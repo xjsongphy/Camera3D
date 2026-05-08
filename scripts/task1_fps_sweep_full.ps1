@@ -1,5 +1,5 @@
 param(
-    [string[]]$Videos = @("S1-2")
+    [string[]]$Videos = @("S1-1", "S1-2", "S1-3")
 )
 
 $ErrorActionPreference = "Stop"
@@ -7,7 +7,7 @@ $ErrorActionPreference = "Stop"
 $RootDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 Set-Location $RootDir
 
-$FpsList = @(4, 8, 16, 30)
+$FpsList = @(30)
 $Stamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $SummaryDir = "outputs/lab1/task1/benchmarks"
 $SummaryCsv = Join-Path $SummaryDir "task1_full_sweep_${Stamp}.csv"

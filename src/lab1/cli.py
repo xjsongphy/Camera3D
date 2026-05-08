@@ -7,6 +7,7 @@ from pathlib import Path
 from lab1.logging_utils import build_timestamped_log_path, tee_console_output
 from lab1.task1 import Task1Config, Task1Error, run_task1
 from lab1.task2 import Task2Config, run_task2
+from lab1.task3 import Task3Config, run_task3
 
 LAB1_ROOT = Path("lab1")
 OUTPUT_ROOT = Path("outputs/lab1")
@@ -96,6 +97,26 @@ def run_task2_entry(args: argparse.Namespace) -> int:
         return 2
 
 
+def run_task3_entry(args: argparse.Namespace) -> int:
+    out_dir = _ensure_output_dir("task3")
+    cfg = Task3Config(
+        lab1_root=LAB1_ROOT,
+        output_root=out_dir,
+        fps=args.fps,
+        colmap_bin=args.colmap_bin,
+        ffmpeg_bin=args.ffmpeg_bin,
+        force=args.force,
+        dry_run=args.dry_run,
+        stage=args.stage,
+        videos=args.videos,
+    )
+    try:
+        return run_task3(cfg)
+    except Task1Error as exc:
+        print(f"Task3 failed: {exc}")
+        return 2
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Camera3D Lab1 task runner")
     subparsers = parser.add_subparsers(dest="task", required=True)
@@ -139,9 +160,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     task2_parser.set_defaults(handler=run_task2_entry)
 
-    for task in ("task3", "task4"):
-        sub = subparsers.add_parser(task, help=TASK_HELP[task])
-        sub.set_defaults(handler=lambda _args, task_name=task: _run_placeholder(task_name))
+    task3_parser = subparsers.add_parser("task3", help=TASK_HELP["task3"])
+    task3_parser.add_argument("--fps", type=float, default=5.0, help="frame sampling rate for task3 dynamic videos")
+    task3_parser.add_argument("--colmap-bin", default="colmap", help="colmap executable name/path for task3")
+    task3_parser.add_argument("--ffmpeg-bin", default="ffmpeg", help="ffmpeg executable name/path for task3")
+    task3_parser.add_argument("--force", action="store_true", help="overwrite previous task3 outputs")
+    task3_parser.add_argument("--dry-run", action="store_true", help="print commands without executing for task3")
+    task3_parser.add_argument(
+        "--stage",
+        default="all",
+        choices=["all", "extract", "sfm", "analyze"],
+        help="task3 stage control: all (default), extract only, sfm only, or analyze only",
+    )
+    task3_parser.add_argument(
+        "--videos",
+        nargs="+",
+        help="task3 only: choose subset videos, e.g. --videos S2-1 S2-2",
+    )
+    task3_parser.set_defaults(handler=run_task3_entry)
+
+    task4_parser = subparsers.add_parser("task4", help=TASK_HELP["task4"])
+    task4_parser.set_defaults(handler=lambda _args: _run_placeholder("task4"))
 
     for alias, target in ALIASES.items():
         if alias.startswith("q"):
@@ -183,6 +222,24 @@ def build_parser() -> argparse.ArgumentParser:
                     help="task2 stage control: all (default), prepare only, sfm only, or analyze only",
                 )
                 sub.set_defaults(handler=run_task2_entry)
+            elif target == "task3":
+                sub.add_argument("--fps", type=float, default=5.0, help="frame sampling rate for task3 dynamic videos")
+                sub.add_argument("--colmap-bin", default="colmap", help="colmap executable name/path for task3")
+                sub.add_argument("--ffmpeg-bin", default="ffmpeg", help="ffmpeg executable name/path for task3")
+                sub.add_argument("--force", action="store_true", help="overwrite previous task3 outputs")
+                sub.add_argument("--dry-run", action="store_true", help="print commands without executing for task3")
+                sub.add_argument(
+                    "--stage",
+                    default="all",
+                    choices=["all", "extract", "sfm", "analyze"],
+                    help="task3 stage control: all (default), extract only, sfm only, or analyze only",
+                )
+                sub.add_argument(
+                    "--videos",
+                    nargs="+",
+                    help="task3 only: choose subset videos, e.g. --videos S2-1 S2-2",
+                )
+                sub.set_defaults(handler=run_task3_entry)
             else:
                 sub.set_defaults(handler=lambda _args, task_name=target: _run_placeholder(task_name))
     return parser
