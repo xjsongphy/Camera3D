@@ -1,10 +1,19 @@
 # Lab1 Report
 
+## 运行环境
+
+测试平台：Windows 台式机（本地实验环境）
+
+ - CPU: Intel(R) Core(TM) i7-14700K, 20C20T @ 3.4GHz
+ - Memory: 32GB
+ - COLMAP 版本：4.1.0.dev0 (Commit 5b76f53, with CUDA)
+ - GPU: NVIDIA GeForce RTX 4070 Ti SUPER（使用 GPU 加速）
+
 ## 题目一：静态场景 SfM
 
 题目一的流程由 `ffmpeg + COLMAP` 完成。实现上，先用 `ffmpeg` 按固定 `fps` 从视频均匀抽帧，再依次调用 `COLMAP` 的 `feature_extractor`、`sequential_matcher`、`mapper` 和 `model_converter` 得到稀疏重建结果，最后根据 `images.txt` 反算相机中心并绘制轨迹图。实验中使用了 `single_camera=1` 和 `PINHOLE` 相机模型，抽帧策略采用等时间间隔采样。
 
-为了比较抽帧策略对结果的影响，三段视频都测试了 `4 / 8 / 16 / 30 fps` 四组设置。相关素材已经复制到未忽略目录 [report_assets/task1](/d:/Codes/Camera3D/lab1/report_assets/task1)。其中四宫格拼图由通用脚本 [make_image_grid.py](/d:/Codes/Camera3D/lab1/report_assets/make_image_grid.py) 生成；对齐叠加图则直接使用项目已有的 `uv run lab1 task1 merge` 输出。
+为了比较抽帧策略对结果的影响，三段视频都测试了 `4 / 8 / 16 / 30 fps` 四组设置。对齐叠加图则使用 `uv run lab1 task1 merge` 输出。
 
 ### 拼图展示
 
@@ -22,9 +31,7 @@
 
 ### 合并图展示
 
-仅看四宫格可以观察到不同 `fps` 的轨迹形状差异，但还不能直接判断它们在同一坐标系下是否一致。项目中现有的 `task1 merge` 会基于公共源帧建立对应关系，再对不同 `fps` 的轨迹做 `Sim(3)` 对齐并叠加绘制，因此更适合用来比较不同抽帧率得到的结果是否互相吻合。
-
-`S1-1` 的合并图显示，`8 fps`、`16 fps` 和 `30 fps` 在主干部分大体一致，但局部回环区域仍存在明显偏移，说明该视频对抽帧率有一定敏感性。
+`S1-1` 的合并图显示，`8 fps`、`16 fps` 和 `30 fps` 在主干部分大体一致。
 
 ![S1-1 merged overlay](report_assets/task1/merged/S1-1_trajectory_overlay.png)
 
@@ -32,7 +39,7 @@
 
 ![S1-2 merged overlay](report_assets/task1/merged/S1-2_trajectory_overlay.png)
 
-`S1-3` 的合并图差异最大。`8 fps` 与 `30 fps` 的主轨迹虽然仍有重合区域，但整体分叉明显，说明这一段视频的几何约束较弱，抽帧率变化会显著改变最终重建。
+`S1-3` 的合并图差异最大。`8 fps` 与 `30 fps` 的主轨迹虽然仍有重合区域，但整体分叉明显。
 
 ![S1-3 merged overlay](report_assets/task1/merged/S1-3_trajectory_overlay.png)
 
@@ -56,5 +63,3 @@
 | S1-3 | 8  | 200  | 200 | 1.000 | 1182.61 |
 | S1-3 | 16 | 400  | 152 | 0.380 | 522.49 |
 | S1-3 | 30 | 750  | 750 | 1.000 | 5936.41 |
-
-综合来看，`S1-2` 对抽帧率最不敏感，低帧率就能稳定重建；`S1-1` 在 `16 fps` 时最平衡；`S1-3` 则最依赖合适的采样密度。题目一的结果说明，视频 SfM 的效果既取决于场景本身，也强烈受抽帧策略影响。
