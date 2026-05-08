@@ -54,6 +54,8 @@ def run_task1_entry(args: argparse.Namespace) -> int:
         skip_sfm=args.skip_sfm,
         force=args.force,
         dry_run=args.dry_run,
+        videos=args.videos,
+        stage=args.stage,
     )
     try:
         return run_task1(cfg)
@@ -74,6 +76,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--skip-sfm", action="store_true", help="only extract frames for task1")
     parser.add_argument("--force", action="store_true", help="overwrite previous task1 outputs")
     parser.add_argument("--dry-run", action="store_true", help="print commands without executing for task1")
+    parser.add_argument(
+        "--stage",
+        default="all",
+        choices=["all", "extract", "sfm"],
+        help="task1 stage control: all (default), extract only, or sfm only",
+    )
+    parser.add_argument(
+        "--videos",
+        nargs="+",
+        help="task1 only: choose subset videos, e.g. --videos S1-1 S1-2",
+    )
     return parser
 
 

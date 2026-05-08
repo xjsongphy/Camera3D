@@ -23,6 +23,7 @@ class Task1Config:
     force: bool
     dry_run: bool
     videos: list[str] | None = None
+    stage: str = "all"
 
 
 class Task1Error(RuntimeError):
@@ -42,7 +43,7 @@ def _require_tool(tool_name: str) -> None:
 
 
 def _extract_frames(video_path: Path, images_dir: Path, fps: float, ffmpeg_bin: str, force: bool, dry_run: bool) -> None:
-    if images_dir.exists() and force:
+    if images_dir.exists() and force and not dry_run:
         shutil.rmtree(images_dir)
     images_dir.mkdir(parents=True, exist_ok=True)
 
@@ -61,10 +62,14 @@ def _extract_frames(video_path: Path, images_dir: Path, fps: float, ffmpeg_bin: 
     _run_cmd(cmd, dry_run=dry_run)
 
 
+def _has_any_frames(images_dir: Path) -> bool:
+    return images_dir.exists() and any(images_dir.glob("*.jpg"))
+
+
 def _run_colmap(images_dir: Path, sparse_root: Path, db_path: Path, colmap_bin: str, force: bool, dry_run: bool) -> Path:
-    if db_path.exists() and force:
+    if db_path.exists() and force and not dry_run:
         db_path.unlink()
-    if sparse_root.exists() and force:
+    if sparse_root.exists() and force and not dry_run:
         shutil.rmtree(sparse_root)
     sparse_root.mkdir(parents=True, exist_ok=True)
 
@@ -215,6 +220,17 @@ def _has_completed_outputs(case_root: Path) -> bool:
     )
 
 
+def _has_completed_sfm(case_root: Path) -> bool:
+    sparse_dir = case_root / "sparse" / "0"
+    trajectory = case_root / "trajectory.png"
+    return (
+        (sparse_dir / "images.txt").exists()
+        and (sparse_dir / "cameras.txt").exists()
+        and (sparse_dir / "points3D.txt").exists()
+        and trajectory.exists()
+    )
+
+
 def _normalize_video_name(name: str) -> str:
     value = name.strip()
     if not value:
@@ -236,9 +252,13 @@ def run_task1(cfg: Task1Config) -> int:
             "(or short names S1-1/S1-2/S1-3)"
         )
 
+    if cfg.stage not in {"all", "extract", "sfm"}:
+        raise Task1Error(f"Unsupported stage: {cfg.stage}. Choose from all|extract|sfm")
+
     if not cfg.dry_run:
-        _require_tool(cfg.ffmpeg_bin)
-        if not cfg.skip_sfm:
+        if cfg.stage in {"all", "extract"}:
+            _require_tool(cfg.ffmpeg_bin)
+        if cfg.stage in {"all", "sfm"} and not cfg.skip_sfm:
             _require_tool(cfg.colmap_bin)
 
     for video_name in selected_videos:
@@ -253,23 +273,38 @@ def run_task1(cfg: Task1Config) -> int:
         db_path = case_root / "database.db"
 
         print(f"\n=== Task1 / {case_name} / {param_tag} ===")
-        if not cfg.force and _has_completed_outputs(case_root):
+        if cfg.stage == "all" and not cfg.force and _has_completed_outputs(case_root):
             print(f"Reuse existing outputs (same parameters): {case_root}")
             continue
 
         case_root.mkdir(parents=True, exist_ok=True)
 
-        _extract_frames(
-            video_path=video_path,
-            images_dir=images_dir,
-            fps=cfg.fps,
-            ffmpeg_bin=cfg.ffmpeg_bin,
-            force=cfg.force,
-            dry_run=cfg.dry_run,
-        )
+        if cfg.stage in {"all", "extract"}:
+            if cfg.stage == "extract" and not cfg.force and _has_any_frames(images_dir):
+                print(f"Reuse extracted frames: {images_dir}")
+            else:
+                _extract_frames(
+                    video_path=video_path,
+                    images_dir=images_dir,
+                    fps=cfg.fps,
+                    ffmpeg_bin=cfg.ffmpeg_bin,
+                    force=cfg.force,
+                    dry_run=cfg.dry_run,
+                )
+        elif cfg.stage == "sfm":
+            if not _has_any_frames(images_dir):
+                raise Task1Error(
+                    f"No extracted frames found under {images_dir}. "
+                    "Run extraction first (--stage extract) or use --stage all."
+                )
+            print(f"Reuse extracted frames: {images_dir}")
 
-        if cfg.skip_sfm:
+        if cfg.skip_sfm or cfg.stage == "extract":
             print("Skip SfM as requested (--skip-sfm).")
+            continue
+
+        if cfg.stage == "sfm" and not cfg.force and _has_completed_sfm(case_root):
+            print(f"Reuse SfM outputs: {case_root}")
             continue
 
         model_dir = _run_colmap(
