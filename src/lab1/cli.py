@@ -66,45 +66,71 @@ def run_task1_entry(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Camera3D Lab1 task runner")
-    parser.add_argument(
-        "task",
-        help="task id: task1|task2|task3|task4 (or alias: q1|q2|q3|q4)",
+    subparsers = parser.add_subparsers(dest="task", required=True)
+
+    task1_parser = subparsers.add_parser("task1", help=TASK_HELP["task1"])
+    task1_parser.add_argument("--fps", type=float, default=2.0, help="frame sampling rate for task1")
+    task1_parser.add_argument("--colmap-bin", default="colmap", help="colmap executable name/path for task1")
+    task1_parser.add_argument("--ffmpeg-bin", default="ffmpeg", help="ffmpeg executable name/path for task1")
+    task1_parser.add_argument(
+        "--skip-sfm",
+        action="store_true",
+        help="(deprecated) task1 only: skip SfM, equivalent to --stage extract",
     )
-    parser.add_argument("--fps", type=float, default=2.0, help="frame sampling rate for task1")
-    parser.add_argument("--colmap-bin", default="colmap", help="colmap executable name/path for task1")
-    parser.add_argument("--ffmpeg-bin", default="ffmpeg", help="ffmpeg executable name/path for task1")
-    parser.add_argument("--skip-sfm", action="store_true", help="only extract frames for task1")
-    parser.add_argument("--force", action="store_true", help="overwrite previous task1 outputs")
-    parser.add_argument("--dry-run", action="store_true", help="print commands without executing for task1")
-    parser.add_argument(
+    task1_parser.add_argument("--force", action="store_true", help="overwrite previous task1 outputs")
+    task1_parser.add_argument("--dry-run", action="store_true", help="print commands without executing for task1")
+    task1_parser.add_argument(
         "--stage",
         default="all",
         choices=["all", "extract", "sfm"],
         help="task1 stage control: all (default), extract only, or sfm only",
     )
-    parser.add_argument(
+    task1_parser.add_argument(
         "--videos",
         nargs="+",
         help="task1 only: choose subset videos, e.g. --videos S1-1 S1-2",
     )
+    task1_parser.set_defaults(handler=run_task1_entry)
+
+    for task in ("task2", "task3", "task4"):
+        sub = subparsers.add_parser(task, help=TASK_HELP[task])
+        sub.set_defaults(handler=lambda _args, task_name=task: _run_placeholder(task_name))
+
+    for alias, target in ALIASES.items():
+        if alias.startswith("q"):
+            sub = subparsers.add_parser(alias, help=f"alias of {target}")
+            if target == "task1":
+                sub.add_argument("--fps", type=float, default=2.0, help="frame sampling rate for task1")
+                sub.add_argument("--colmap-bin", default="colmap", help="colmap executable name/path for task1")
+                sub.add_argument("--ffmpeg-bin", default="ffmpeg", help="ffmpeg executable name/path for task1")
+                sub.add_argument(
+                    "--skip-sfm",
+                    action="store_true",
+                    help="(deprecated) task1 only: skip SfM, equivalent to --stage extract",
+                )
+                sub.add_argument("--force", action="store_true", help="overwrite previous task1 outputs")
+                sub.add_argument("--dry-run", action="store_true", help="print commands without executing for task1")
+                sub.add_argument(
+                    "--stage",
+                    default="all",
+                    choices=["all", "extract", "sfm"],
+                    help="task1 stage control: all (default), extract only, or sfm only",
+                )
+                sub.add_argument(
+                    "--videos",
+                    nargs="+",
+                    help="task1 only: choose subset videos, e.g. --videos S1-1 S1-2",
+                )
+                sub.set_defaults(handler=run_task1_entry)
+            else:
+                sub.set_defaults(handler=lambda _args, task_name=target: _run_placeholder(task_name))
     return parser
 
 
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
-    task = _normalize_task(args.task)
-
-    if task not in TASK_HELP:
-        print(f"Unsupported task: {args.task}")
-        print("Supported tasks:", ", ".join(TASK_HELP.keys()))
-        print("Aliases:", ", ".join(f"{k}->{v}" for k, v in ALIASES.items()))
-        raise SystemExit(2)
-
-    if task == "task1":
-        raise SystemExit(run_task1_entry(args))
-
-    raise SystemExit(_run_placeholder(task))
+    raise SystemExit(args.handler(args))
 
 
 if __name__ == "__main__":

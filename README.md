@@ -103,7 +103,7 @@ outputs/lab1/task1/<video_name>_<param_tag>/
 可选参数：
 
 - `--fps`: 抽帧帧率（默认 `2.0`）
-- `--skip-sfm`: 只抽帧，不跑 COLMAP
+- `--skip-sfm`: 兼容旧参数（已弃用），等价于 `--stage extract`
 - `--stage`: 控制阶段，`all`（默认）/`extract`（仅抽帧）/`sfm`（仅跑SfM，复用已有抽帧）
 - `--colmap-bin`: COLMAP 可执行文件路径（默认 `colmap`）
 - `--ffmpeg-bin`: ffmpeg 可执行文件路径（默认 `ffmpeg`）
@@ -119,6 +119,8 @@ uv run lab1 task1 --videos S1-1 --fps 4 --stage extract --force
 # 第二步：只跑 SfM（复用已有 frames）
 uv run lab1 task1 --videos S1-1 --fps 4 --stage sfm --force
 ```
+
+说明：`task1` 参数只对 `task1/q1` 生效；`task2/3/4` 不再接受 `--fps` 等 `task1` 专属参数，避免误用。
 
 ## 视频文件放置说明
 

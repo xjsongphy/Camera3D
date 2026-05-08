@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 from dataclasses import dataclass
+from collections import deque
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -34,7 +35,25 @@ def _run_cmd(cmd: list[str], dry_run: bool = False) -> None:
     print("$", " ".join(cmd))
     if dry_run:
         return
-    subprocess.run(cmd, check=True)
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    tail: deque[str] = deque(maxlen=120)
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        print(line, end="")
+        tail.append(line.rstrip("\n"))
+    return_code = proc.wait()
+    if return_code != 0:
+        log_tail = "\n".join(tail)
+        raise Task1Error(
+            f"Command failed with exit code {return_code}: {' '.join(cmd)}\n"
+            f"Last output lines:\n{log_tail}"
+        )
 
 
 def _require_tool(tool_name: str) -> None:
@@ -45,7 +64,8 @@ def _require_tool(tool_name: str) -> None:
 def _extract_frames(video_path: Path, images_dir: Path, fps: float, ffmpeg_bin: str, force: bool, dry_run: bool) -> None:
     if images_dir.exists() and force and not dry_run:
         shutil.rmtree(images_dir)
-    images_dir.mkdir(parents=True, exist_ok=True)
+    if not dry_run:
+        images_dir.mkdir(parents=True, exist_ok=True)
 
     output_pattern = str(images_dir / "%06d.jpg")
     cmd = [
@@ -71,7 +91,8 @@ def _run_colmap(images_dir: Path, sparse_root: Path, db_path: Path, colmap_bin: 
         db_path.unlink()
     if sparse_root.exists() and force and not dry_run:
         shutil.rmtree(sparse_root)
-    sparse_root.mkdir(parents=True, exist_ok=True)
+    if not dry_run:
+        sparse_root.mkdir(parents=True, exist_ok=True)
 
     _run_cmd(
         [
@@ -136,7 +157,10 @@ def _run_colmap(images_dir: Path, sparse_root: Path, db_path: Path, colmap_bin: 
 
 def _quat_to_rot(qw: float, qx: float, qy: float, qz: float) -> np.ndarray:
     q = np.array([qw, qx, qy, qz], dtype=float)
-    q /= np.linalg.norm(q) + 1e-12
+    norm = np.linalg.norm(q)
+    if norm <= 1e-12:
+        raise Task1Error("Encountered near-zero quaternion norm while parsing COLMAP poses.")
+    q /= norm
     qw, qx, qy, qz = q
     return np.array(
         [
@@ -151,16 +175,19 @@ def _parse_image_centers(images_txt: Path) -> tuple[np.ndarray, list[str]]:
     centers: list[np.ndarray] = []
     names: list[str] = []
     with images_txt.open("r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
+        while True:
+            pose_line = f.readline()
+            if not pose_line:
+                break
+            pose_line = pose_line.strip()
+            if not pose_line or pose_line.startswith("#"):
                 continue
-            parts = line.split()
+            parts = pose_line.split()
             if len(parts) < 10:
-                continue
+                raise Task1Error(f"Malformed COLMAP images.txt pose line: {pose_line}")
             image_id = parts[0]
             if not image_id.isdigit():
-                continue
+                raise Task1Error(f"Expected image id at pose line start, got: {pose_line}")
 
             qw, qx, qy, qz = map(float, parts[1:5])
             tx, ty, tz = map(float, parts[5:8])
@@ -172,6 +199,9 @@ def _parse_image_centers(images_txt: Path) -> tuple[np.ndarray, list[str]]:
 
             centers.append(c)
             names.append(name)
+            # COLMAP images.txt stores a second line of POINTS2D per image entry.
+            # Consume it explicitly to avoid accidental mis-parsing.
+            _ = f.readline()
 
     if not centers:
         raise Task1Error(f"No image poses parsed from {images_txt}")
@@ -190,6 +220,7 @@ def _plot_trajectory(centers: np.ndarray, out_path: Path, title: str) -> None:
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
     ax.set_zlabel("Z")
+    ax.set_box_aspect([1, 1, 1])
     ax.grid(True)
     fig.tight_layout()
     fig.savefig(out_path, dpi=160)
@@ -254,6 +285,13 @@ def run_task1(cfg: Task1Config) -> int:
 
     if cfg.stage not in {"all", "extract", "sfm"}:
         raise Task1Error(f"Unsupported stage: {cfg.stage}. Choose from all|extract|sfm")
+    if cfg.fps <= 0:
+        raise Task1Error(f"fps must be positive, got {cfg.fps}")
+    if cfg.skip_sfm and cfg.stage == "sfm":
+        raise Task1Error("--skip-sfm conflicts with --stage sfm. Use --stage extract or --stage all.")
+    if cfg.skip_sfm and cfg.stage == "all":
+        print("Warning: --skip-sfm is deprecated; treating as --stage extract.")
+        cfg.stage = "extract"
 
     if not cfg.dry_run:
         if cfg.stage in {"all", "extract"}:
@@ -277,7 +315,8 @@ def run_task1(cfg: Task1Config) -> int:
             print(f"Reuse existing outputs (same parameters): {case_root}")
             continue
 
-        case_root.mkdir(parents=True, exist_ok=True)
+        if not cfg.dry_run:
+            case_root.mkdir(parents=True, exist_ok=True)
 
         if cfg.stage in {"all", "extract"}:
             if cfg.stage == "extract" and not cfg.force and _has_any_frames(images_dir):
@@ -300,7 +339,7 @@ def run_task1(cfg: Task1Config) -> int:
             print(f"Reuse extracted frames: {images_dir}")
 
         if cfg.skip_sfm or cfg.stage == "extract":
-            print("Skip SfM as requested (--skip-sfm).")
+            print("Skip SfM for extract stage.")
             continue
 
         if cfg.stage == "sfm" and not cfg.force and _has_completed_sfm(case_root):
