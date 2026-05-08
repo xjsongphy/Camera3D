@@ -1,87 +1,69 @@
 # Camera3D
 
-当前仓库使用 `uv` 管理 Python 环境与命令行入口。
+使用 `uv` 管理环境与命令入口。
 
 ## 项目结构
 
-- `src/lab1/`: Lab1 代码（当前优先实现）
-- `src/lab2/`: Lab2 代码目录（仅占位，后续实现）
-- `lab1/`: 课程给定的 Lab1 文档与素材
-- `lab2/`: 课程给定的 Lab2 文档与素材
-- `outputs/lab1/`: Lab1 运行产物
+- `src/lab1/`: Lab1 实现代码（`task1`、`task2`、`task3`、CLI）
+- `lab1/`: Lab1 题目文档与报告
+- `scripts/`: 批处理与一键运行脚本
+- `outputs/lab1/`: 运行产物（已在 `.gitignore` 中忽略）
 
-## 安装
+## 目录存放约定
+
+- 输入视频固定放在 `lab1/assets/videos/`，文件名按题目约定：
+  - `S1-1.mp4`、`S1-2.mp4`、`S1-3.mp4`
+  - `S2-1.mp4`、`S2-2.mp4`
+- 报告与报告素材放在 `lab1/` 下：
+  - 报告：`lab1/report.md`
+  - 报告图与脚本：`lab1/report_assets/`
+- 运行脚本放在 `scripts/`：
+  - `task1_build_full_result.*`
+  - `task2_full_pipeline.*`
+- 运行输出统一写到 `outputs/lab1/`（默认不提交）：
+  - `task1`：`outputs/lab1/task1/<video>_<param_tag>/`
+  - `task1 merge`：`outputs/lab1/task1/merged/<video>/`
+  - `task2`：`outputs/lab1/task2/S1-2_<param_tag>/`
+
+## 环境准备
+
+### 1. Python 依赖
 
 ```bash
 uv sync
 uv run lab1 --help
 ```
 
-## 安装 COLMAP 与 ffmpeg
+### 2. 外部工具
 
-`task1` 依赖外部命令行工具：`colmap` 和 `ffmpeg`。
+需要安装并可在命令行调用：
 
-macOS（推荐，Homebrew）：
+- `colmap`
+- `ffmpeg`
 
-```bash
-# 如果还没有 Homebrew，先安装：
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-# 安装依赖
-brew install colmap ffmpeg
-```
-
-Linux（Debian/Ubuntu）：
-
-```bash
-sudo apt update
-sudo apt install -y colmap ffmpeg
-```
-
-Windows：
-
-1. 安装 FFmpeg：
-   - 打开 <https://ffmpeg.org/download.html>
-   - 在 `Windows EXE Files` 下选择一个预编译包提供方（常用 `gyan.dev`）
-   - 下载最新 `release` 压缩包并解压到例如 `C:\ffmpeg`
-   - 将 `C:\ffmpeg\bin` 添加到系统环境变量 `Path`
-2. 安装 COLMAP：
-   - 打开 COLMAP 官方安装页 <https://colmap.github.io/install.html>
-   - 按文档提供的 Windows 预编译链接下载：<https://demuc.de/colmap/>
-   - 解压到例如 `C:\colmap`
-   - 可直接双击 `COLMAP.bat` 启动图形界面
-   - 如需命令行使用，可将 `C:\colmap` 添加到 `Path`
-3. 打开新的 `PowerShell`，执行：
-
-```powershell
-colmap -h
-ffmpeg -version
-```
-
-安装后自检：
+可用以下命令检查：
 
 ```bash
 colmap -h
 ffmpeg -version
 ```
 
-若 `colmap` 不在 PATH，可在运行时显式指定：
+如不在 PATH，可运行时指定：
 
 ```bash
-uv run lab1 task1 --colmap-bin /your/path/to/colmap
+uv run lab1 task1 --colmap-bin /path/to/colmap --ffmpeg-bin /path/to/ffmpeg
 ```
 
-## Lab1 运行
+## 常用命令
 
 ```bash
-uv run lab1 task1 [--fps 2] [--force]
-uv run lab1 task1 merge [--videos S1-1 S1-2]
-uv run lab1 task2 [--source-fps 4] [--force]
+uv run lab1 task1
+uv run lab1 task1 merge
+uv run lab1 task2
 uv run lab1 task3
-uv run lab1 task4
 ```
 
-简写：
+别名：
 
 ```bash
 uv run lab1 q1
@@ -90,193 +72,95 @@ uv run lab1 q3
 uv run lab1 q4
 ```
 
-## 题目一（已实现）
+## Task1 运行
 
-按 `lab1/lab1.md` 要求，`task1` 会对以下三个静态视频执行流程：
-
-- `lab1/assets/videos/S1-1.mp4`
-- `lab1/assets/videos/S1-2.mp4`
-- `lab1/assets/videos/S1-3.mp4`
-
-流程：
-
-1. 用 `ffmpeg` 抽帧到 `images/`
-2. 用 COLMAP 运行稀疏重建（`feature_extractor + sequential_matcher + hierarchical_mapper`）
-3. 导出 COLMAP 文本格式结果（`images.txt/cameras.txt/points3D.txt`）
-4. 绘制并保存相机轨迹图 `trajectory.png`
-
-输出目录（每个视频一份）：
-
-```txt
-outputs/lab1/task1/<video_name>_<param_tag>/
-├── images/
-├── frame_map.csv
-├── sparse/
-│   └── 0/
-│       ├── images.txt
-│       ├── cameras.txt
-│       └── points3D.txt
-├── timing.csv
-└── trajectory.png
-```
-
-其中 `param_tag` 由运行参数生成（例如 `fps4`、`fps2p5`），用于隔离不同参数的实验结果。
-同样参数重复运行时会自动复用已有结果（除非传 `--force`）。
-
-可选参数：
-
-- `merge`: 合并模式，叠加同一视频现有的不同 `fps` 轨迹图，不运行抽帧或 SfM
-- `--fps`: 抽帧帧率（默认 `2.0`）
-- `--stage`: 控制阶段，`all`（默认）/`extract`（仅抽帧）/`sfm`（仅跑SfM，复用已有抽帧）
-- `--colmap-bin`: COLMAP 可执行文件路径（默认 `colmap`）
-- `--ffmpeg-bin`: ffmpeg 可执行文件路径（默认 `ffmpeg`）
-- `--force`: 覆盖已有输出
-- `--dry-run`: 只打印命令，不执行
-
-示例（避免重复抽帧）：
+### 全流程（默认）
 
 ```bash
-# 第一步：仅抽帧
-uv run lab1 task1 --videos S1-1 --fps 4 --stage extract --force
-
-# 第二步：只跑 SfM（复用已有 frames）
-uv run lab1 task1 --videos S1-1 --fps 4 --stage sfm --force
+uv run lab1 task1 --videos S1-1 S1-2 S1-3 --fps 30 --stage all
 ```
 
-合并同一视频不同 `fps` 的已有轨迹（基于公共源帧做 Sim(3) 对齐）：
+### 分阶段
 
 ```bash
-uv run lab1 task1 merge --videos S1-1
-uv run lab1 task1 merge
+uv run lab1 task1 --videos S1-2 --fps 30 --stage extract
+uv run lab1 task1 --videos S1-2 --fps 30 --stage sfm
 ```
 
-说明：`merge` 会读取每组结果中的 `frame_map.csv`，按公共源帧建立对应关系，再将非参考轨迹对齐到参考轨迹后叠加绘制。默认会跳过少于 2 组 `fps` 结果的视频。如果显式指定了 `--videos`，但某个视频现有结果不足 2 组，则会直接报错。
-
-合并输出目录：
-
-```txt
-outputs/lab1/task1/merged/
-├── S1-1/{trajectory_overlay.png,alignment_summary.csv,timing.csv}
-├── S1-2/{trajectory_overlay.png,alignment_summary.csv,timing.csv}
-└── ...
-```
-
-说明：`task1` 参数只对 `task1/q1` 生效；`task2/3/4` 不再接受 `--fps` 等 `task1` 专属参数，避免误用。
-
-## 视频文件放置说明
-
-请将 Lab1 视频放在以下路径：
-
-- `lab1/assets/videos/S1-1.mp4`
-- `lab1/assets/videos/S1-2.mp4`
-- `lab1/assets/videos/S1-3.mp4`
-- `lab1/assets/videos/S2-1.mp4`
-- `lab1/assets/videos/S2-2.mp4`
-
-若视频在其他位置，请先移动或建立软链接到上述路径。
-
-## 当前范围
-
-- 已实现：Lab1 题目一、题目二
-- 未实现：Lab1 题目三/四 与 Lab2
-
-## 题目二（已实现）
-
-`task2` 针对 `S1-2` 执行“三段子序列 × 两种位姿来源”的对比：
-
-1. 方法 A：从 `task1` 的完整序列重建中截取子序列位姿；
-2. 方法 B：仅用该子序列帧重新跑一遍 SfM；
-3. 对齐与对比：用 Sim(3)（Umeyama）将方法 B 对齐到方法 A，并计算 ATE，导出叠加轨迹图。
-
-输入依赖（先运行 task1）：
+### 合并不同 FPS 轨迹（Sim(3) 对齐）
 
 ```bash
-uv run lab1 task1 --videos S1-2 --fps 4 --stage all
+uv run lab1 task1 merge --videos S1-2
 ```
 
-运行 task2：
+输出目录示例：
+
+- `outputs/lab1/task1/S1-2_fps30/`
+- `outputs/lab1/task1/merged/S1-2/`
+
+## Task2 运行（S1-2 子序列分析）
+
+`task2` 使用三段固定子序列：前 `1/3`、中间 `1/2`、后 `1/4`。  
+流程包含方法 A 位姿截取、方法 B 子序列重建、Sim(3) 对齐和 ATE 统计。
+
+### 直接运行 task2
 
 ```bash
-uv run lab1 task2 --source-fps 4 --stage all
+uv run lab1 task2 --source-fps 30 --stage all
 ```
 
-分阶段运行（避免重复）：
+### 分阶段运行
 
 ```bash
-# 准备三段子序列（复制子帧 + 方法A位姿子集）
-uv run lab1 task2 --source-fps 4 --stage prepare
-
-# 仅跑方法B的 SfM
-uv run lab1 task2 --source-fps 4 --stage sfm
-
-# 仅做对齐与ATE分析
-uv run lab1 task2 --source-fps 4 --stage analyze
+uv run lab1 task2 --source-fps 30 --stage prepare
+uv run lab1 task2 --source-fps 30 --stage sfm
+uv run lab1 task2 --source-fps 30 --stage analyze
 ```
 
-输出目录：
+输出目录示例：
 
-```txt
-outputs/lab1/task2/S1-2_fps4/
-├── seq01_front_1over3_000001-000105/
-│   ├── method_a/sparse/0/{images.txt,cameras.txt,points3D.txt}
-│   ├── method_b/{images/,database.db,sparse/0/...}
-│   ├── trajectory_overlay.png
-│   ├── metrics.txt
-│   └── timing.csv
-├── seq02_middle_1over2_000079-000235/...
-├── seq03_back_1over4_000235-000312/...
-└── summary.csv
+- `outputs/lab1/task2/S1-2_fps30/summary.csv`
+- `outputs/lab1/task2/S1-2_fps30/<subseq>/metrics.txt`
+- `outputs/lab1/task2/S1-2_fps30/<subseq>/trajectory_overlay.png`
+
+## 一键脚本
+
+### Task1 全量结果构建（S1-2）
+
+Windows:
+
+```powershell
+./scripts/task1_build_full_result.ps1 -Video S1-2 -Fps 30
 ```
 
-## 日志与耗时统计
+Linux/macOS:
 
-每次 `uv run lab1 ...` 都会在对应任务目录写一个带时间戳的日志：
+```bash
+bash ./scripts/task1_build_full_result.sh S1-2 30
+```
+
+### Task2 全流程（带前置检测）
+
+脚本会先检测 `task1` 全量结果是否存在，缺失时自动调用上面的 `task1` 构建脚本；存在则复用，避免重复重建。
+
+Windows:
+
+```powershell
+./scripts/task2_full_pipeline.ps1 -SourceFps 30
+```
+
+Linux/macOS:
+
+```bash
+bash ./scripts/task2_full_pipeline.sh 30
+```
+
+强制重跑可加 `-Force`（PowerShell）或 `--force`（bash 第 2 个参数）。
+
+## 日志与耗时
+
+每次 `uv run lab1 ...` 会写日志到：
 
 - `outputs/lab1/<task>/logs/<task>_YYYYMMDD_HHMMSS.log`
 
-日志包含：
-
-- 运行开始/结束时间和总耗时（elapsed）
-- 命令行调用与标准输出
-- 每个视频/子序列的阶段耗时汇总（终端打印）
-
-同时，结构化耗时会写入 `timing.csv`，便于对比不同 `fps` 策略效率：
-
-- `task1`: `outputs/lab1/task1/<video>_<param_tag>/timing.csv`
-- `task1 merge`: `outputs/lab1/task1/merged/<video>/timing.csv`
-- `task2`: `outputs/lab1/task2/S1-2_<param_tag>/<subseq>/timing.csv`
-
-`timing.csv` 字段：
-
-- `stage`: 阶段名（如 `extract`、`feature_extractor`、`hierarchical_mapper`、`sfm_total`、`analyze`）
-- `seconds`: 秒级耗时（浮点）
-- `human`: 可读格式耗时（如 `12.34s`、`3m05.12s`）
-
-## Task1 FPS 扫描脚本（串行）
-
-用于比较 `fps=4/8/16/30` 在 `task1 --stage all` 下的完整流程耗时。脚本按顺序执行，不并行，适合做效率对比统计。
-
-Windows（PowerShell）：
-
-```powershell
-./scripts/task1_fps_sweep_full.ps1                 # 默认 S1-2
-./scripts/task1_fps_sweep_full.ps1 -Videos S1-1,S1-2
-```
-
-Linux/macOS（bash）：
-
-```bash
-bash ./scripts/task1_fps_sweep_full.sh             # 默认 S1-2
-bash ./scripts/task1_fps_sweep_full.sh S1-1 S1-2
-```
-
-汇总输出：
-
-- `outputs/lab1/task1/benchmarks/task1_full_sweep_<timestamp>.csv`
-
-汇总字段包含每次运行的：
-
-- 抽帧耗时 `extract_s`
-- SfM各阶段耗时（`feature_extractor_s`、`sequential_matcher_s`、`hierarchical_mapper_s`、`model_converter_s`、`sfm_total_s`）
-- 注册帧数 `registered_frames`
-- 是否生成轨迹图 `trajectory_png`
+阶段耗时会写到各自目录的 `timing.csv`。

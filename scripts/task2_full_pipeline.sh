@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+SOURCE_FPS="${1:-30}"
+FORCE_FLAG="${2:-}"
+
+format_param_tag() {
+  local value="$1"
+  local formatted
+  formatted="$(printf "%.3f" "$value" | sed 's/0*$//; s/\.$//; s/\./p/g')"
+  echo "fps${formatted}"
+}
+
+task1_result_ready() {
+  local case_root="$1"
+  local required=(
+    "${case_root}/images"
+    "${case_root}/frame_map.csv"
+    "${case_root}/sparse/0/images.txt"
+    "${case_root}/sparse/0/cameras.txt"
+    "${case_root}/sparse/0/points3D.txt"
+    "${case_root}/trajectory.png"
+  )
+  for p in "${required[@]}"; do
+    [[ -e "$p" ]] || return 1
+  done
+  compgen -G "${case_root}/images/*.jpg" > /dev/null || return 1
+  return 0
+}
+
+EXTRA_ARGS=()
+if [[ "$FORCE_FLAG" == "--force" ]]; then
+  EXTRA_ARGS+=("--force")
+fi
+
+echo "Running Task2 full pipeline for S1-2."
+echo "Source FPS: ${SOURCE_FPS}"
+echo "Force: ${FORCE_FLAG:-false}"
+PARAM_TAG="$(format_param_tag "$SOURCE_FPS")"
+TASK1_CASE_ROOT="outputs/lab1/task1/S1-2_${PARAM_TAG}"
+
+echo
+echo "=== Step 1/4: Build full-sequence task1 result for S1-2 ==="
+if [[ "$FORCE_FLAG" == "--force" ]] || ! task1_result_ready "$TASK1_CASE_ROOT"; then
+  BUILDER_SCRIPT="scripts/task1_build_full_result.sh"
+  if [[ ! -f "$BUILDER_SCRIPT" ]]; then
+    echo "Missing task1 builder script: $BUILDER_SCRIPT" >&2
+    exit 1
+  fi
+  bash "$BUILDER_SCRIPT" "S1-2" "$SOURCE_FPS" "$FORCE_FLAG"
+else
+  echo "Reuse existing task1 result: ${TASK1_CASE_ROOT}"
+fi
+
+echo
+echo "=== Step 2/4: Prepare task2 subsequences (method A subset + method B frames) ==="
+uv run lab1 task2 --source-fps "$SOURCE_FPS" --stage prepare "${EXTRA_ARGS[@]}"
+
+echo
+echo "=== Step 3/4: Run task2 subset SfM (method B) ==="
+uv run lab1 task2 --source-fps "$SOURCE_FPS" --stage sfm "${EXTRA_ARGS[@]}"
+
+echo
+echo "=== Step 4/4: Analyze alignment and ATE ==="
+uv run lab1 task2 --source-fps "$SOURCE_FPS" --stage analyze "${EXTRA_ARGS[@]}"
+
+TASK2_ROOT="outputs/lab1/task2/S1-2_${PARAM_TAG}"
+SUMMARY_CSV="${TASK2_ROOT}/summary.csv"
+
+if [[ ! -f "$SUMMARY_CSV" ]]; then
+  echo "Missing summary.csv: $SUMMARY_CSV" >&2
+  exit 1
+fi
+
+echo
+echo "=== Task2 ATE Summary ==="
+awk -F',' 'NR==1 {next} {printf "%s | subset=%s, common=%s, ATE=%.6f, scale=%.6f\n", $1, $2, $3, $4, $5}' "$SUMMARY_CSV"
+
+echo
+echo "Task2 outputs:"
+echo "- Root: ${TASK2_ROOT}"
+echo "- Summary CSV: ${SUMMARY_CSV}"
+echo "- Per-subsequence files: method_a/, method_b/, trajectory_overlay.png, metrics.txt, timing.csv"
