@@ -7,7 +7,10 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+from lab1.logging_utils import print_timing_summary, timed_block, write_timing_csv
 from lab1.task1 import Task1Error, _format_float_tag, _has_any_frames, _quat_to_rot, _require_tool, _run_cmd
+
+TIMING_FILENAME = "timing.csv"
 
 
 @dataclass
@@ -82,7 +85,15 @@ def _write_subset_images_txt(
     return kept
 
 
-def _run_colmap_subset(images_dir: Path, sparse_root: Path, db_path: Path, colmap_bin: str, force: bool, dry_run: bool) -> Path:
+def _run_colmap_subset(
+    images_dir: Path,
+    sparse_root: Path,
+    db_path: Path,
+    colmap_bin: str,
+    force: bool,
+    dry_run: bool,
+    timings: dict[str, float] | None = None,
+) -> Path:
     if db_path.exists() and force and not dry_run:
         db_path.unlink()
     if sparse_root.exists() and force and not dry_run:
@@ -90,51 +101,56 @@ def _run_colmap_subset(images_dir: Path, sparse_root: Path, db_path: Path, colma
     if not dry_run:
         sparse_root.mkdir(parents=True, exist_ok=True)
 
-    _run_cmd(
-        [
-            colmap_bin,
-            "feature_extractor",
-            "--database_path",
-            str(db_path),
-            "--image_path",
-            str(images_dir),
-            "--ImageReader.single_camera",
-            "1",
-            "--ImageReader.camera_model",
-            "PINHOLE",
-        ],
-        dry_run=dry_run,
-    )
-    _run_cmd([colmap_bin, "sequential_matcher", "--database_path", str(db_path)], dry_run=dry_run)
-    _run_cmd(
-        [
-            colmap_bin,
-            "mapper",
-            "--database_path",
-            str(db_path),
-            "--image_path",
-            str(images_dir),
-            "--output_path",
-            str(sparse_root),
-        ],
-        dry_run=dry_run,
-    )
+    timings = {} if timings is None else timings
+    with timed_block("feature_extractor", timings):
+        _run_cmd(
+            [
+                colmap_bin,
+                "feature_extractor",
+                "--database_path",
+                str(db_path),
+                "--image_path",
+                str(images_dir),
+                "--ImageReader.single_camera",
+                "1",
+                "--ImageReader.camera_model",
+                "PINHOLE",
+            ],
+            dry_run=dry_run,
+        )
+    with timed_block("sequential_matcher", timings):
+        _run_cmd([colmap_bin, "sequential_matcher", "--database_path", str(db_path)], dry_run=dry_run)
+    with timed_block("mapper", timings):
+        _run_cmd(
+            [
+                colmap_bin,
+                "mapper",
+                "--database_path",
+                str(db_path),
+                "--image_path",
+                str(images_dir),
+                "--output_path",
+                str(sparse_root),
+            ],
+            dry_run=dry_run,
+        )
     model_dir = sparse_root / "0"
     if not dry_run and not model_dir.exists():
         raise Task1Error(f"COLMAP mapper produced no model under: {model_dir}")
-    _run_cmd(
-        [
-            colmap_bin,
-            "model_converter",
-            "--input_path",
-            str(model_dir),
-            "--output_path",
-            str(model_dir),
-            "--output_type",
-            "TXT",
-        ],
-        dry_run=dry_run,
-    )
+    with timed_block("model_converter", timings):
+        _run_cmd(
+            [
+                colmap_bin,
+                "model_converter",
+                "--input_path",
+                str(model_dir),
+                "--output_path",
+                str(model_dir),
+                "--output_type",
+                "TXT",
+            ],
+            dry_run=dry_run,
+        )
     return model_dir
 
 
@@ -246,6 +262,7 @@ def run_task2(cfg: Task2Config) -> int:
 
     summary_rows = []
     for idx, (start, end, seq_name) in enumerate(_default_subseq_ranges(len(all_frames)), start=1):
+        timings: dict[str, float] = {}
         subset_names = all_frames[start:end]
         keep = set(subset_names)
         sub_tag = f"seq{idx:02d}_{seq_name}_{start+1:06d}-{end:06d}"
@@ -257,6 +274,7 @@ def run_task2(cfg: Task2Config) -> int:
         method_b_db = method_b_root / "database.db"
         overlay_png = sub_root / "trajectory_overlay.png"
         metrics_txt = sub_root / "metrics.txt"
+        timing_path = sub_root / TIMING_FILENAME
 
         print(f"\n=== Task2 / {sub_tag} ===")
         if not cfg.dry_run:
@@ -264,76 +282,85 @@ def run_task2(cfg: Task2Config) -> int:
             method_b_images.mkdir(parents=True, exist_ok=True)
 
         if cfg.stage in {"all", "prepare"}:
-            if cfg.force and not cfg.dry_run and method_b_images.exists():
-                shutil.rmtree(method_b_images)
-                method_b_images.mkdir(parents=True, exist_ok=True)
-            for name in subset_names:
-                src = full_images_dir / name
-                dst = method_b_images / name
-                if not dst.exists() or cfg.force:
-                    if not cfg.dry_run:
-                        shutil.copy2(src, dst)
-            if not cfg.dry_run:
-                shutil.copy2(full_cameras_txt, method_a_sparse / "cameras.txt")
-                kept = _write_subset_images_txt(full_images_txt, method_a_sparse / "images.txt", keep)
-                (method_a_sparse / "points3D.txt").write_text("", encoding="utf-8")
-                print(f"Method A poses kept: {kept}/{len(subset_names)}")
+            with timed_block("prepare", timings):
+                if cfg.force and not cfg.dry_run and method_b_images.exists():
+                    shutil.rmtree(method_b_images)
+                    method_b_images.mkdir(parents=True, exist_ok=True)
+                for name in subset_names:
+                    src = full_images_dir / name
+                    dst = method_b_images / name
+                    if not dst.exists() or cfg.force:
+                        if not cfg.dry_run:
+                            shutil.copy2(src, dst)
+                if not cfg.dry_run:
+                    shutil.copy2(full_cameras_txt, method_a_sparse / "cameras.txt")
+                    kept = _write_subset_images_txt(full_images_txt, method_a_sparse / "images.txt", keep)
+                    (method_a_sparse / "points3D.txt").write_text("", encoding="utf-8")
+                    print(f"Method A poses kept: {kept}/{len(subset_names)}")
 
         if cfg.stage in {"all", "sfm"}:
             if cfg.stage == "sfm":
                 _require_prepared_subset_images(method_b_images, subset_names)
-            _run_colmap_subset(
-                images_dir=method_b_images,
-                sparse_root=method_b_sparse,
-                db_path=method_b_db,
-                colmap_bin=cfg.colmap_bin,
-                force=cfg.force,
-                dry_run=cfg.dry_run,
-            )
+            with timed_block("sfm_total", timings):
+                _run_colmap_subset(
+                    images_dir=method_b_images,
+                    sparse_root=method_b_sparse,
+                    db_path=method_b_db,
+                    colmap_bin=cfg.colmap_bin,
+                    force=cfg.force,
+                    dry_run=cfg.dry_run,
+                    timings=timings,
+                )
 
         if cfg.stage in {"all", "analyze"}:
             if cfg.dry_run:
+                print_timing_summary(f"Timing / {sub_tag}", timings)
                 continue
-            b_images_txt = method_b_sparse / "0" / "images.txt"
-            if not b_images_txt.exists():
-                raise Task1Error(f"Method B sparse result missing: {b_images_txt}")
-            poses_b = _parse_colmap_poses(b_images_txt)
+            with timed_block("analyze", timings):
+                b_images_txt = method_b_sparse / "0" / "images.txt"
+                if not b_images_txt.exists():
+                    raise Task1Error(f"Method B sparse result missing: {b_images_txt}")
+                poses_b = _parse_colmap_poses(b_images_txt)
 
-            common = sorted([n for n in subset_names if n in all_poses and n in poses_b])
-            if len(common) < 3:
-                raise Task1Error(f"Too few common registered frames for alignment in {sub_tag}: {len(common)}")
+                common = sorted([n for n in subset_names if n in all_poses and n in poses_b])
+                if len(common) < 3:
+                    raise Task1Error(f"Too few common registered frames for alignment in {sub_tag}: {len(common)}")
 
-            a_xyz = np.stack([all_poses[n][0] for n in common], axis=0)
-            b_xyz = np.stack([poses_b[n][0] for n in common], axis=0)
-            scale, rot, trans = _umeyama_sim3(b_xyz, a_xyz)
-            b_aligned = _apply_sim3(b_xyz, scale, rot, trans)
-            ate_val = _ate(a_xyz, b_aligned)
-            _plot_overlay(a_xyz, b_aligned, overlay_png, f"{sub_tag} | source_fps={cfg.source_fps:g} | ATE={ate_val:.4f}")
+                a_xyz = np.stack([all_poses[n][0] for n in common], axis=0)
+                b_xyz = np.stack([poses_b[n][0] for n in common], axis=0)
+                scale, rot, trans = _umeyama_sim3(b_xyz, a_xyz)
+                b_aligned = _apply_sim3(b_xyz, scale, rot, trans)
+                ate_val = _ate(a_xyz, b_aligned)
+                _plot_overlay(a_xyz, b_aligned, overlay_png, f"{sub_tag} | source_fps={cfg.source_fps:g} | ATE={ate_val:.4f}")
 
-            row = {
-                "subseq": sub_tag,
-                "subset_frames": len(subset_names),
-                "common_registered": len(common),
-                "ate": ate_val,
-                "scale": scale,
-            }
-            summary_rows.append(row)
-            metrics_txt.write_text(
-                "\n".join(
-                    [
-                        f"subseq={sub_tag}",
-                        f"source_fps={cfg.source_fps:g}",
-                        f"subset_frames={len(subset_names)}",
-                        f"common_registered={len(common)}",
-                        f"sim3_scale={scale:.8f}",
-                        f"ate={ate_val:.8f}",
-                    ]
+                row = {
+                    "subseq": sub_tag,
+                    "subset_frames": len(subset_names),
+                    "common_registered": len(common),
+                    "ate": ate_val,
+                    "scale": scale,
+                }
+                summary_rows.append(row)
+                metrics_txt.write_text(
+                    "\n".join(
+                        [
+                            f"subseq={sub_tag}",
+                            f"source_fps={cfg.source_fps:g}",
+                            f"subset_frames={len(subset_names)}",
+                            f"common_registered={len(common)}",
+                            f"sim3_scale={scale:.8f}",
+                            f"ate={ate_val:.8f}",
+                        ]
+                    )
+                    + "\n",
+                    encoding="utf-8",
                 )
-                + "\n",
-                encoding="utf-8",
-            )
             print(f"Saved: {overlay_png}")
             print(f"ATE={ate_val:.6f}, common={len(common)}")
+        if not cfg.dry_run:
+            write_timing_csv(timing_path, timings)
+            print(f"Saved timing summary: {timing_path}")
+        print_timing_summary(f"Timing / {sub_tag}", timings)
 
     if cfg.stage in {"all", "analyze"} and not cfg.dry_run:
         summary_path = task2_root / "summary.csv"

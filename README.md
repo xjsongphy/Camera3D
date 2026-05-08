@@ -110,11 +110,13 @@ uv run lab1 q4
 ```txt
 outputs/lab1/task1/<video_name>_<param_tag>/
 ├── images/
+├── frame_map.csv
 ├── sparse/
 │   └── 0/
 │       ├── images.txt
 │       ├── cameras.txt
 │       └── points3D.txt
+├── timing.csv
 └── trajectory.png
 ```
 
@@ -141,21 +143,21 @@ uv run lab1 task1 --videos S1-1 --fps 4 --stage extract --force
 uv run lab1 task1 --videos S1-1 --fps 4 --stage sfm --force
 ```
 
-合并同一视频不同 `fps` 的已有轨迹：
+合并同一视频不同 `fps` 的已有轨迹（基于公共源帧做 Sim(3) 对齐）：
 
 ```bash
 uv run lab1 task1 merge --videos S1-1
 uv run lab1 task1 merge
 ```
 
-说明：`merge` 只读取现有 `task1` 结果；默认会跳过少于 2 组 `fps` 结果的视频。如果显式指定了 `--videos`，但某个视频现有结果不足 2 组，则会直接报错。
+说明：`merge` 会读取每组结果中的 `frame_map.csv`，按公共源帧建立对应关系，再将非参考轨迹对齐到参考轨迹后叠加绘制。默认会跳过少于 2 组 `fps` 结果的视频。如果显式指定了 `--videos`，但某个视频现有结果不足 2 组，则会直接报错。
 
 合并输出目录：
 
 ```txt
 outputs/lab1/task1/merged/
-├── S1-1/trajectory_overlay.png
-├── S1-2/trajectory_overlay.png
+├── S1-1/{trajectory_overlay.png,alignment_summary.csv,timing.csv}
+├── S1-2/{trajectory_overlay.png,alignment_summary.csv,timing.csv}
 └── ...
 ```
 
@@ -219,8 +221,33 @@ outputs/lab1/task2/S1-2_fps4/
 │   ├── method_a/sparse/0/{images.txt,cameras.txt,points3D.txt}
 │   ├── method_b/{images/,database.db,sparse/0/...}
 │   ├── trajectory_overlay.png
-│   └── metrics.txt
+│   ├── metrics.txt
+│   └── timing.csv
 ├── seq02_middle_1over2_000079-000235/...
 ├── seq03_back_1over4_000235-000312/...
 └── summary.csv
 ```
+
+## 日志与耗时统计
+
+每次 `uv run lab1 ...` 都会在对应任务目录写一个带时间戳的日志：
+
+- `outputs/lab1/<task>/logs/<task>_YYYYMMDD_HHMMSS.log`
+
+日志包含：
+
+- 运行开始/结束时间和总耗时（elapsed）
+- 命令行调用与标准输出
+- 每个视频/子序列的阶段耗时汇总（终端打印）
+
+同时，结构化耗时会写入 `timing.csv`，便于对比不同 `fps` 策略效率：
+
+- `task1`: `outputs/lab1/task1/<video>_<param_tag>/timing.csv`
+- `task1 merge`: `outputs/lab1/task1/merged/<video>/timing.csv`
+- `task2`: `outputs/lab1/task2/S1-2_<param_tag>/<subseq>/timing.csv`
+
+`timing.csv` 字段：
+
+- `stage`: 阶段名（如 `extract`、`feature_extractor`、`hierarchical_mapper`、`sfm_total`、`analyze`）
+- `seconds`: 秒级耗时（浮点）
+- `human`: 可读格式耗时（如 `12.34s`、`3m05.12s`）

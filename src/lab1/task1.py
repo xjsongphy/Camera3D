@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -9,6 +10,8 @@ import re
 
 import matplotlib.pyplot as plt
 import numpy as np
+
+from lab1.logging_utils import print_timing_summary, timed_block, write_timing_csv
 
 
 S1_VIDEOS = ["S1-1.mp4", "S1-2.mp4", "S1-3.mp4"]
@@ -30,6 +33,10 @@ class Task1Config:
 
 class Task1Error(RuntimeError):
     pass
+
+
+FRAME_MAP_FILENAME = "frame_map.csv"
+TIMING_FILENAME = "timing.csv"
 
 
 def _run_cmd(cmd: list[str], dry_run: bool = False) -> None:
@@ -62,9 +69,71 @@ def _require_tool(tool_name: str) -> None:
         raise Task1Error(f"Required tool not found in PATH: {tool_name}")
 
 
-def _extract_frames(video_path: Path, images_dir: Path, fps: float, ffmpeg_bin: str, force: bool, dry_run: bool) -> None:
+def _probe_video_fps(video_path: Path) -> float:
+    cmd = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=avg_frame_rate",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        str(video_path),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    rate_text = result.stdout.strip()
+    if not rate_text:
+        raise Task1Error(f"Failed to probe video fps for {video_path}")
+    if "/" in rate_text:
+        num_text, den_text = rate_text.split("/", maxsplit=1)
+        value = float(num_text) / float(den_text)
+    else:
+        value = float(rate_text)
+    if value <= 0:
+        raise Task1Error(f"Probed non-positive source fps {value} for {video_path}")
+    return value
+
+
+def _write_frame_map(frame_map_path: Path, image_names: list[str], source_fps: float, sample_fps: float) -> None:
+    with frame_map_path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["image_name", "sample_index", "source_time_sec", "source_frame_index"])
+        for sample_idx, image_name in enumerate(image_names):
+            source_time = sample_idx / sample_fps
+            source_frame_index = int(round(source_time * source_fps))
+            writer.writerow([image_name, sample_idx, f"{source_time:.9f}", source_frame_index])
+
+
+def _load_frame_map(frame_map_path: Path) -> dict[str, int]:
+    if not frame_map_path.exists():
+        raise Task1Error(f"Frame map not found: {frame_map_path}")
+    mapping: dict[str, int] = {}
+    with frame_map_path.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            image_name = row["image_name"]
+            source_frame_index = int(row["source_frame_index"])
+            mapping[image_name] = source_frame_index
+    if not mapping:
+        raise Task1Error(f"Frame map is empty: {frame_map_path}")
+    return mapping
+
+
+def _extract_frames(
+    video_path: Path,
+    images_dir: Path,
+    frame_map_path: Path,
+    fps: float,
+    ffmpeg_bin: str,
+    force: bool,
+    dry_run: bool,
+) -> None:
     if images_dir.exists() and force and not dry_run:
         shutil.rmtree(images_dir)
+    if frame_map_path.exists() and force and not dry_run:
+        frame_map_path.unlink()
     if not dry_run:
         images_dir.mkdir(parents=True, exist_ok=True)
 
@@ -81,13 +150,29 @@ def _extract_frames(video_path: Path, images_dir: Path, fps: float, ffmpeg_bin: 
         output_pattern,
     ]
     _run_cmd(cmd, dry_run=dry_run)
+    if dry_run:
+        return
+
+    image_names = sorted(p.name for p in images_dir.glob("*.jpg"))
+    if not image_names:
+        raise Task1Error(f"No frames extracted under {images_dir}")
+    source_fps = _probe_video_fps(video_path)
+    _write_frame_map(frame_map_path, image_names, source_fps=source_fps, sample_fps=fps)
 
 
 def _has_any_frames(images_dir: Path) -> bool:
     return images_dir.exists() and any(images_dir.glob("*.jpg"))
 
 
-def _run_colmap(images_dir: Path, sparse_root: Path, db_path: Path, colmap_bin: str, force: bool, dry_run: bool) -> Path:
+def _run_colmap(
+    images_dir: Path,
+    sparse_root: Path,
+    db_path: Path,
+    colmap_bin: str,
+    force: bool,
+    dry_run: bool,
+    timings: dict[str, float] | None = None,
+) -> Path:
     if db_path.exists() and force and not dry_run:
         db_path.unlink()
     if sparse_root.exists() and force and not dry_run:
@@ -95,45 +180,49 @@ def _run_colmap(images_dir: Path, sparse_root: Path, db_path: Path, colmap_bin: 
     if not dry_run:
         sparse_root.mkdir(parents=True, exist_ok=True)
 
-    _run_cmd(
-        [
-            colmap_bin,
-            "feature_extractor",
-            "--database_path",
-            str(db_path),
-            "--image_path",
-            str(images_dir),
-            "--ImageReader.single_camera",
-            "1",
-            "--ImageReader.camera_model",
-            "PINHOLE",
-        ],
-        dry_run=dry_run,
-    )
+    timings = {} if timings is None else timings
+    with timed_block("feature_extractor", timings):
+        _run_cmd(
+            [
+                colmap_bin,
+                "feature_extractor",
+                "--database_path",
+                str(db_path),
+                "--image_path",
+                str(images_dir),
+                "--ImageReader.single_camera",
+                "1",
+                "--ImageReader.camera_model",
+                "PINHOLE",
+            ],
+            dry_run=dry_run,
+        )
 
-    _run_cmd(
-        [
-            colmap_bin,
-            "sequential_matcher",
-            "--database_path",
-            str(db_path),
-        ],
-        dry_run=dry_run,
-    )
+    with timed_block("sequential_matcher", timings):
+        _run_cmd(
+            [
+                colmap_bin,
+                "sequential_matcher",
+                "--database_path",
+                str(db_path),
+            ],
+            dry_run=dry_run,
+        )
 
-    _run_cmd(
-        [
-            colmap_bin,
-            "hierarchical_mapper",
-            "--database_path",
-            str(db_path),
-            "--image_path",
-            str(images_dir),
-            "--output_path",
-            str(sparse_root),
-        ],
-        dry_run=dry_run,
-    )
+    with timed_block("hierarchical_mapper", timings):
+        _run_cmd(
+            [
+                colmap_bin,
+                "hierarchical_mapper",
+                "--database_path",
+                str(db_path),
+                "--image_path",
+                str(images_dir),
+                "--output_path",
+                str(sparse_root),
+            ],
+            dry_run=dry_run,
+        )
 
     if dry_run:
         return sparse_root / "0"
@@ -142,19 +231,20 @@ def _run_colmap(images_dir: Path, sparse_root: Path, db_path: Path, colmap_bin: 
     if model_dir is None:
         raise Task1Error(f"COLMAP hierarchical_mapper produced no model under: {sparse_root}")
 
-    _run_cmd(
-        [
-            colmap_bin,
-            "model_converter",
-            "--input_path",
-            str(model_dir),
-            "--output_path",
-            str(model_dir),
-            "--output_type",
-            "TXT",
-        ],
-        dry_run=dry_run,
-    )
+    with timed_block("model_converter", timings):
+        _run_cmd(
+            [
+                colmap_bin,
+                "model_converter",
+                "--input_path",
+                str(model_dir),
+                "--output_path",
+                str(model_dir),
+                "--output_type",
+                "TXT",
+            ],
+            dry_run=dry_run,
+        )
 
     model_dir = _materialize_canonical_model_dir(model_dir, sparse_root / "0")
     return model_dir
@@ -305,6 +395,29 @@ def _plot_merged_trajectories(
     plt.close(fig)
 
 
+def _umeyama_sim3(src: np.ndarray, dst: np.ndarray) -> tuple[float, np.ndarray, np.ndarray]:
+    if src.shape != dst.shape or src.shape[0] < 3:
+        raise Task1Error("Sim(3) alignment requires matched trajectories with at least 3 points.")
+    mu_src = src.mean(axis=0)
+    mu_dst = dst.mean(axis=0)
+    src_c = src - mu_src
+    dst_c = dst - mu_dst
+    cov = (dst_c.T @ src_c) / src.shape[0]
+    u, d, vt = np.linalg.svd(cov)
+    s = np.eye(3)
+    if np.linalg.det(u @ vt) < 0:
+        s[2, 2] = -1
+    r = u @ s @ vt
+    var_src = np.mean(np.sum(src_c * src_c, axis=1))
+    scale = float(np.trace(np.diag(d) @ s) / var_src)
+    t = mu_dst - scale * (r @ mu_src)
+    return scale, r, t
+
+
+def _apply_sim3(points: np.ndarray, scale: float, rot: np.ndarray, trans: np.ndarray) -> np.ndarray:
+    return (scale * (rot @ points.T)).T + trans
+
+
 def _format_float_tag(value: float) -> str:
     s = f"{value:.3f}".rstrip("0").rstrip(".")
     return s.replace(".", "p")
@@ -329,9 +442,11 @@ def _has_completed_outputs(case_root: Path) -> bool:
     images_dir = case_root / "images"
     sparse_dir = case_root / "sparse" / "0"
     trajectory = case_root / "trajectory.png"
+    frame_map = case_root / FRAME_MAP_FILENAME
     return (
         images_dir.exists()
         and any(images_dir.glob("*.jpg"))
+        and frame_map.exists()
         and (sparse_dir / "images.txt").exists()
         and (sparse_dir / "cameras.txt").exists()
         and (sparse_dir / "points3D.txt").exists()
@@ -359,9 +474,17 @@ def _normalize_video_name(name: str) -> str:
     return value
 
 
-def _collect_existing_case_trajectories(output_root: Path, case_name: str) -> list[tuple[float, str, np.ndarray, Path]]:
+def _parse_registered_pose_map(images_txt: Path) -> dict[str, np.ndarray]:
+    centers, names = _parse_image_centers(images_txt)
+    return {name: center for name, center in zip(names, centers, strict=True)}
+
+
+def _collect_existing_case_trajectories(
+    output_root: Path,
+    case_name: str,
+) -> list[tuple[float, str, dict[str, np.ndarray], dict[str, int], Path]]:
     pattern = re.compile(rf"^{re.escape(case_name)}_(fps[0-9p]+)$")
-    found: list[tuple[float, str, np.ndarray, Path]] = []
+    found: list[tuple[float, str, dict[str, np.ndarray], dict[str, int], Path]] = []
     if not output_root.exists():
         return found
 
@@ -373,12 +496,67 @@ def _collect_existing_case_trajectories(output_root: Path, case_name: str) -> li
             continue
         param_tag = match.group(1)
         images_txt = child / "sparse" / "0" / "images.txt"
-        if not images_txt.exists():
+        frame_map_path = child / FRAME_MAP_FILENAME
+        if not images_txt.exists() or not frame_map_path.exists():
             continue
-        centers, _ = _parse_image_centers(images_txt)
-        found.append((_parse_param_tag_value(param_tag), param_tag, centers, child))
+        pose_map = _parse_registered_pose_map(images_txt)
+        frame_map = _load_frame_map(frame_map_path)
+        found.append((_parse_param_tag_value(param_tag), param_tag, pose_map, frame_map, child))
 
     return sorted(found, key=lambda item: (item[0], item[1]))
+
+
+def _align_trajectories_to_reference(
+    trajectories: list[tuple[float, str, dict[str, np.ndarray], dict[str, int], Path]],
+) -> tuple[list[tuple[float, str, np.ndarray]], list[dict[str, str | int | float]]]:
+    ref_fps, ref_tag, ref_pose_map, ref_frame_map, _ref_case_root = trajectories[0]
+    ref_pairs = {
+        source_frame_idx: ref_pose_map[image_name]
+        for image_name, source_frame_idx in ref_frame_map.items()
+        if image_name in ref_pose_map
+    }
+    if len(ref_pairs) < 3:
+        raise Task1Error(f"Reference trajectory {ref_tag} has fewer than 3 registered mapped frames.")
+
+    ref_names_sorted = sorted(
+        (source_idx, image_name) for image_name, source_idx in ref_frame_map.items() if image_name in ref_pose_map
+    )
+    ref_full = np.array([ref_pose_map[image_name] for _source_idx, image_name in ref_names_sorted])
+    aligned = [(ref_fps, ref_tag, ref_full)]
+    summary: list[dict[str, str | int | float]] = [
+        {"param_tag": ref_tag, "fps": ref_fps, "common_frames": len(ref_pairs), "scale": 1.0}
+    ]
+
+    for fps, param_tag, pose_map, frame_map, _case_root in trajectories[1:]:
+        cur_pairs = {
+            source_frame_idx: pose_map[image_name]
+            for image_name, source_frame_idx in frame_map.items()
+            if image_name in pose_map
+        }
+        common_frame_indices = sorted(set(ref_pairs) & set(cur_pairs))
+        if len(common_frame_indices) < 3:
+            raise Task1Error(
+                f"Need at least 3 common registered source frames to align {param_tag} to {ref_tag}, "
+                f"found {len(common_frame_indices)}"
+            )
+        ref_common = np.array([ref_pairs[idx] for idx in common_frame_indices])
+        cur_common = np.array([cur_pairs[idx] for idx in common_frame_indices])
+        scale, rot, trans = _umeyama_sim3(cur_common, ref_common)
+        cur_names_sorted = sorted(
+            (source_idx, image_name) for image_name, source_idx in frame_map.items() if image_name in pose_map
+        )
+        cur_full = np.array([pose_map[image_name] for _source_idx, image_name in cur_names_sorted])
+        cur_aligned = _apply_sim3(cur_full, scale, rot, trans)
+        aligned.append((fps, param_tag, cur_aligned))
+        summary.append(
+            {
+                "param_tag": param_tag,
+                "fps": fps,
+                "common_frames": len(common_frame_indices),
+                "scale": scale,
+            }
+        )
+    return aligned, summary
 
 
 def _run_task1_merge(cfg: Task1Config, selected_videos: list[str], strict: bool) -> int:
@@ -391,8 +569,10 @@ def _run_task1_merge(cfg: Task1Config, selected_videos: list[str], strict: bool)
 
     for video_name in selected_videos:
         case_name = Path(video_name).stem
+        timings: dict[str, float] = {}
         print(f"\n=== Task1 Merge / {case_name} ===")
-        trajectories = _collect_existing_case_trajectories(cfg.output_root, case_name)
+        with timed_block("load_results", timings):
+            trajectories = _collect_existing_case_trajectories(cfg.output_root, case_name)
         if len(trajectories) < 2:
             message = (
                 f"Need at least 2 existing task1 results to merge for {case_name}, "
@@ -405,25 +585,41 @@ def _run_task1_merge(cfg: Task1Config, selected_videos: list[str], strict: bool)
 
         merge_dir = merged_root / case_name
         out_path = merge_dir / "trajectory_overlay.png"
+        summary_path = merge_dir / "alignment_summary.csv"
+        timing_path = merge_dir / TIMING_FILENAME
         if cfg.dry_run:
             print(f"Would save merged trajectory: {out_path}")
-            for fps, param_tag, _centers, case_root in trajectories:
+            for fps, param_tag, _pose_map, _frame_map, case_root in trajectories:
                 print(f"  source: {case_root} ({param_tag}, fps={fps:g})")
+            print_timing_summary(f"Timing / {case_name} / merge", timings)
             continue
 
         merge_dir.mkdir(parents=True, exist_ok=True)
         if out_path.exists() and not cfg.force:
             print(f"Reuse merged trajectory: {out_path}")
+            print_timing_summary(f"Timing / {case_name} / merge", timings)
             continue
 
-        for fps, param_tag, _centers, case_root in trajectories:
+        for fps, param_tag, _pose_map, _frame_map, case_root in trajectories:
             print(f"Source trajectory: {case_root} ({param_tag}, fps={fps:g})")
-        _plot_merged_trajectories(
-            [(fps, param_tag, centers) for fps, param_tag, centers, _case_root in trajectories],
-            out_path,
-            f"{case_name} Camera Trajectory Overlay (all fps)",
-        )
+        with timed_block("align", timings):
+            aligned_trajectories, alignment_summary = _align_trajectories_to_reference(trajectories)
+        with timed_block("plot", timings):
+            _plot_merged_trajectories(
+                aligned_trajectories,
+                out_path,
+                f"{case_name} Camera Trajectory Overlay (aligned across fps)",
+            )
+        with timed_block("write_summary", timings):
+            with summary_path.open("w", encoding="utf-8", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=["param_tag", "fps", "common_frames", "scale"])
+                writer.writeheader()
+                writer.writerows(alignment_summary)
+        write_timing_csv(timing_path, timings)
         print(f"Saved merged trajectory: {out_path}")
+        print(f"Saved alignment summary: {summary_path}")
+        print(f"Saved timing summary: {timing_path}")
+        print_timing_summary(f"Timing / {case_name} / merge", timings)
 
     print("\nTask1 merge completed.")
     return 0
@@ -457,7 +653,14 @@ def run_task1(cfg: Task1Config) -> int:
         if cfg.stage in {"all", "sfm"}:
             _require_tool(cfg.colmap_bin)
 
+    def _finalize_case_timing(case_name: str, case_root: Path, param_tag: str, timings: dict[str, float]) -> None:
+        if not cfg.dry_run:
+            write_timing_csv(case_root / TIMING_FILENAME, timings)
+            print(f"Saved timing summary: {case_root / TIMING_FILENAME}")
+        print_timing_summary(f"Timing / {case_name} / {param_tag}", timings)
+
     for video_name in selected_videos:
+        timings: dict[str, float] = {}
         video_path = videos_dir / video_name
         if not video_path.exists():
             raise Task1Error(f"Video not found: {video_path}")
@@ -465,12 +668,14 @@ def run_task1(cfg: Task1Config) -> int:
         case_name = video_path.stem
         case_root = cfg.output_root / f"{case_name}_{param_tag}"
         images_dir = case_root / "images"
+        frame_map_path = case_root / FRAME_MAP_FILENAME
         sparse_root = case_root / "sparse"
         db_path = case_root / "database.db"
 
         print(f"\n=== Task1 / {case_name} / {param_tag} ===")
         if cfg.stage == "all" and not cfg.force and _has_completed_outputs(case_root):
             print(f"Reuse existing outputs (same parameters): {case_root}")
+            _finalize_case_timing(case_name, case_root, param_tag, timings)
             continue
 
         if not cfg.dry_run:
@@ -480,52 +685,66 @@ def run_task1(cfg: Task1Config) -> int:
             if not cfg.force and _has_any_frames(images_dir):
                 print(f"Reuse extracted frames: {images_dir}")
             else:
-                _extract_frames(
-                    video_path=video_path,
-                    images_dir=images_dir,
-                    fps=cfg.fps,
-                    ffmpeg_bin=cfg.ffmpeg_bin,
-                    force=cfg.force,
-                    dry_run=cfg.dry_run,
-                )
+                with timed_block("extract", timings):
+                    _extract_frames(
+                        video_path=video_path,
+                        images_dir=images_dir,
+                        frame_map_path=frame_map_path,
+                        fps=cfg.fps,
+                        ffmpeg_bin=cfg.ffmpeg_bin,
+                        force=cfg.force,
+                        dry_run=cfg.dry_run,
+                    )
         elif cfg.stage == "sfm":
             if not _has_any_frames(images_dir):
                 raise Task1Error(
                     f"No extracted frames found under {images_dir}. "
                     "Run extraction first (--stage extract) or use --stage all."
                 )
+            if not frame_map_path.exists():
+                raise Task1Error(
+                    f"Frame map not found under {frame_map_path}. "
+                    "Run extraction first (--stage extract) or use --stage all."
+                )
             print(f"Reuse extracted frames: {images_dir}")
 
         if cfg.stage == "extract":
             print("Skip SfM for extract stage.")
+            _finalize_case_timing(case_name, case_root, param_tag, timings)
             continue
 
         if cfg.stage == "sfm" and not cfg.force and _has_completed_sfm(case_root):
             print(f"Reuse SfM outputs: {case_root}")
+            _finalize_case_timing(case_name, case_root, param_tag, timings)
             continue
 
-        model_dir = _run_colmap(
-            images_dir=images_dir,
-            sparse_root=sparse_root,
-            db_path=db_path,
-            colmap_bin=cfg.colmap_bin,
-            force=cfg.force,
-            dry_run=cfg.dry_run,
-        )
+        with timed_block("sfm_total", timings):
+            model_dir = _run_colmap(
+                images_dir=images_dir,
+                sparse_root=sparse_root,
+                db_path=db_path,
+                colmap_bin=cfg.colmap_bin,
+                force=cfg.force,
+                dry_run=cfg.dry_run,
+                timings=timings,
+            )
 
         if cfg.dry_run:
+            _finalize_case_timing(case_name, case_root, param_tag, timings)
             continue
 
         images_txt = model_dir / "images.txt"
-        centers, _ = _parse_image_centers(images_txt)
-        _plot_trajectory(
-            centers,
-            case_root / "trajectory.png",
-            f"{case_name} Camera Trajectory (fps={cfg.fps:g})",
-        )
+        with timed_block("plot", timings):
+            centers, _ = _parse_image_centers(images_txt)
+            _plot_trajectory(
+                centers,
+                case_root / "trajectory.png",
+                f"{case_name} Camera Trajectory (fps={cfg.fps:g})",
+            )
 
         print(f"Saved trajectory: {case_root / 'trajectory.png'}")
         print(f"Sparse model text files: {model_dir}")
+        _finalize_case_timing(case_name, case_root, param_tag, timings)
 
     print("\nTask1 completed.")
     return 0
