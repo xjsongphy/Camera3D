@@ -58,10 +58,7 @@ def run_feature_extractor(
             "--ImageReader.single_camera",
             "1",
             "--ImageReader.camera_model",
-            "SIMPLE_RADIAL",
-            # Keep intrinsics stable for monocular video SfM to avoid BA degeneracy.
-            "--SiftExtraction.max_num_features",
-            "8192",
+            "PINHOLE",
         ],
         dry_run=dry_run,
         error_cls=error_cls,
