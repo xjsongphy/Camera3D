@@ -5,6 +5,7 @@ import subprocess
 from dataclasses import dataclass
 from collections import deque
 from pathlib import Path
+import re
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -24,6 +25,7 @@ class Task1Config:
     dry_run: bool
     videos: list[str] | None = None
     stage: str = "all"
+    mode: str = "run"
 
 
 class Task1Error(RuntimeError):
@@ -122,7 +124,7 @@ def _run_colmap(images_dir: Path, sparse_root: Path, db_path: Path, colmap_bin: 
     _run_cmd(
         [
             colmap_bin,
-            "mapper",
+            "hierarchical_mapper",
             "--database_path",
             str(db_path),
             "--image_path",
@@ -133,9 +135,12 @@ def _run_colmap(images_dir: Path, sparse_root: Path, db_path: Path, colmap_bin: 
         dry_run=dry_run,
     )
 
-    model_dir = sparse_root / "0"
-    if not dry_run and not model_dir.exists():
-        raise Task1Error(f"COLMAP mapper produced no model under: {model_dir}")
+    if dry_run:
+        return sparse_root / "0"
+
+    model_dir = _select_best_model_dir(sparse_root)
+    if model_dir is None:
+        raise Task1Error(f"COLMAP hierarchical_mapper produced no model under: {sparse_root}")
 
     _run_cmd(
         [
@@ -151,7 +156,49 @@ def _run_colmap(images_dir: Path, sparse_root: Path, db_path: Path, colmap_bin: 
         dry_run=dry_run,
     )
 
+    model_dir = _materialize_canonical_model_dir(model_dir, sparse_root / "0")
     return model_dir
+
+
+def _count_registered_images_in_model(images_txt: Path) -> int:
+    count = 0
+    with images_txt.open("r", encoding="utf-8") as f:
+        while True:
+            pose_line = f.readline()
+            if not pose_line:
+                break
+            pose_line = pose_line.strip()
+            if not pose_line or pose_line.startswith("#"):
+                continue
+            parts = pose_line.split()
+            if len(parts) >= 10 and parts[0].isdigit():
+                count += 1
+            _ = f.readline()
+    return count
+
+
+def _select_best_model_dir(sparse_root: Path) -> Path | None:
+    best: tuple[int, Path] | None = None
+    for child in sorted(sparse_root.iterdir()):
+        if not child.is_dir():
+            continue
+        images_bin = child / "images.bin"
+        images_txt = child / "images.txt"
+        if not images_bin.exists() and not images_txt.exists():
+            continue
+        count = _count_registered_images_in_model(images_txt) if images_txt.exists() else 0
+        if best is None or count > best[0]:
+            best = (count, child)
+    return None if best is None else best[1]
+
+
+def _materialize_canonical_model_dir(model_dir: Path, canonical_dir: Path) -> Path:
+    if model_dir == canonical_dir:
+        return model_dir
+    if canonical_dir.exists():
+        shutil.rmtree(canonical_dir)
+    shutil.copytree(model_dir, canonical_dir)
+    return canonical_dir
 
 
 def _quat_to_rot(qw: float, qx: float, qy: float, qz: float) -> np.ndarray:
@@ -226,6 +273,38 @@ def _plot_trajectory(centers: np.ndarray, out_path: Path, title: str) -> None:
     plt.close(fig)
 
 
+def _plot_merged_trajectories(
+    trajectories: list[tuple[float, str, np.ndarray]],
+    out_path: Path,
+    title: str,
+) -> None:
+    fig = plt.figure(figsize=(9, 7))
+    ax = fig.add_subplot(111, projection="3d")
+    colors = plt.cm.get_cmap("tab10", max(len(trajectories), 1))
+    for idx, (fps, label, centers) in enumerate(trajectories):
+        ax.plot(
+            centers[:, 0],
+            centers[:, 1],
+            centers[:, 2],
+            marker="o",
+            markersize=2,
+            linewidth=1.5,
+            alpha=0.9,
+            color=colors(idx),
+            label=f"{label} ({len(centers)} poses)",
+        )
+    ax.set_title(title)
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+    ax.set_zlabel("Z")
+    ax.set_box_aspect([1, 1, 1])
+    ax.grid(True)
+    ax.legend(loc="best")
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=160)
+    plt.close(fig)
+
+
 def _format_float_tag(value: float) -> str:
     s = f"{value:.3f}".rstrip("0").rstrip(".")
     return s.replace(".", "p")
@@ -234,6 +313,16 @@ def _format_float_tag(value: float) -> str:
 def _build_param_tag(cfg: Task1Config) -> str:
     # Keep parameterized outputs separate to avoid mixing results from different runs.
     return f"fps{_format_float_tag(cfg.fps)}"
+
+
+def _parse_param_tag_value(param_tag: str) -> float:
+    if not param_tag.startswith("fps"):
+        raise Task1Error(f"Unsupported parameter tag: {param_tag}")
+    value = param_tag[3:].replace("p", ".")
+    try:
+        return float(value)
+    except ValueError as exc:
+        raise Task1Error(f"Failed to parse fps from tag: {param_tag}") from exc
 
 
 def _has_completed_outputs(case_root: Path) -> bool:
@@ -270,10 +359,79 @@ def _normalize_video_name(name: str) -> str:
     return value
 
 
+def _collect_existing_case_trajectories(output_root: Path, case_name: str) -> list[tuple[float, str, np.ndarray, Path]]:
+    pattern = re.compile(rf"^{re.escape(case_name)}_(fps[0-9p]+)$")
+    found: list[tuple[float, str, np.ndarray, Path]] = []
+    if not output_root.exists():
+        return found
+
+    for child in sorted(output_root.iterdir()):
+        if not child.is_dir():
+            continue
+        match = pattern.match(child.name)
+        if not match:
+            continue
+        param_tag = match.group(1)
+        images_txt = child / "sparse" / "0" / "images.txt"
+        if not images_txt.exists():
+            continue
+        centers, _ = _parse_image_centers(images_txt)
+        found.append((_parse_param_tag_value(param_tag), param_tag, centers, child))
+
+    return sorted(found, key=lambda item: (item[0], item[1]))
+
+
+def _run_task1_merge(cfg: Task1Config, selected_videos: list[str], strict: bool) -> int:
+    if cfg.stage != "all":
+        raise Task1Error("task1 merge does not support --stage; it only reads existing outputs.")
+
+    merged_root = cfg.output_root / "merged"
+    if not cfg.dry_run:
+        merged_root.mkdir(parents=True, exist_ok=True)
+
+    for video_name in selected_videos:
+        case_name = Path(video_name).stem
+        print(f"\n=== Task1 Merge / {case_name} ===")
+        trajectories = _collect_existing_case_trajectories(cfg.output_root, case_name)
+        if len(trajectories) < 2:
+            message = (
+                f"Need at least 2 existing task1 results to merge for {case_name}, "
+                f"found {len(trajectories)} under {cfg.output_root}"
+            )
+            if strict:
+                raise Task1Error(message)
+            print(f"Skip merge: {message}")
+            continue
+
+        merge_dir = merged_root / case_name
+        out_path = merge_dir / "trajectory_overlay.png"
+        if cfg.dry_run:
+            print(f"Would save merged trajectory: {out_path}")
+            for fps, param_tag, _centers, case_root in trajectories:
+                print(f"  source: {case_root} ({param_tag}, fps={fps:g})")
+            continue
+
+        merge_dir.mkdir(parents=True, exist_ok=True)
+        if out_path.exists() and not cfg.force:
+            print(f"Reuse merged trajectory: {out_path}")
+            continue
+
+        for fps, param_tag, _centers, case_root in trajectories:
+            print(f"Source trajectory: {case_root} ({param_tag}, fps={fps:g})")
+        _plot_merged_trajectories(
+            [(fps, param_tag, centers) for fps, param_tag, centers, _case_root in trajectories],
+            out_path,
+            f"{case_name} Camera Trajectory Overlay (all fps)",
+        )
+        print(f"Saved merged trajectory: {out_path}")
+
+    print("\nTask1 merge completed.")
+    return 0
+
+
 def run_task1(cfg: Task1Config) -> int:
     videos_dir = cfg.lab1_root / "assets" / "videos"
     selected_videos = S1_VIDEOS if not cfg.videos else [_normalize_video_name(v) for v in cfg.videos]
-    param_tag = _build_param_tag(cfg)
 
     invalid = [v for v in selected_videos if v not in S1_VIDEOS]
     if invalid:
@@ -282,6 +440,12 @@ def run_task1(cfg: Task1Config) -> int:
             "(or short names S1-1/S1-2/S1-3)"
         )
 
+    if cfg.mode == "merge":
+        return _run_task1_merge(cfg, selected_videos, strict=cfg.videos is not None)
+    if cfg.mode != "run":
+        raise Task1Error(f"Unsupported task1 mode: {cfg.mode}")
+
+    param_tag = _build_param_tag(cfg)
     if cfg.stage not in {"all", "extract", "sfm"}:
         raise Task1Error(f"Unsupported stage: {cfg.stage}. Choose from all|extract|sfm")
     if cfg.fps <= 0:

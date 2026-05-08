@@ -75,6 +75,7 @@ uv run lab1 task1 --colmap-bin /your/path/to/colmap
 
 ```bash
 uv run lab1 task1 [--fps 2] [--force]
+uv run lab1 task1 merge [--videos S1-1 S1-2]
 uv run lab1 task2 [--source-fps 4] [--force]
 uv run lab1 task3
 uv run lab1 task4
@@ -100,7 +101,7 @@ uv run lab1 q4
 流程：
 
 1. 用 `ffmpeg` 抽帧到 `images/`
-2. 用 COLMAP 运行稀疏重建（`feature_extractor + sequential_matcher + mapper`）
+2. 用 COLMAP 运行稀疏重建（`feature_extractor + sequential_matcher + hierarchical_mapper`）
 3. 导出 COLMAP 文本格式结果（`images.txt/cameras.txt/points3D.txt`）
 4. 绘制并保存相机轨迹图 `trajectory.png`
 
@@ -122,6 +123,7 @@ outputs/lab1/task1/<video_name>_<param_tag>/
 
 可选参数：
 
+- `merge`: 合并模式，叠加同一视频现有的不同 `fps` 轨迹图，不运行抽帧或 SfM
 - `--fps`: 抽帧帧率（默认 `2.0`）
 - `--stage`: 控制阶段，`all`（默认）/`extract`（仅抽帧）/`sfm`（仅跑SfM，复用已有抽帧）
 - `--colmap-bin`: COLMAP 可执行文件路径（默认 `colmap`）
@@ -137,6 +139,24 @@ uv run lab1 task1 --videos S1-1 --fps 4 --stage extract --force
 
 # 第二步：只跑 SfM（复用已有 frames）
 uv run lab1 task1 --videos S1-1 --fps 4 --stage sfm --force
+```
+
+合并同一视频不同 `fps` 的已有轨迹：
+
+```bash
+uv run lab1 task1 merge --videos S1-1
+uv run lab1 task1 merge
+```
+
+说明：`merge` 只读取现有 `task1` 结果；默认会跳过少于 2 组 `fps` 结果的视频。如果显式指定了 `--videos`，但某个视频现有结果不足 2 组，则会直接报错。
+
+合并输出目录：
+
+```txt
+outputs/lab1/task1/merged/
+├── S1-1/trajectory_overlay.png
+├── S1-2/trajectory_overlay.png
+└── ...
 ```
 
 说明：`task1` 参数只对 `task1/q1` 生效；`task2/3/4` 不再接受 `--fps` 等 `task1` 专属参数，避免误用。

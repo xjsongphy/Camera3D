@@ -68,6 +68,7 @@ def run_task1_entry(args: argparse.Namespace) -> int:
         dry_run=args.dry_run,
         videos=args.videos,
         stage=args.stage,
+        mode=args.mode,
     )
     try:
         return run_task1(cfg)
@@ -100,6 +101,13 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="task", required=True)
 
     task1_parser = subparsers.add_parser("task1", help=TASK_HELP["task1"])
+    task1_parser.add_argument(
+        "mode",
+        nargs="?",
+        default="run",
+        choices=["run", "merge"],
+        help="task1 mode: run (default) or merge existing trajectories across fps",
+    )
     task1_parser.add_argument("--fps", type=float, default=2.0, help="frame sampling rate for task1")
     task1_parser.add_argument("--colmap-bin", default="colmap", help="colmap executable name/path for task1")
     task1_parser.add_argument("--ffmpeg-bin", default="ffmpeg", help="ffmpeg executable name/path for task1")
@@ -139,6 +147,13 @@ def build_parser() -> argparse.ArgumentParser:
         if alias.startswith("q"):
             sub = subparsers.add_parser(alias, help=f"alias of {target}")
             if target == "task1":
+                sub.add_argument(
+                    "mode",
+                    nargs="?",
+                    default="run",
+                    choices=["run", "merge"],
+                    help="task1 mode: run (default) or merge existing trajectories across fps",
+                )
                 sub.add_argument("--fps", type=float, default=2.0, help="frame sampling rate for task1")
                 sub.add_argument("--colmap-bin", default="colmap", help="colmap executable name/path for task1")
                 sub.add_argument("--ffmpeg-bin", default="ffmpeg", help="ffmpeg executable name/path for task1")
