@@ -87,7 +87,7 @@ uv run lab1 q4
 输出目录（每个视频一份）：
 
 ```txt
-outputs/lab1/task1/<video_name>/
+outputs/lab1/task1/<video_name>_<param_tag>/
 ├── images/
 ├── sparse/
 │   └── 0/
@@ -96,6 +96,9 @@ outputs/lab1/task1/<video_name>/
 │       └── points3D.txt
 └── trajectory.png
 ```
+
+其中 `param_tag` 由运行参数生成（例如 `fps4`、`fps2p5`），用于隔离不同参数的实验结果。
+同样参数重复运行时会自动复用已有结果（除非传 `--force`）。
 
 可选参数：
 

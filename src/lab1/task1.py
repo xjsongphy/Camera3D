@@ -22,6 +22,7 @@ class Task1Config:
     skip_sfm: bool
     force: bool
     dry_run: bool
+    videos: list[str] | None = None
 
 
 class Task1Error(RuntimeError):
@@ -190,26 +191,72 @@ def _plot_trajectory(centers: np.ndarray, out_path: Path, title: str) -> None:
     plt.close(fig)
 
 
+def _format_float_tag(value: float) -> str:
+    s = f"{value:.3f}".rstrip("0").rstrip(".")
+    return s.replace(".", "p")
+
+
+def _build_param_tag(cfg: Task1Config) -> str:
+    # Keep parameterized outputs separate to avoid mixing results from different runs.
+    return f"fps{_format_float_tag(cfg.fps)}"
+
+
+def _has_completed_outputs(case_root: Path) -> bool:
+    images_dir = case_root / "images"
+    sparse_dir = case_root / "sparse" / "0"
+    trajectory = case_root / "trajectory.png"
+    return (
+        images_dir.exists()
+        and any(images_dir.glob("*.jpg"))
+        and (sparse_dir / "images.txt").exists()
+        and (sparse_dir / "cameras.txt").exists()
+        and (sparse_dir / "points3D.txt").exists()
+        and trajectory.exists()
+    )
+
+
+def _normalize_video_name(name: str) -> str:
+    value = name.strip()
+    if not value:
+        raise Task1Error("Empty video name provided")
+    if not value.endswith(".mp4"):
+        value = f"{value}.mp4"
+    return value
+
+
 def run_task1(cfg: Task1Config) -> int:
     videos_dir = cfg.lab1_root / "assets" / "videos"
+    selected_videos = S1_VIDEOS if not cfg.videos else [_normalize_video_name(v) for v in cfg.videos]
+    param_tag = _build_param_tag(cfg)
+
+    invalid = [v for v in selected_videos if v not in S1_VIDEOS]
+    if invalid:
+        raise Task1Error(
+            f"Unsupported video(s): {invalid}. Supported: {S1_VIDEOS} "
+            "(or short names S1-1/S1-2/S1-3)"
+        )
 
     if not cfg.dry_run:
         _require_tool(cfg.ffmpeg_bin)
         if not cfg.skip_sfm:
             _require_tool(cfg.colmap_bin)
 
-    for video_name in S1_VIDEOS:
+    for video_name in selected_videos:
         video_path = videos_dir / video_name
         if not video_path.exists():
             raise Task1Error(f"Video not found: {video_path}")
 
         case_name = video_path.stem
-        case_root = cfg.output_root / case_name
+        case_root = cfg.output_root / f"{case_name}_{param_tag}"
         images_dir = case_root / "images"
         sparse_root = case_root / "sparse"
         db_path = case_root / "database.db"
 
-        print(f"\n=== Task1 / {case_name} ===")
+        print(f"\n=== Task1 / {case_name} / {param_tag} ===")
+        if not cfg.force and _has_completed_outputs(case_root):
+            print(f"Reuse existing outputs (same parameters): {case_root}")
+            continue
+
         case_root.mkdir(parents=True, exist_ok=True)
 
         _extract_frames(
@@ -239,7 +286,11 @@ def run_task1(cfg: Task1Config) -> int:
 
         images_txt = model_dir / "images.txt"
         centers, _ = _parse_image_centers(images_txt)
-        _plot_trajectory(centers, case_root / "trajectory.png", f"{case_name} Camera Trajectory")
+        _plot_trajectory(
+            centers,
+            case_root / "trajectory.png",
+            f"{case_name} Camera Trajectory (fps={cfg.fps:g})",
+        )
 
         print(f"Saved trajectory: {case_root / 'trajectory.png'}")
         print(f"Sparse model text files: {model_dir}")
