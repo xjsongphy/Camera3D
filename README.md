@@ -251,3 +251,32 @@ outputs/lab1/task2/S1-2_fps4/
 - `stage`: 阶段名（如 `extract`、`feature_extractor`、`hierarchical_mapper`、`sfm_total`、`analyze`）
 - `seconds`: 秒级耗时（浮点）
 - `human`: 可读格式耗时（如 `12.34s`、`3m05.12s`）
+
+## Task1 FPS 扫描脚本（串行）
+
+用于比较 `fps=4/8/16/30` 在 `task1 --stage all` 下的完整流程耗时。脚本按顺序执行，不并行，适合做效率对比统计。
+
+Windows（PowerShell）：
+
+```powershell
+./scripts/task1_fps_sweep_full.ps1                 # 默认 S1-2
+./scripts/task1_fps_sweep_full.ps1 -Videos S1-1,S1-2
+```
+
+Linux/macOS（bash）：
+
+```bash
+bash ./scripts/task1_fps_sweep_full.sh             # 默认 S1-2
+bash ./scripts/task1_fps_sweep_full.sh S1-1 S1-2
+```
+
+汇总输出：
+
+- `outputs/lab1/task1/benchmarks/task1_full_sweep_<timestamp>.csv`
+
+汇总字段包含每次运行的：
+
+- 抽帧耗时 `extract_s`
+- SfM各阶段耗时（`feature_extractor_s`、`sequential_matcher_s`、`hierarchical_mapper_s`、`model_converter_s`、`sfm_total_s`）
+- 注册帧数 `registered_frames`
+- 是否生成轨迹图 `trajectory_png`

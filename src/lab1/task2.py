@@ -7,8 +7,15 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+from lab1.colmap_utils import (
+    require_tool,
+    run_cmd,
+    run_feature_extractor,
+    run_model_converter,
+    run_sequential_matcher,
+)
 from lab1.logging_utils import print_timing_summary, timed_block, write_timing_csv
-from lab1.task1 import Task1Error, _format_float_tag, _has_any_frames, _quat_to_rot, _require_tool, _run_cmd
+from lab1.task1 import Task1Error, _format_float_tag, _has_any_frames, _quat_to_rot
 
 TIMING_FILENAME = "timing.csv"
 
@@ -103,25 +110,22 @@ def _run_colmap_subset(
 
     timings = {} if timings is None else timings
     with timed_block("feature_extractor", timings):
-        _run_cmd(
-            [
-                colmap_bin,
-                "feature_extractor",
-                "--database_path",
-                str(db_path),
-                "--image_path",
-                str(images_dir),
-                "--ImageReader.single_camera",
-                "1",
-                "--ImageReader.camera_model",
-                "PINHOLE",
-            ],
+        run_feature_extractor(
+            colmap_bin=colmap_bin,
+            db_path=db_path,
+            images_dir=images_dir,
             dry_run=dry_run,
+            error_cls=Task1Error,
         )
     with timed_block("sequential_matcher", timings):
-        _run_cmd([colmap_bin, "sequential_matcher", "--database_path", str(db_path)], dry_run=dry_run)
+        run_sequential_matcher(
+            colmap_bin=colmap_bin,
+            db_path=db_path,
+            dry_run=dry_run,
+            error_cls=Task1Error,
+        )
     with timed_block("mapper", timings):
-        _run_cmd(
+        run_cmd(
             [
                 colmap_bin,
                 "mapper",
@@ -133,23 +137,17 @@ def _run_colmap_subset(
                 str(sparse_root),
             ],
             dry_run=dry_run,
+            error_cls=Task1Error,
         )
     model_dir = sparse_root / "0"
     if not dry_run and not model_dir.exists():
         raise Task1Error(f"COLMAP mapper produced no model under: {model_dir}")
     with timed_block("model_converter", timings):
-        _run_cmd(
-            [
-                colmap_bin,
-                "model_converter",
-                "--input_path",
-                str(model_dir),
-                "--output_path",
-                str(model_dir),
-                "--output_type",
-                "TXT",
-            ],
+        run_model_converter(
+            colmap_bin=colmap_bin,
+            model_dir=model_dir,
             dry_run=dry_run,
+            error_cls=Task1Error,
         )
     return model_dir
 
@@ -249,7 +247,7 @@ def run_task2(cfg: Task2Config) -> int:
             f"Run: uv run lab1 task1 --videos S1-2 --fps {cfg.source_fps:g} --stage all"
         )
     if not cfg.dry_run and cfg.stage in {"all", "sfm"}:
-        _require_tool(cfg.colmap_bin)
+        require_tool(cfg.colmap_bin, error_cls=Task1Error)
 
     all_frames = sorted([p.name for p in full_images_dir.glob("*.jpg")])
     if len(all_frames) < 10:

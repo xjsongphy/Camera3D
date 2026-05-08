@@ -4,13 +4,19 @@ import csv
 import shutil
 import subprocess
 from dataclasses import dataclass
-from collections import deque
 from pathlib import Path
 import re
 
 import matplotlib.pyplot as plt
 import numpy as np
 
+from lab1.colmap_utils import (
+    require_tool,
+    run_cmd,
+    run_feature_extractor,
+    run_model_converter,
+    run_sequential_matcher,
+)
 from lab1.logging_utils import print_timing_summary, timed_block, write_timing_csv
 
 
@@ -37,36 +43,6 @@ class Task1Error(RuntimeError):
 
 FRAME_MAP_FILENAME = "frame_map.csv"
 TIMING_FILENAME = "timing.csv"
-
-
-def _run_cmd(cmd: list[str], dry_run: bool = False) -> None:
-    print("$", " ".join(cmd))
-    if dry_run:
-        return
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-    )
-    tail: deque[str] = deque(maxlen=120)
-    assert proc.stdout is not None
-    for line in proc.stdout:
-        print(line, end="")
-        tail.append(line.rstrip("\n"))
-    return_code = proc.wait()
-    if return_code != 0:
-        log_tail = "\n".join(tail)
-        raise Task1Error(
-            f"Command failed with exit code {return_code}: {' '.join(cmd)}\n"
-            f"Last output lines:\n{log_tail}"
-        )
-
-
-def _require_tool(tool_name: str) -> None:
-    if shutil.which(tool_name) is None:
-        raise Task1Error(f"Required tool not found in PATH: {tool_name}")
 
 
 def _probe_video_fps(video_path: Path) -> float:
@@ -149,7 +125,7 @@ def _extract_frames(
         "2",
         output_pattern,
     ]
-    _run_cmd(cmd, dry_run=dry_run)
+    run_cmd(cmd, dry_run=dry_run, error_cls=Task1Error)
     if dry_run:
         return
 
@@ -182,35 +158,24 @@ def _run_colmap(
 
     timings = {} if timings is None else timings
     with timed_block("feature_extractor", timings):
-        _run_cmd(
-            [
-                colmap_bin,
-                "feature_extractor",
-                "--database_path",
-                str(db_path),
-                "--image_path",
-                str(images_dir),
-                "--ImageReader.single_camera",
-                "1",
-                "--ImageReader.camera_model",
-                "PINHOLE",
-            ],
+        run_feature_extractor(
+            colmap_bin=colmap_bin,
+            db_path=db_path,
+            images_dir=images_dir,
             dry_run=dry_run,
+            error_cls=Task1Error,
         )
 
     with timed_block("sequential_matcher", timings):
-        _run_cmd(
-            [
-                colmap_bin,
-                "sequential_matcher",
-                "--database_path",
-                str(db_path),
-            ],
+        run_sequential_matcher(
+            colmap_bin=colmap_bin,
+            db_path=db_path,
             dry_run=dry_run,
+            error_cls=Task1Error,
         )
 
     with timed_block("hierarchical_mapper", timings):
-        _run_cmd(
+        run_cmd(
             [
                 colmap_bin,
                 "hierarchical_mapper",
@@ -222,6 +187,7 @@ def _run_colmap(
                 str(sparse_root),
             ],
             dry_run=dry_run,
+            error_cls=Task1Error,
         )
 
     if dry_run:
@@ -232,18 +198,11 @@ def _run_colmap(
         raise Task1Error(f"COLMAP hierarchical_mapper produced no model under: {sparse_root}")
 
     with timed_block("model_converter", timings):
-        _run_cmd(
-            [
-                colmap_bin,
-                "model_converter",
-                "--input_path",
-                str(model_dir),
-                "--output_path",
-                str(model_dir),
-                "--output_type",
-                "TXT",
-            ],
+        run_model_converter(
+            colmap_bin=colmap_bin,
+            model_dir=model_dir,
             dry_run=dry_run,
+            error_cls=Task1Error,
         )
 
     model_dir = _materialize_canonical_model_dir(model_dir, sparse_root / "0")
@@ -649,9 +608,9 @@ def run_task1(cfg: Task1Config) -> int:
 
     if not cfg.dry_run:
         if cfg.stage in {"all", "extract"}:
-            _require_tool(cfg.ffmpeg_bin)
+            require_tool(cfg.ffmpeg_bin, error_cls=Task1Error)
         if cfg.stage in {"all", "sfm"}:
-            _require_tool(cfg.colmap_bin)
+            require_tool(cfg.colmap_bin, error_cls=Task1Error)
 
     def _finalize_case_timing(case_name: str, case_root: Path, param_tag: str, timings: dict[str, float]) -> None:
         if not cfg.dry_run:
