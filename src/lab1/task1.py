@@ -20,7 +20,6 @@ class Task1Config:
     fps: float
     colmap_bin: str
     ffmpeg_bin: str
-    skip_sfm: bool
     force: bool
     dry_run: bool
     videos: list[str] | None = None
@@ -287,16 +286,11 @@ def run_task1(cfg: Task1Config) -> int:
         raise Task1Error(f"Unsupported stage: {cfg.stage}. Choose from all|extract|sfm")
     if cfg.fps <= 0:
         raise Task1Error(f"fps must be positive, got {cfg.fps}")
-    if cfg.skip_sfm and cfg.stage == "sfm":
-        raise Task1Error("--skip-sfm conflicts with --stage sfm. Use --stage extract or --stage all.")
-    if cfg.skip_sfm and cfg.stage == "all":
-        print("Warning: --skip-sfm is deprecated; treating as --stage extract.")
-        cfg.stage = "extract"
 
     if not cfg.dry_run:
         if cfg.stage in {"all", "extract"}:
             _require_tool(cfg.ffmpeg_bin)
-        if cfg.stage in {"all", "sfm"} and not cfg.skip_sfm:
+        if cfg.stage in {"all", "sfm"}:
             _require_tool(cfg.colmap_bin)
 
     for video_name in selected_videos:
@@ -338,7 +332,7 @@ def run_task1(cfg: Task1Config) -> int:
                 )
             print(f"Reuse extracted frames: {images_dir}")
 
-        if cfg.skip_sfm or cfg.stage == "extract":
+        if cfg.stage == "extract":
             print("Skip SfM for extract stage.")
             continue
 

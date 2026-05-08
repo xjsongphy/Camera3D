@@ -52,7 +52,6 @@ def run_task1_entry(args: argparse.Namespace) -> int:
         fps=args.fps,
         colmap_bin=args.colmap_bin,
         ffmpeg_bin=args.ffmpeg_bin,
-        skip_sfm=args.skip_sfm,
         force=args.force,
         dry_run=args.dry_run,
         videos=args.videos,
@@ -92,11 +91,6 @@ def build_parser() -> argparse.ArgumentParser:
     task1_parser.add_argument("--fps", type=float, default=2.0, help="frame sampling rate for task1")
     task1_parser.add_argument("--colmap-bin", default="colmap", help="colmap executable name/path for task1")
     task1_parser.add_argument("--ffmpeg-bin", default="ffmpeg", help="ffmpeg executable name/path for task1")
-    task1_parser.add_argument(
-        "--skip-sfm",
-        action="store_true",
-        help="(deprecated) task1 only: skip SfM, equivalent to --stage extract",
-    )
     task1_parser.add_argument("--force", action="store_true", help="overwrite previous task1 outputs")
     task1_parser.add_argument("--dry-run", action="store_true", help="print commands without executing for task1")
     task1_parser.add_argument(
@@ -136,11 +130,6 @@ def build_parser() -> argparse.ArgumentParser:
                 sub.add_argument("--fps", type=float, default=2.0, help="frame sampling rate for task1")
                 sub.add_argument("--colmap-bin", default="colmap", help="colmap executable name/path for task1")
                 sub.add_argument("--ffmpeg-bin", default="ffmpeg", help="ffmpeg executable name/path for task1")
-                sub.add_argument(
-                    "--skip-sfm",
-                    action="store_true",
-                    help="(deprecated) task1 only: skip SfM, equivalent to --stage extract",
-                )
                 sub.add_argument("--force", action="store_true", help="overwrite previous task1 outputs")
                 sub.add_argument("--dry-run", action="store_true", help="print commands without executing for task1")
                 sub.add_argument(

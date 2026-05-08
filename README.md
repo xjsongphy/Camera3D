@@ -38,6 +38,26 @@ sudo apt update
 sudo apt install -y colmap ffmpeg
 ```
 
+Windows：
+
+1. 安装 FFmpeg：
+   - 打开 <https://ffmpeg.org/download.html>
+   - 在 `Windows EXE Files` 下选择一个预编译包提供方（常用 `gyan.dev`）
+   - 下载最新 `release` 压缩包并解压到例如 `C:\ffmpeg`
+   - 将 `C:\ffmpeg\bin` 添加到系统环境变量 `Path`
+2. 安装 COLMAP：
+   - 打开 COLMAP 官方安装页 <https://colmap.github.io/install.html>
+   - 按文档提供的 Windows 预编译链接下载：<https://demuc.de/colmap/>
+   - 解压到例如 `C:\colmap`
+   - 可直接双击 `COLMAP.bat` 启动图形界面
+   - 如需命令行使用，可将 `C:\colmap` 添加到 `Path`
+3. 打开新的 `PowerShell`，执行：
+
+```powershell
+colmap -h
+ffmpeg -version
+```
+
 安装后自检：
 
 ```bash
@@ -103,7 +123,6 @@ outputs/lab1/task1/<video_name>_<param_tag>/
 可选参数：
 
 - `--fps`: 抽帧帧率（默认 `2.0`）
-- `--skip-sfm`: 兼容旧参数（已弃用），等价于 `--stage extract`
 - `--stage`: 控制阶段，`all`（默认）/`extract`（仅抽帧）/`sfm`（仅跑SfM，复用已有抽帧）
 - `--colmap-bin`: COLMAP 可执行文件路径（默认 `colmap`）
 - `--ffmpeg-bin`: ffmpeg 可执行文件路径（默认 `ffmpeg`）
