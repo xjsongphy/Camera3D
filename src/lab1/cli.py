@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from lab1.task1 import Task1Config, Task1Error, run_task1
+
 LAB1_ROOT = Path("lab1")
 OUTPUT_ROOT = Path("outputs/lab1")
 
@@ -32,29 +34,32 @@ def _ensure_output_dir(task_name: str) -> Path:
     return path
 
 
-def run_task(task_name: str) -> int:
-    task = _normalize_task(task_name)
-    if task not in TASK_HELP:
-        print(f"Unsupported task: {task_name}")
-        print("Supported tasks:", ", ".join(TASK_HELP.keys()))
-        print("Aliases:", ", ".join(f"{k}->{v}" for k, v in ALIASES.items()))
-        return 2
-
+def _run_placeholder(task: str) -> int:
     out_dir = _ensure_output_dir(task)
     print(f"Running {task}: {TASK_HELP[task]}")
     print(f"Lab materials: {LAB1_ROOT.resolve()}")
     print(f"Output directory: {out_dir.resolve()}")
-
-    if task == "task1":
-        print("Next step: extract frames from S1 videos and run SfM sparse reconstruction.")
-    elif task == "task2":
-        print("Next step: select 3 sub-sequences from S1-2 and compare full-vs-subset SfM trajectories.")
-    elif task == "task3":
-        print("Next step: run dynamic-scene baseline and try a masking/improvement strategy.")
-    elif task == "task4":
-        print("Next step: compute no-GT pose quality metrics for annotations/01~10.")
-
+    print("This task is not implemented yet.")
     return 0
+
+
+def run_task1_entry(args: argparse.Namespace) -> int:
+    out_dir = _ensure_output_dir("task1")
+    cfg = Task1Config(
+        lab1_root=LAB1_ROOT,
+        output_root=out_dir,
+        fps=args.fps,
+        colmap_bin=args.colmap_bin,
+        ffmpeg_bin=args.ffmpeg_bin,
+        skip_sfm=args.skip_sfm,
+        force=args.force,
+        dry_run=args.dry_run,
+    )
+    try:
+        return run_task1(cfg)
+    except Task1Error as exc:
+        print(f"Task1 failed: {exc}")
+        return 2
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -63,13 +68,30 @@ def build_parser() -> argparse.ArgumentParser:
         "task",
         help="task id: task1|task2|task3|task4 (or alias: q1|q2|q3|q4)",
     )
+    parser.add_argument("--fps", type=float, default=2.0, help="frame sampling rate for task1")
+    parser.add_argument("--colmap-bin", default="colmap", help="colmap executable name/path for task1")
+    parser.add_argument("--ffmpeg-bin", default="ffmpeg", help="ffmpeg executable name/path for task1")
+    parser.add_argument("--skip-sfm", action="store_true", help="only extract frames for task1")
+    parser.add_argument("--force", action="store_true", help="overwrite previous task1 outputs")
+    parser.add_argument("--dry-run", action="store_true", help="print commands without executing for task1")
     return parser
 
 
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
-    raise SystemExit(run_task(args.task))
+    task = _normalize_task(args.task)
+
+    if task not in TASK_HELP:
+        print(f"Unsupported task: {args.task}")
+        print("Supported tasks:", ", ".join(TASK_HELP.keys()))
+        print("Aliases:", ", ".join(f"{k}->{v}" for k, v in ALIASES.items()))
+        raise SystemExit(2)
+
+    if task == "task1":
+        raise SystemExit(run_task1_entry(args))
+
+    raise SystemExit(_run_placeholder(task))
 
 
 if __name__ == "__main__":
