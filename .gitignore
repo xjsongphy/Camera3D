@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.venv/
+
+# macOS
+.DS_Store
+
+# uv
+.uv/
+uv.lock
+
+# Course large files / private data
+slides/
+assets/
+records/
+
+# Generated outputs
+outputs/
