@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
+from lab1.logging_utils import build_timestamped_log_path, tee_console_output
 from lab1.task1 import Task1Config, Task1Error, run_task1
 from lab1.task2 import Task2Config, run_task2
 
@@ -33,6 +35,16 @@ def _ensure_output_dir(task_name: str) -> Path:
     path = OUTPUT_ROOT / task_name
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def _resolve_task_for_logging(argv: list[str]) -> str:
+    if not argv:
+        return "cli"
+    first = argv[0].strip()
+    if not first or first.startswith("-"):
+        return "cli"
+    task = _normalize_task(first)
+    return task if task in TASK_HELP else "cli"
 
 
 def _run_placeholder(task: str) -> int:
@@ -162,9 +174,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
-    parser = build_parser()
-    args = parser.parse_args()
-    raise SystemExit(args.handler(args))
+    task_name = _resolve_task_for_logging(sys.argv[1:])
+    log_root = _ensure_output_dir(task_name) / "logs"
+    log_path = build_timestamped_log_path(log_root, task_name)
+
+    with tee_console_output(log_path):
+        print(f"Log file: {log_path.resolve()}")
+        parser = build_parser()
+        args = parser.parse_args()
+        raise SystemExit(args.handler(args))
 
 
 if __name__ == "__main__":
