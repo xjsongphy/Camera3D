@@ -319,7 +319,7 @@ def run_task1(cfg: Task1Config) -> int:
             case_root.mkdir(parents=True, exist_ok=True)
 
         if cfg.stage in {"all", "extract"}:
-            if cfg.stage == "extract" and not cfg.force and _has_any_frames(images_dir):
+            if not cfg.force and _has_any_frames(images_dir):
                 print(f"Reuse extracted frames: {images_dir}")
             else:
                 _extract_frames(
