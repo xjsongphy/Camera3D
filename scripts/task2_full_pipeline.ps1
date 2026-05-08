@@ -1,5 +1,4 @@
 param(
-    [double]$SourceFps = 30.0,
     [switch]$Force
 )
 
@@ -33,24 +32,21 @@ function Test-Task1ResultReady {
 }
 
 Write-Host "Running Task2 full pipeline for S1-2."
-Write-Host "Source FPS: $SourceFps"
+Write-Host "Source FPS: 30"
 Write-Host "Force: $($Force.IsPresent)"
 
 $commonArgs = @()
 if ($Force) {
     $commonArgs += "--force"
 }
+$SourceFps = 30.0
 $paramTag = Format-ParamTag -Value $SourceFps
 $task1CaseRoot = Join-Path "outputs/lab1/task1" "S1-2_$paramTag"
 
 Write-Host ""
 Write-Host "=== Step 1/4: Build full-sequence task1 result for S1-2 ==="
 if ($Force -or !(Test-Task1ResultReady -CaseRoot $task1CaseRoot)) {
-    $builderScript = Join-Path "scripts" "task1_build_full_result.ps1"
-    if (!(Test-Path $builderScript)) {
-        throw "Missing task1 builder script: $builderScript"
-    }
-    & $builderScript -Video "S1-2" -Fps $SourceFps -Force:$Force
+    uv run lab1 task1 --videos S1-2 --fps $SourceFps --stage all @commonArgs
 } else {
     Write-Host "Reuse existing task1 result: $task1CaseRoot"
 }

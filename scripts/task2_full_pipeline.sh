@@ -4,8 +4,12 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-SOURCE_FPS="${1:-30}"
-FORCE_FLAG="${2:-}"
+SOURCE_FPS="30"
+FORCE_FLAG="${1:-}"
+if [[ -n "$FORCE_FLAG" && "$FORCE_FLAG" != "--force" ]]; then
+  echo "Usage: bash ./scripts/task2_full_pipeline.sh [--force]" >&2
+  exit 1
+fi
 
 format_param_tag() {
   local value="$1"
@@ -45,12 +49,7 @@ TASK1_CASE_ROOT="outputs/lab1/task1/S1-2_${PARAM_TAG}"
 echo
 echo "=== Step 1/4: Build full-sequence task1 result for S1-2 ==="
 if [[ "$FORCE_FLAG" == "--force" ]] || ! task1_result_ready "$TASK1_CASE_ROOT"; then
-  BUILDER_SCRIPT="scripts/task1_build_full_result.sh"
-  if [[ ! -f "$BUILDER_SCRIPT" ]]; then
-    echo "Missing task1 builder script: $BUILDER_SCRIPT" >&2
-    exit 1
-  fi
-  bash "$BUILDER_SCRIPT" "S1-2" "$SOURCE_FPS" "$FORCE_FLAG"
+  uv run lab1 task1 --videos S1-2 --fps "$SOURCE_FPS" --stage all "${EXTRA_ARGS[@]}"
 else
   echo "Reuse existing task1 result: ${TASK1_CASE_ROOT}"
 fi
