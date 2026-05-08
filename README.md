@@ -55,7 +55,7 @@ uv run lab1 task1 --colmap-bin /your/path/to/colmap
 
 ```bash
 uv run lab1 task1 [--fps 2] [--force]
-uv run lab1 task2
+uv run lab1 task2 [--source-fps 4] [--force]
 uv run lab1 task3
 uv run lab1 task4
 ```
@@ -136,5 +136,52 @@ uv run lab1 task1 --videos S1-1 --fps 4 --stage sfm --force
 
 ## 当前范围
 
-- 已实现：Lab1 题目一
-- 未实现：Lab1 题目二/三/四 与 Lab2
+- 已实现：Lab1 题目一、题目二
+- 未实现：Lab1 题目三/四 与 Lab2
+
+## 题目二（已实现）
+
+`task2` 针对 `S1-2` 执行“三段子序列 × 两种位姿来源”的对比：
+
+1. 方法 A：从 `task1` 的完整序列重建中截取子序列位姿；
+2. 方法 B：仅用该子序列帧重新跑一遍 SfM；
+3. 对齐与对比：用 Sim(3)（Umeyama）将方法 B 对齐到方法 A，并计算 ATE，导出叠加轨迹图。
+
+输入依赖（先运行 task1）：
+
+```bash
+uv run lab1 task1 --videos S1-2 --fps 4 --stage all
+```
+
+运行 task2：
+
+```bash
+uv run lab1 task2 --source-fps 4 --stage all
+```
+
+分阶段运行（避免重复）：
+
+```bash
+# 准备三段子序列（复制子帧 + 方法A位姿子集）
+uv run lab1 task2 --source-fps 4 --stage prepare
+
+# 仅跑方法B的 SfM
+uv run lab1 task2 --source-fps 4 --stage sfm
+
+# 仅做对齐与ATE分析
+uv run lab1 task2 --source-fps 4 --stage analyze
+```
+
+输出目录：
+
+```txt
+outputs/lab1/task2/S1-2_fps4/
+├── seq01_front_1over3_000001-000105/
+│   ├── method_a/sparse/0/{images.txt,cameras.txt,points3D.txt}
+│   ├── method_b/{images/,database.db,sparse/0/...}
+│   ├── trajectory_overlay.png
+│   └── metrics.txt
+├── seq02_middle_1over2_000079-000235/...
+├── seq03_back_1over4_000235-000312/...
+└── summary.csv
+```

@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 from lab1.task1 import Task1Config, Task1Error, run_task1
+from lab1.task2 import Task2Config, run_task2
 
 LAB1_ROOT = Path("lab1")
 OUTPUT_ROOT = Path("outputs/lab1")
@@ -64,6 +65,25 @@ def run_task1_entry(args: argparse.Namespace) -> int:
         return 2
 
 
+def run_task2_entry(args: argparse.Namespace) -> int:
+    out_dir = _ensure_output_dir("task2")
+    cfg = Task2Config(
+        lab1_root=LAB1_ROOT,
+        task1_output_root=OUTPUT_ROOT / "task1",
+        output_root=out_dir,
+        source_fps=args.source_fps,
+        colmap_bin=args.colmap_bin,
+        force=args.force,
+        dry_run=args.dry_run,
+        stage=args.stage,
+    )
+    try:
+        return run_task2(cfg)
+    except Task1Error as exc:
+        print(f"Task2 failed: {exc}")
+        return 2
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Camera3D Lab1 task runner")
     subparsers = parser.add_subparsers(dest="task", required=True)
@@ -92,7 +112,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     task1_parser.set_defaults(handler=run_task1_entry)
 
-    for task in ("task2", "task3", "task4"):
+    task2_parser = subparsers.add_parser("task2", help=TASK_HELP["task2"])
+    task2_parser.add_argument("--source-fps", type=float, default=4.0, help="use task1 S1-2 results from this fps tag")
+    task2_parser.add_argument("--colmap-bin", default="colmap", help="colmap executable name/path for task2")
+    task2_parser.add_argument("--force", action="store_true", help="overwrite previous task2 outputs")
+    task2_parser.add_argument("--dry-run", action="store_true", help="print commands without executing for task2")
+    task2_parser.add_argument(
+        "--stage",
+        default="all",
+        choices=["all", "prepare", "sfm", "analyze"],
+        help="task2 stage control: all (default), prepare only, sfm only, or analyze only",
+    )
+    task2_parser.set_defaults(handler=run_task2_entry)
+
+    for task in ("task3", "task4"):
         sub = subparsers.add_parser(task, help=TASK_HELP[task])
         sub.set_defaults(handler=lambda _args, task_name=task: _run_placeholder(task_name))
 
@@ -122,6 +155,18 @@ def build_parser() -> argparse.ArgumentParser:
                     help="task1 only: choose subset videos, e.g. --videos S1-1 S1-2",
                 )
                 sub.set_defaults(handler=run_task1_entry)
+            elif target == "task2":
+                sub.add_argument("--source-fps", type=float, default=4.0, help="use task1 S1-2 results from this fps tag")
+                sub.add_argument("--colmap-bin", default="colmap", help="colmap executable name/path for task2")
+                sub.add_argument("--force", action="store_true", help="overwrite previous task2 outputs")
+                sub.add_argument("--dry-run", action="store_true", help="print commands without executing for task2")
+                sub.add_argument(
+                    "--stage",
+                    default="all",
+                    choices=["all", "prepare", "sfm", "analyze"],
+                    help="task2 stage control: all (default), prepare only, sfm only, or analyze only",
+                )
+                sub.set_defaults(handler=run_task2_entry)
             else:
                 sub.set_defaults(handler=lambda _args, task_name=target: _run_placeholder(task_name))
     return parser
