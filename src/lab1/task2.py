@@ -30,6 +30,7 @@ class Task2Config:
     force: bool
     dry_run: bool
     stage: str = "all"
+    subseq_specs: tuple[str, ...] = ()
 
 
 def _parse_colmap_poses(images_txt: Path) -> dict[str, tuple[np.ndarray, np.ndarray]]:
@@ -228,6 +229,35 @@ def _default_subseq_ranges(n: int) -> list[tuple[int, int, str]]:
     return fixed
 
 
+def _parse_subseq_specs(specs: tuple[str, ...], n: int) -> list[tuple[int, int, str]]:
+    parsed: list[tuple[int, int, str]] = []
+    seen_names: set[str] = set()
+    for raw in specs:
+        parts = raw.split(":")
+        if len(parts) != 3:
+            raise Task1Error(
+                f"Invalid --subseq value: {raw}. Expected format START:END:NAME "
+                "(1-based inclusive frame indices)."
+            )
+        start_s, end_s, name = parts
+        if not start_s.isdigit() or not end_s.isdigit():
+            raise Task1Error(f"Invalid --subseq value: {raw}. START and END must be positive integers.")
+        start = int(start_s)
+        end = int(end_s)
+        if start < 1 or end < 1 or start > end:
+            raise Task1Error(f"Invalid --subseq range: {raw}. Require 1 <= START <= END.")
+        if end > n:
+            raise Task1Error(f"Invalid --subseq range: {raw}. END exceeds available frames ({n}).")
+        clean_name = name.strip()
+        if not clean_name:
+            raise Task1Error(f"Invalid --subseq value: {raw}. NAME must be non-empty.")
+        if clean_name in seen_names:
+            raise Task1Error(f"Duplicate --subseq name: {clean_name}")
+        seen_names.add(clean_name)
+        parsed.append((start - 1, end, clean_name))
+    return parsed
+
+
 def run_task2(cfg: Task2Config) -> int:
     if cfg.source_fps <= 0:
         raise Task1Error(f"source_fps must be positive, got {cfg.source_fps}")
@@ -259,7 +289,8 @@ def run_task2(cfg: Task2Config) -> int:
         task2_root.mkdir(parents=True, exist_ok=True)
 
     summary_rows = []
-    for idx, (start, end, seq_name) in enumerate(_default_subseq_ranges(len(all_frames)), start=1):
+    subseq_ranges = _parse_subseq_specs(cfg.subseq_specs, len(all_frames)) if cfg.subseq_specs else _default_subseq_ranges(len(all_frames))
+    for idx, (start, end, seq_name) in enumerate(subseq_ranges, start=1):
         timings: dict[str, float] = {}
         subset_names = all_frames[start:end]
         keep = set(subset_names)
@@ -329,6 +360,9 @@ def run_task2(cfg: Task2Config) -> int:
                 scale, rot, trans = _umeyama_sim3(b_xyz, a_xyz)
                 b_aligned = _apply_sim3(b_xyz, scale, rot, trans)
                 ate_val = _ate(a_xyz, b_aligned)
+                endpoint_distance = float(np.linalg.norm(a_xyz[-1] - a_xyz[0]))
+                path_length = float(np.linalg.norm(np.diff(a_xyz, axis=0), axis=1).sum()) if len(a_xyz) >= 2 else 0.0
+                endpoint_ratio = endpoint_distance / path_length if path_length > 0 else 0.0
                 _plot_overlay(a_xyz, b_aligned, overlay_png, f"{sub_tag} | source_fps={cfg.source_fps:g} | ATE={ate_val:.4f}")
 
                 row = {
@@ -337,6 +371,9 @@ def run_task2(cfg: Task2Config) -> int:
                     "common_registered": len(common),
                     "ate": ate_val,
                     "scale": scale,
+                    "endpoint_distance": endpoint_distance,
+                    "path_length": path_length,
+                    "endpoint_ratio": endpoint_ratio,
                 }
                 summary_rows.append(row)
                 metrics_txt.write_text(
@@ -347,6 +384,9 @@ def run_task2(cfg: Task2Config) -> int:
                             f"subset_frames={len(subset_names)}",
                             f"common_registered={len(common)}",
                             f"sim3_scale={scale:.8f}",
+                            f"endpoint_distance={endpoint_distance:.8f}",
+                            f"path_length={path_length:.8f}",
+                            f"endpoint_path_ratio={endpoint_ratio:.8f}",
                             f"ate={ate_val:.8f}",
                         ]
                     )
@@ -362,10 +402,11 @@ def run_task2(cfg: Task2Config) -> int:
 
     if cfg.stage in {"all", "analyze"} and not cfg.dry_run:
         summary_path = task2_root / "summary.csv"
-        lines = ["subseq,subset_frames,common_registered,ate,scale"]
+        lines = ["subseq,subset_frames,common_registered,ate,scale,endpoint_distance,path_length,endpoint_ratio"]
         for r in summary_rows:
             lines.append(
-                f"{r['subseq']},{r['subset_frames']},{r['common_registered']},{r['ate']:.8f},{r['scale']:.8f}"
+                f"{r['subseq']},{r['subset_frames']},{r['common_registered']},{r['ate']:.8f},"
+                f"{r['scale']:.8f},{r['endpoint_distance']:.8f},{r['path_length']:.8f},{r['endpoint_ratio']:.8f}"
             )
         summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         print(f"\nSaved summary: {summary_path}")

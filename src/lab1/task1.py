@@ -35,6 +35,7 @@ class Task1Config:
     videos: list[str] | None = None
     stage: str = "all"
     mode: str = "run"
+    direction_arrows: int = 12
 
 
 class Task1Error(RuntimeError):
@@ -266,8 +267,9 @@ def _quat_to_rot(qw: float, qx: float, qy: float, qz: float) -> np.ndarray:
     )
 
 
-def _parse_image_centers(images_txt: Path) -> tuple[np.ndarray, list[str]]:
+def _parse_image_poses(images_txt: Path) -> tuple[np.ndarray, np.ndarray, list[str]]:
     centers: list[np.ndarray] = []
+    forward_dirs: list[np.ndarray] = []
     names: list[str] = []
     with images_txt.open("r", encoding="utf-8") as f:
         while True:
@@ -291,8 +293,13 @@ def _parse_image_centers(images_txt: Path) -> tuple[np.ndarray, list[str]]:
             r = _quat_to_rot(qw, qx, qy, qz)
             t = np.array([tx, ty, tz], dtype=float)
             c = -r.T @ t
+            forward = r.T @ np.array([0.0, 0.0, 1.0], dtype=float)
+            forward_norm = np.linalg.norm(forward)
+            if forward_norm > 1e-12:
+                forward = forward / forward_norm
 
             centers.append(c)
+            forward_dirs.append(forward)
             names.append(name)
             # COLMAP images.txt stores a second line of POINTS2D per image entry.
             # Consume it explicitly to avoid accidental mis-parsing.
@@ -303,14 +310,53 @@ def _parse_image_centers(images_txt: Path) -> tuple[np.ndarray, list[str]]:
 
     order = np.argsort(np.array(names))
     centers_arr = np.array(centers)[order]
+    forward_arr = np.array(forward_dirs)[order]
     names_sorted = [names[i] for i in order]
-    return centers_arr, names_sorted
+    return centers_arr, forward_arr, names_sorted
 
 
-def _plot_trajectory(centers: np.ndarray, out_path: Path, title: str) -> None:
+def _parse_image_centers(images_txt: Path) -> tuple[np.ndarray, list[str]]:
+    centers, _forward_dirs, names = _parse_image_poses(images_txt)
+    return centers, names
+
+
+def _select_direction_indices(num_points: int, arrow_count: int) -> np.ndarray:
+    if num_points <= 0:
+        raise Task1Error("Cannot select direction arrows from an empty trajectory.")
+    if arrow_count <= 0:
+        return np.array([], dtype=int)
+    count = min(num_points, arrow_count)
+    return np.unique(np.round(np.linspace(0, num_points - 1, count)).astype(int))
+
+
+def _plot_trajectory(
+    centers: np.ndarray,
+    out_path: Path,
+    title: str,
+    forward_dirs: np.ndarray | None = None,
+    direction_arrows: int = 0,
+) -> None:
     fig = plt.figure(figsize=(8, 6))
     ax = fig.add_subplot(111, projection="3d")
     ax.plot(centers[:, 0], centers[:, 1], centers[:, 2], marker="o", markersize=2)
+    if forward_dirs is not None and direction_arrows > 0:
+        indices = _select_direction_indices(len(centers), direction_arrows)
+        sampled_centers = centers[indices]
+        sampled_dirs = forward_dirs[indices]
+        axis_span = np.ptp(centers, axis=0)
+        arrow_length = max(float(np.max(axis_span)) * 0.08, 1.0)
+        ax.quiver(
+            sampled_centers[:, 0],
+            sampled_centers[:, 1],
+            sampled_centers[:, 2],
+            sampled_dirs[:, 0],
+            sampled_dirs[:, 1],
+            sampled_dirs[:, 2],
+            length=arrow_length,
+            normalize=True,
+            color="tab:red",
+            linewidth=1.2,
+        )
     ax.set_title(title)
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
@@ -438,6 +484,48 @@ def _normalize_video_name(name: str) -> str:
 def _parse_registered_pose_map(images_txt: Path) -> dict[str, np.ndarray]:
     centers, names = _parse_image_centers(images_txt)
     return {name: center for name, center in zip(names, centers, strict=True)}
+
+
+def _plot_existing_case(
+    case_root: Path,
+    case_name: str,
+    fps: float,
+    direction_arrows: int,
+    force: bool,
+    dry_run: bool,
+    timings: dict[str, float],
+) -> None:
+    images_txt = case_root / "sparse" / "0" / "images.txt"
+    cameras_txt = case_root / "sparse" / "0" / "cameras.txt"
+    points3d_txt = case_root / "sparse" / "0" / "points3D.txt"
+    if not images_txt.exists() or not cameras_txt.exists() or not points3d_txt.exists():
+        raise Task1Error(f"Missing sparse model text files under {case_root / 'sparse' / '0'}")
+
+    trajectory_path = case_root / "trajectory.png"
+    direction_path = case_root / "trajectory_with_directions.png"
+    if dry_run:
+        print(f"Would redraw trajectory plots from: {images_txt}")
+        return
+    if trajectory_path.exists() and direction_path.exists() and not force:
+        print(f"Reuse trajectory plots: {case_root}")
+        return
+
+    with timed_block("plot", timings):
+        centers, forward_dirs, _names = _parse_image_poses(images_txt)
+        _plot_trajectory(
+            centers,
+            trajectory_path,
+            f"{case_name} Camera Trajectory (fps={fps:g})",
+        )
+        _plot_trajectory(
+            centers,
+            direction_path,
+            f"{case_name} Camera Trajectory + Viewing Directions (fps={fps:g})",
+            forward_dirs=forward_dirs,
+            direction_arrows=direction_arrows,
+        )
+    print(f"Saved trajectory: {trajectory_path}")
+    print(f"Saved trajectory with directions: {direction_path}")
 
 
 def _collect_existing_case_trajectories(
@@ -586,6 +674,38 @@ def _run_task1_merge(cfg: Task1Config, selected_videos: list[str], strict: bool)
     return 0
 
 
+def _run_task1_plot(cfg: Task1Config, selected_videos: list[str]) -> int:
+    if cfg.stage != "all":
+        raise Task1Error("task1 plot does not support --stage; it only reads existing outputs.")
+    if cfg.fps <= 0:
+        raise Task1Error(f"fps must be positive, got {cfg.fps}")
+
+    param_tag = _build_param_tag(cfg)
+    for video_name in selected_videos:
+        timings: dict[str, float] = {}
+        case_name = Path(video_name).stem
+        case_root = cfg.output_root / f"{case_name}_{param_tag}"
+        print(f"\n=== Task1 Plot / {case_name} / {param_tag} ===")
+        if not case_root.exists():
+            raise Task1Error(f"Task1 output not found: {case_root}")
+        _plot_existing_case(
+            case_root=case_root,
+            case_name=case_name,
+            fps=cfg.fps,
+            direction_arrows=cfg.direction_arrows,
+            force=cfg.force,
+            dry_run=cfg.dry_run,
+            timings=timings,
+        )
+        if not cfg.dry_run:
+            write_timing_csv(case_root / TIMING_FILENAME, timings)
+            print(f"Saved timing summary: {case_root / TIMING_FILENAME}")
+        print_timing_summary(f"Timing / {case_name} / {param_tag} / plot", timings)
+
+    print("\nTask1 plot completed.")
+    return 0
+
+
 def run_task1(cfg: Task1Config) -> int:
     videos_dir = cfg.lab1_root / "assets" / "videos"
     selected_videos = S1_VIDEOS if not cfg.videos else [_normalize_video_name(v) for v in cfg.videos]
@@ -599,6 +719,8 @@ def run_task1(cfg: Task1Config) -> int:
 
     if cfg.mode == "merge":
         return _run_task1_merge(cfg, selected_videos, strict=cfg.videos is not None)
+    if cfg.mode == "plot":
+        return _run_task1_plot(cfg, selected_videos)
     if cfg.mode != "run":
         raise Task1Error(f"Unsupported task1 mode: {cfg.mode}")
 
@@ -694,16 +816,15 @@ def run_task1(cfg: Task1Config) -> int:
             _finalize_case_timing(case_name, case_root, param_tag, timings)
             continue
 
-        images_txt = model_dir / "images.txt"
-        with timed_block("plot", timings):
-            centers, _ = _parse_image_centers(images_txt)
-            _plot_trajectory(
-                centers,
-                case_root / "trajectory.png",
-                f"{case_name} Camera Trajectory (fps={cfg.fps:g})",
-            )
-
-        print(f"Saved trajectory: {case_root / 'trajectory.png'}")
+        _plot_existing_case(
+            case_root=case_root,
+            case_name=case_name,
+            fps=cfg.fps,
+            direction_arrows=cfg.direction_arrows,
+            force=True,
+            dry_run=cfg.dry_run,
+            timings=timings,
+        )
         print(f"Sparse model text files: {model_dir}")
         _finalize_case_timing(case_name, case_root, param_tag, timings)
 

@@ -70,6 +70,7 @@ def run_task1_entry(args: argparse.Namespace) -> int:
         videos=args.videos,
         stage=args.stage,
         mode=args.mode,
+        direction_arrows=args.direction_arrows,
     )
     try:
         return run_task1(cfg)
@@ -89,6 +90,7 @@ def run_task2_entry(args: argparse.Namespace) -> int:
         force=args.force,
         dry_run=args.dry_run,
         stage=args.stage,
+        subseq_specs=tuple(args.subseq or ()),
     )
     try:
         return run_task2(cfg)
@@ -126,8 +128,8 @@ def build_parser() -> argparse.ArgumentParser:
         "mode",
         nargs="?",
         default="run",
-        choices=["run", "merge"],
-        help="task1 mode: run (default) or merge existing trajectories across fps",
+        choices=["run", "merge", "plot"],
+        help="task1 mode: run (default), merge existing trajectories across fps, or redraw plots from existing outputs",
     )
     task1_parser.add_argument("--fps", type=float, default=2.0, help="frame sampling rate for task1")
     task1_parser.add_argument("--colmap-bin", default="colmap", help="colmap executable name/path for task1")
@@ -145,6 +147,12 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="+",
         help="task1 only: choose subset videos, e.g. --videos S1-1 S1-2",
     )
+    task1_parser.add_argument(
+        "--direction-arrows",
+        type=int,
+        default=12,
+        help="number of camera-direction arrows to draw on the directional trajectory plot",
+    )
     task1_parser.set_defaults(handler=run_task1_entry)
 
     task2_parser = subparsers.add_parser("task2", help=TASK_HELP["task2"])
@@ -157,6 +165,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="all",
         choices=["all", "prepare", "sfm", "analyze"],
         help="task2 stage control: all (default), prepare only, sfm only, or analyze only",
+    )
+    task2_parser.add_argument(
+        "--subseq",
+        action="append",
+        help="optional custom subsequence in START:END:NAME format (1-based inclusive); repeatable",
     )
     task2_parser.set_defaults(handler=run_task2_entry)
 
@@ -190,8 +203,8 @@ def build_parser() -> argparse.ArgumentParser:
                     "mode",
                     nargs="?",
                     default="run",
-                    choices=["run", "merge"],
-                    help="task1 mode: run (default) or merge existing trajectories across fps",
+                    choices=["run", "merge", "plot"],
+                    help="task1 mode: run (default), merge existing trajectories across fps, or redraw plots from existing outputs",
                 )
                 sub.add_argument("--fps", type=float, default=2.0, help="frame sampling rate for task1")
                 sub.add_argument("--colmap-bin", default="colmap", help="colmap executable name/path for task1")
@@ -209,6 +222,12 @@ def build_parser() -> argparse.ArgumentParser:
                     nargs="+",
                     help="task1 only: choose subset videos, e.g. --videos S1-1 S1-2",
                 )
+                sub.add_argument(
+                    "--direction-arrows",
+                    type=int,
+                    default=12,
+                    help="number of camera-direction arrows to draw on the directional trajectory plot",
+                )
                 sub.set_defaults(handler=run_task1_entry)
             elif target == "task2":
                 sub.add_argument("--source-fps", type=float, default=4.0, help="use task1 S1-2 results from this fps tag")
@@ -220,6 +239,11 @@ def build_parser() -> argparse.ArgumentParser:
                     default="all",
                     choices=["all", "prepare", "sfm", "analyze"],
                     help="task2 stage control: all (default), prepare only, sfm only, or analyze only",
+                )
+                sub.add_argument(
+                    "--subseq",
+                    action="append",
+                    help="optional custom subsequence in START:END:NAME format (1-based inclusive); repeatable",
                 )
                 sub.set_defaults(handler=run_task2_entry)
             elif target == "task3":

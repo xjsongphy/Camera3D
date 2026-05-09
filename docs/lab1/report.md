@@ -29,6 +29,10 @@
 
 ![S1-3 fps collage](report_assets/task1/S1-3_fps_grid.png)
 
+### 30 fps 带方向轨迹图
+
+![Task1 30fps direction triptych](report_assets/task1/task1_30fps_direction_triptych.png)
+
 ### 合并图展示
 
 `S1-1` 的合并图显示，`8 fps`、`16 fps` 和 `30 fps` 在主干部分大体一致。
@@ -66,7 +70,7 @@
 
 ## 题目二：子序列位姿分析
 
-题目二以 `S1-2 @ 30 fps` 的完整重建结果作为参考。实现上，我采用两种方式构造同一段子序列的位姿：**Method A** 直接从完整序列的 `images.txt` 中裁出对应帧的位姿，作为参考轨迹；**Method B** 则只保留该子序列图像，重新独立运行一次 `feature_extractor + sequential_matcher + mapper`，得到子序列自身的 SfM 结果。由于两个重建都只在各自的任意坐标系内成立，所以比较前需要先基于公共注册帧的相机中心做 **Sim(3)** 对齐，再计算 **ATE（Absolute Trajectory Error）**。
+题目二以 `S1-2 @ 30 fps` 的完整重建结果作为参考。实现上，采用两种方式构造同一段子序列的位姿：**Method A** 直接从完整序列的 `images.txt` 中裁出对应帧的位姿，作为参考轨迹；**Method B** 则只保留该子序列图像，重新独立运行一次 `feature_extractor + sequential_matcher + mapper`，得到子序列自身的 SfM 结果。由于两个重建都只在各自的任意坐标系内成立，所以比较前需要先基于公共注册帧的相机中心做 **Sim(3)** 对齐，再计算 **ATE（Absolute Trajectory Error）**。
 
 本实验按作业要求选取三段子序列：前 `1/3`、中间 `1/2` 和后 `1/4`。三段序列在 `30 fps` 下都能完整注册，说明 `S1-2` 这个场景即使截成较短片段，也仍然保留了足够稳定的纹理与视角约束。
 
