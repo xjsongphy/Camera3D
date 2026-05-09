@@ -219,12 +219,12 @@ def _plot_overlay(ref: np.ndarray, est_aligned: np.ndarray, out_path: Path, titl
 def _default_subseq_ranges(n: int) -> list[tuple[int, int, str]]:
     # 0-based half-open ranges.
     # These defaults are chosen from the S1-2 full trajectory geometry:
-    # 1) a short local return/fold-back segment that is prone to independent SfM failure,
+    # 1) a medium-length return segment with larger spatial extent than the failed short local return,
     # 2) a clean single-direction scan segment that typically reconstructs stably,
     # 3) a long return segment that contains the strongest global self-return cue short of the full sequence.
     specs = [
-        (round(n * 0.405797), round(n * 0.550725), "return_local"),
-        (round(n * 0.594203), round(n * 0.739130), "scan_stable"),
+        (round(n * 0.478261), round(n * 0.681159), "return_mid"),
+        (round(n * 0.594203), round(n * 0.768116), "scan_stable"),
         (round(n * 0.492754), round(n * 0.927536), "return_long"),
     ]
     fixed: list[tuple[int, int, str]] = []

@@ -17,6 +17,7 @@ from lab1.task1 import (
     _extract_frames,
     _format_float_tag,
     _has_any_frames,
+    _normalize_video_name,
     _parse_image_centers,
     _parse_image_poses,
     _plot_trajectory,
@@ -44,15 +45,6 @@ class Task3Config:
     motion_dilation: int = 9
     direction_arrows: int = 10
     max_points_plot: int = 12000
-
-
-def _normalize_video_name(name: str) -> str:
-    value = name.strip()
-    if not value:
-        raise Task1Error("Empty video name provided")
-    if not value.endswith(".mp4"):
-        value = f"{value}.mp4"
-    return value
 
 
 def _normalize_method_name(name: str) -> str:
@@ -291,25 +283,32 @@ def _write_motion_masks(images_dir: Path, mask_dir: Path, threshold: int, dilati
     image_paths = sorted(images_dir.glob("*.jpg"))
     if not image_paths:
         raise Task1Error(f"No extracted frames found under {images_dir}")
-    grays = [_load_gray_image(path) for path in image_paths]
     mask_dir.mkdir(parents=True, exist_ok=True)
     dilation = max(3, dilation)
     if dilation % 2 == 0:
         dilation += 1
-    for idx, image_path in enumerate(image_paths):
-        prev_img = grays[idx - 1] if idx > 0 else None
-        cur_img = grays[idx]
-        next_img = grays[idx + 1] if idx + 1 < len(grays) else None
+
+    # Use sliding window to load each frame only once
+    prev_img: np.ndarray | None = None
+    cur_img = _load_gray_image(image_paths[0])
+
+    for idx in range(len(image_paths)):
+        next_img = _load_gray_image(image_paths[idx + 1]) if idx + 1 < len(image_paths) else None
         mask = _build_dynamic_mask(prev_img, cur_img, next_img, threshold)
         mask_img = Image.fromarray(mask, mode="L").filter(ImageFilter.MaxFilter(size=dilation))
-        mask_img.save(mask_dir / f"{image_path.name}.png")
+        mask_img.save(mask_dir / f"{image_paths[idx].name}.png")
+
+        prev_img = cur_img
+        if next_img is not None:
+            cur_img = next_img
 
 
 def _write_static_roi_camera_mask(images_dir: Path, out_path: Path, case_name: str) -> None:
     first_image = next(iter(sorted(images_dir.glob("*.jpg"))), None)
     if first_image is None:
         raise Task1Error(f"No extracted frames found under {images_dir}")
-    width, height = Image.open(first_image).size
+    with Image.open(first_image) as img:
+        width, height = img.size
     mask = np.zeros((height, width), dtype=np.uint8)
     if case_name == "S2-1":
         cutoff = max(1, int(round(height * 0.20)))
