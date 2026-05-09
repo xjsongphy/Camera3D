@@ -29,9 +29,13 @@
 
 ![S1-3 fps collage](report_assets/task1/S1-3_fps_grid.png)
 
-### 30 fps 带方向轨迹图
+### 三段视频在 30 fps 下的轨迹与相机朝向
+
+下图展示 `S1-1`、`S1-2` 和 `S1-3` 在 `30 fps` 设置下的相机轨迹图。蓝色折线表示相机中心轨迹，红色箭头表示沿轨迹均匀采样得到的相机朝向。
 
 ![Task1 30fps direction triptych](report_assets/task1/task1_30fps_direction_triptych.png)
+
+> 神奇的是， `S1-2` 的重建坐标系的上下方向反了，摄像机全程“朝上”。
 
 ### 合并图展示
 
