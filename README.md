@@ -120,18 +120,28 @@ uv run lab1 task2 --source-fps 30 --stage analyze  # 对齐与统计
 ### Task3
 
 ```bash
-# 原始 SfM
+# 1) 只生成 default mask
+# S2-1 保留顶部 20%，S2-2 保留左上 1/4
+uv run lab1 task3-mask --source default --videos S2-1 S2-2 --fps 5
+
+# 2) 只生成 motion mask
+uv run lab1 task3-mask --source motion --videos S2-1 S2-2 --fps 5
+
+# 3) 只生成 YOLO mask
+uv sync --extra task3-yolo
+uv run lab1 task3-mask --source yolo --videos S2-1 S2-2 --fps 5 --device cuda:0
+
+# 4) 只运行 raw
 uv run lab1 task3 --videos S2-1 S2-2 --fps 5 --methods raw
 
-# 基于静态先验区域的遮罩
-uv run lab1 task3 --videos S2-1 S2-2 --fps 5 --methods static_roi_mask
+# 5) 只调用已有 default mask
+uv run lab1 task3 --videos S2-1 S2-2 --fps 5 --methods mask --mask-source default
 
-# 基于帧间差分的动态区域遮罩
-uv run lab1 task3 --videos S2-1 S2-2 --fps 5 --methods motion_mask
+# 6) 只调用已有 motion mask
+uv run lab1 task3 --videos S2-1 S2-2 --fps 5 --methods mask --mask-source motion
 
-# 外部语义分割掩码（需预先生成）
-uv run lab1 task3 --videos S2-1 S2-2 --fps 5 --methods semantic_mask \
-  --semantic-mask-root /path/to/semantic_masks
+# 7) 只调用已有 YOLO mask
+uv run lab1 task3 --videos S2-1 S2-2 --fps 5 --methods mask --mask-source yolo
 ```
 
 **Task3 输出：**
@@ -176,12 +186,15 @@ bash ./scripts/task2_full_pipeline.sh --force
 
 ```powershell
 # Windows
-./scripts/task3_full_pipeline.ps1
-./scripts/task3_full_pipeline.ps1 -Methods raw,static_roi_mask,motion_mask -Force
+uv run lab1 task3-mask --source default --videos S2-1 S2-2 --fps 5
+./scripts/task3_full_pipeline.ps1 -Methods mask -MaskSource default -Force
+uv run lab1 task3-mask --source yolo --videos S2-1 S2-2 --fps 5 --device cuda:0
+./scripts/task3_full_pipeline.ps1 -Methods mask -MaskSource yolo -Force
 
 # Linux/macOS
-bash ./scripts/task3_full_pipeline.sh
-bash ./scripts/task3_full_pipeline.sh --methods raw static_roi_mask motion_mask --force
+bash ./scripts/task3_full_pipeline.sh --methods raw --force
+uv run lab1 task3-mask --source motion --videos S2-1 S2-2 --fps 5
+bash ./scripts/task3_full_pipeline.sh --methods mask --mask-source motion --force
 ```
 
 ---

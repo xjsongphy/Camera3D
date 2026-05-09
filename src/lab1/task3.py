@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import importlib.util
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -25,7 +26,10 @@ from lab1.task1 import (
 )
 
 S2_VIDEOS = ["S2-1.mp4", "S2-2.mp4"]
-TASK3_METHODS = ("raw", "static_roi_mask", "motion_mask", "semantic_mask")
+TASK3_METHODS = ("raw", "mask")
+TASK3_MASK_SOURCES = ("default", "motion", "yolo")
+TASK3_YOLO_DYNAMIC_CLASS_IDS = (0, 1, 2, 3, 5, 7)
+TASK3_MASK_DIRNAME = "masks"
 
 
 @dataclass
@@ -40,28 +44,57 @@ class Task3Config:
     stage: str = "all"
     videos: list[str] | None = None
     methods: tuple[str, ...] = ("raw",)
-    semantic_mask_root: Path | None = None
-    motion_threshold: int = 28
-    motion_dilation: int = 9
+    mask_source: str = "default"
     direction_arrows: int = 10
     max_points_plot: int = 12000
+
+
+@dataclass
+class Task3MaskConfig:
+    lab1_root: Path
+    output_root: Path
+    fps: float
+    ffmpeg_bin: str
+    force: bool
+    dry_run: bool
+    videos: list[str] | None = None
+    source: str = "default"
+    motion_threshold: int = 28
+    motion_dilation: int = 9
+    model: str = "yolo11s-seg.pt"
+    device: str = "auto"
+    conf: float = 0.25
+    imgsz: int = 960
+    yolo_dilation: int = 7
 
 
 def _normalize_method_name(name: str) -> str:
     value = name.strip().lower()
     aliases = {
         "baseline": "raw",
-        "camera_mask": "static_roi_mask",
-        "mask": "static_roi_mask",
-        "roi_mask": "static_roi_mask",
-        "static": "static_roi_mask",
-        "motion": "motion_mask",
-        "semantic": "semantic_mask",
+        "masked": "mask",
     }
     value = aliases.get(value, value)
     if value not in TASK3_METHODS:
         raise Task1Error(f"Unsupported task3 method: {name}. Supported: {TASK3_METHODS}")
     return value
+
+
+def _normalize_mask_source(name: str) -> str:
+    value = name.strip().lower()
+    aliases = {
+        "roi": "default",
+        "static": "default",
+        "semantic": "yolo",
+    }
+    value = aliases.get(value, value)
+    if value not in TASK3_MASK_SOURCES:
+        raise Task1Error(f"Unsupported task3 mask source: {name}. Supported: {TASK3_MASK_SOURCES}")
+    return value
+
+
+def _default_mask_root(output_root: Path, source: str) -> Path:
+    return output_root / TASK3_MASK_DIRNAME / source
 
 
 def _count_points3d(points3d_txt: Path) -> int:
@@ -323,77 +356,153 @@ def _write_static_roi_camera_mask(images_dir: Path, out_path: Path, case_name: s
     Image.fromarray(mask, mode="L").save(out_path)
 
 
-def _resolve_semantic_mask_dir(root: Path, case_name: str, param_tag: str) -> Path:
+def _resolve_mask_dir(root: Path, case_name: str, param_tag: str) -> Path:
     return root / f"{case_name}_{param_tag}"
 
 
-def _check_semantic_masks(mask_dir: Path, images_dir: Path) -> None:
+def _resolve_default_mask_path(root: Path, case_name: str, param_tag: str) -> Path:
+    return _resolve_mask_dir(root, case_name, param_tag) / "camera_mask.png"
+
+
+def _check_mask_dir(mask_dir: Path, images_dir: Path, *, missing_hint: str | None = None) -> None:
     if not mask_dir.exists():
-        raise Task1Error(
-            f"Semantic mask directory not found: {mask_dir}. "
-            "Generate external per-image masks first."
-        )
+        message = f"Mask directory not found: {mask_dir}. Generate masks first."
+        if missing_hint:
+            message += f" {missing_hint}"
+        raise Task1Error(message)
     missing = [p.name for p in sorted(images_dir.glob('*.jpg')) if not (mask_dir / f"{p.name}.png").exists()]
     if missing:
         preview = ", ".join(missing[:3])
         suffix = " ..." if len(missing) > 3 else ""
+        message = f"Masks incomplete under {mask_dir}. Missing {len(missing)} file(s): {preview}{suffix}"
+        if missing_hint:
+            message += f" {missing_hint}"
+        raise Task1Error(message)
+
+
+def _check_default_camera_mask(mask_path: Path, *, missing_hint: str | None = None) -> None:
+    if mask_path.exists():
+        return
+    message = f"Camera mask file not found: {mask_path}."
+    if missing_hint:
+        message += f" {missing_hint}"
+    raise Task1Error(message)
+
+
+def _build_missing_mask_hint(case_name: str, fps: float, source: str) -> str:
+    return f"Run: uv run lab1 task3-mask --source {source} --videos {case_name} --fps {fps:g}"
+
+
+def _ensure_ultralytics_available() -> None:
+    if importlib.util.find_spec("ultralytics") is None:
         raise Task1Error(
-            f"Semantic masks incomplete under {mask_dir}. Missing {len(missing)} file(s): {preview}{suffix}"
+            "Ultralytics is not installed in the current uv environment. "
+            "Run: uv sync --extra task3-yolo"
         )
+
+
+def _resize_binary_mask(mask: np.ndarray, target_size: tuple[int, int]) -> np.ndarray:
+    width, height = target_size
+    if mask.shape == (height, width):
+        return mask.astype(bool)
+    img = Image.fromarray((mask.astype(np.uint8) * 255), mode="L").resize((width, height), Image.Resampling.NEAREST)
+    return np.asarray(img, dtype=np.uint8) > 0
+
+
+def _load_yolo_segmenter(model_name: str):
+    _ensure_ultralytics_available()
+    from ultralytics import YOLO
+
+    return YOLO(model_name)
+
+
+def _collect_yolo_dynamic_mask(result, image_size: tuple[int, int]) -> np.ndarray:
+    width, height = image_size
+    if result.masks is None or result.boxes is None or len(result.boxes) == 0:
+        return np.zeros((height, width), dtype=bool)
+    classes = result.boxes.cls.detach().cpu().numpy().astype(int)
+    mask_data = result.masks.data.detach().cpu().numpy()
+    dynamic = np.zeros(mask_data.shape[1:], dtype=bool)
+    for idx, class_id in enumerate(classes):
+        if class_id in TASK3_YOLO_DYNAMIC_CLASS_IDS:
+            dynamic |= mask_data[idx] > 0.5
+    return _resize_binary_mask(dynamic, (width, height))
+
+
+def _write_yolo_masks_for_images(
+    *,
+    images_dir: Path,
+    mask_dir: Path,
+    model_name: str,
+    device: str,
+    conf: float,
+    imgsz: int,
+    dilation: int,
+) -> None:
+    image_paths = sorted(images_dir.glob("*.jpg"))
+    if not image_paths:
+        raise Task1Error(f"No extracted frames found under {images_dir}")
+
+    mask_dir.mkdir(parents=True, exist_ok=True)
+    dilation = max(1, dilation)
+    if dilation % 2 == 0:
+        dilation += 1
+
+    model = _load_yolo_segmenter(model_name)
+    predict_device = None if device == "auto" else device
+
+    for image_path in image_paths:
+        with Image.open(image_path) as img:
+            width, height = img.size
+        results = model.predict(
+            source=str(image_path),
+            save=False,
+            verbose=False,
+            conf=conf,
+            imgsz=imgsz,
+            device=predict_device,
+            classes=list(TASK3_YOLO_DYNAMIC_CLASS_IDS),
+            retina_masks=True,
+        )
+        dynamic = _collect_yolo_dynamic_mask(results[0], (width, height))
+        mask = np.where(dynamic, 0, 255).astype(np.uint8)
+        mask_img = Image.fromarray(mask, mode="L")
+        if dilation > 1:
+            mask_img = mask_img.filter(ImageFilter.MaxFilter(size=dilation))
+        mask_img.save(mask_dir / f"{image_path.name}.png")
 
 
 def _prepare_method_inputs(
     *,
     method: str,
-    base_root: Path,
     images_dir: Path,
     case_name: str,
     param_tag: str,
-    semantic_mask_root: Path | None,
-    motion_threshold: int,
-    motion_dilation: int,
-    force: bool,
+    mask_source: str,
+    fps: float,
+    output_root: Path,
     dry_run: bool,
 ) -> tuple[Path | None, Path | None]:
-    method_root = base_root / method
     mask_path: Path | None = None
     camera_mask_path: Path | None = None
 
     if method == "raw":
         return None, None
 
-    if method == "static_roi_mask":
-        camera_mask_path = method_root / "camera_mask.png"
-        if dry_run:
-            print(f"Would create static ROI camera mask: {camera_mask_path}")
+    if method == "mask":
+        if mask_source == "default":
+            camera_mask_path = _resolve_default_mask_path(_default_mask_root(output_root, "default"), case_name, param_tag)
+            if dry_run:
+                print(f"Would use default ROI camera mask: {camera_mask_path}")
+                return None, camera_mask_path
+            _check_default_camera_mask(camera_mask_path, missing_hint=_build_missing_mask_hint(case_name, fps, "default"))
             return None, camera_mask_path
-        if not camera_mask_path.exists() or force:
-            _write_static_roi_camera_mask(images_dir, camera_mask_path, case_name)
-        return None, camera_mask_path
-
-    if method == "motion_mask":
-        mask_path = method_root / "masks"
+        mask_root = _default_mask_root(output_root, mask_source)
+        mask_path = _resolve_mask_dir(mask_root, case_name, param_tag)
         if dry_run:
-            print(f"Would create motion masks under: {mask_path}")
+            print(f"Would use {mask_source} masks from: {mask_path}")
             return mask_path, None
-        if force and mask_path.exists():
-            for child in mask_path.glob("*.png"):
-                child.unlink()
-        if force or not any(mask_path.glob("*.png")):
-            _write_motion_masks(images_dir, mask_path, motion_threshold, motion_dilation)
-        return mask_path, None
-
-    if method == "semantic_mask":
-        if semantic_mask_root is None:
-            raise Task1Error(
-                "semantic_mask method requires --semantic-mask-root. "
-                "Masks must follow COLMAP's per-image .png naming convention."
-            )
-        mask_path = _resolve_semantic_mask_dir(semantic_mask_root, case_name, param_tag)
-        if dry_run:
-            print(f"Would use semantic masks from: {mask_path}")
-            return mask_path, None
-        _check_semantic_masks(mask_path, images_dir)
+        _check_mask_dir(mask_path, images_dir, missing_hint=_build_missing_mask_hint(case_name, fps, mask_source))
         return mask_path, None
 
     raise Task1Error(f"Unsupported task3 method: {method}")
@@ -430,6 +539,7 @@ def run_task3(cfg: Task3Config) -> int:
         raise Task1Error(f"fps must be positive, got {cfg.fps}")
     if cfg.stage not in {"all", "extract", "sfm", "analyze"}:
         raise Task1Error(f"Unsupported stage: {cfg.stage}. Choose from all|extract|sfm|analyze")
+    mask_source = _normalize_mask_source(cfg.mask_source)
 
     videos_dir = cfg.lab1_root / "assets" / "videos"
     selected_videos = S2_VIDEOS if not cfg.videos else [_normalize_video_name(v) for v in cfg.videos]
@@ -505,14 +615,12 @@ def run_task3(cfg: Task3Config) -> int:
                 with timed_block("prepare_inputs", timings):
                     feature_mask_path, camera_mask_path = _prepare_method_inputs(
                         method=method,
-                        base_root=base_root,
                         images_dir=images_dir,
                         case_name=case_name,
                         param_tag=param_tag,
-                        semantic_mask_root=cfg.semantic_mask_root,
-                        motion_threshold=cfg.motion_threshold,
-                        motion_dilation=cfg.motion_dilation,
-                        force=cfg.force,
+                        mask_source=mask_source,
+                        fps=cfg.fps,
+                        output_root=cfg.output_root,
                         dry_run=cfg.dry_run,
                     )
                 with timed_block("sfm_total", timings):
@@ -596,4 +704,108 @@ def run_task3(cfg: Task3Config) -> int:
             print(f"Saved method summary: {base_root / 'method_summary.csv'}")
 
     print("\nTask3 completed.")
+    return 0
+
+
+def run_task3_masks(cfg: Task3MaskConfig) -> int:
+    if cfg.fps <= 0:
+        raise Task1Error(f"fps must be positive, got {cfg.fps}")
+    source = _normalize_mask_source(cfg.source)
+    if cfg.conf < 0 or cfg.conf > 1:
+        raise Task1Error(f"conf must be within [0, 1], got {cfg.conf}")
+    if cfg.imgsz <= 0:
+        raise Task1Error(f"imgsz must be positive, got {cfg.imgsz}")
+
+    videos_dir = cfg.lab1_root / "assets" / "videos"
+    selected_videos = S2_VIDEOS if not cfg.videos else [_normalize_video_name(v) for v in cfg.videos]
+    invalid = [v for v in selected_videos if v not in S2_VIDEOS]
+    if invalid:
+        raise Task1Error(f"Unsupported video(s): {invalid}. Supported: {S2_VIDEOS} (or short names S2-1/S2-2)")
+
+    if not cfg.dry_run:
+        require_tool(cfg.ffmpeg_bin, error_cls=Task1Error)
+        if source == "yolo":
+            _ensure_ultralytics_available()
+
+    param_tag = f"fps{_format_float_tag(cfg.fps)}"
+    mask_root = _default_mask_root(cfg.output_root, source)
+
+    for video_name in selected_videos:
+        video_path = videos_dir / video_name
+        if not video_path.exists():
+            raise Task1Error(f"Video not found: {video_path}")
+
+        case_name = video_path.stem
+        base_root = cfg.output_root / f"{case_name}_{param_tag}"
+        images_dir = base_root / "images"
+        frame_map_path = base_root / FRAME_MAP_FILENAME
+        mask_dir = _resolve_mask_dir(mask_root, case_name, param_tag)
+        timings: dict[str, float] = {}
+
+        print(f"\n=== Task3 Mask / {source} / {case_name} / {param_tag} ===")
+        if not cfg.dry_run:
+            base_root.mkdir(parents=True, exist_ok=True)
+            mask_root.mkdir(parents=True, exist_ok=True)
+
+        if not cfg.force and _has_any_frames(images_dir):
+            print(f"Reuse extracted frames: {images_dir}")
+        else:
+            with timed_block("extract", timings):
+                _extract_frames(
+                    video_path=video_path,
+                    images_dir=images_dir,
+                    frame_map_path=frame_map_path,
+                    fps=cfg.fps,
+                    ffmpeg_bin=cfg.ffmpeg_bin,
+                    force=cfg.force,
+                    dry_run=cfg.dry_run,
+                )
+
+        if cfg.dry_run:
+            if source == "default":
+                print(f"Would generate default ROI camera mask under: {mask_dir}")
+            else:
+                print(f"Would generate {source} masks under: {mask_dir}")
+        else:
+            if not _has_any_frames(images_dir):
+                raise Task1Error(
+                    f"No extracted frames found under {images_dir}. "
+                    "Run extraction first or rerun task3-mask without --dry-run."
+                )
+            if source == "default":
+                mask_path = mask_dir / "camera_mask.png"
+                if not mask_dir.exists():
+                    mask_dir.mkdir(parents=True, exist_ok=True)
+                with timed_block("default_mask", timings):
+                    _write_static_roi_camera_mask(images_dir, mask_path, case_name)
+                print(f"Saved default ROI camera mask: {mask_path}")
+            elif source == "motion":
+                if cfg.force and mask_dir.exists():
+                    for child in mask_dir.glob("*.png"):
+                        child.unlink()
+                with timed_block("motion_mask", timings):
+                    _write_motion_masks(images_dir, mask_dir, cfg.motion_threshold, cfg.motion_dilation)
+                print(f"Saved motion masks: {mask_dir}")
+            else:
+                if cfg.force and mask_dir.exists():
+                    for child in mask_dir.glob("*.png"):
+                        child.unlink()
+                with timed_block("yolo_mask", timings):
+                    _write_yolo_masks_for_images(
+                        images_dir=images_dir,
+                        mask_dir=mask_dir,
+                        model_name=cfg.model,
+                        device=cfg.device,
+                        conf=cfg.conf,
+                        imgsz=cfg.imgsz,
+                        dilation=cfg.yolo_dilation,
+                    )
+                print(f"Saved YOLO masks: {mask_dir}")
+
+        if not cfg.dry_run:
+            write_timing_csv(mask_dir / TIMING_FILENAME, timings)
+            print(f"Saved timing summary: {mask_dir / TIMING_FILENAME}")
+        print_timing_summary(f"Timing / Task3 Mask / {source} / {case_name} / {param_tag}", timings)
+
+    print("\nTask3 mask generation completed.")
     return 0

@@ -7,7 +7,7 @@ from pathlib import Path
 from lab1.logging_utils import build_timestamped_log_path, tee_console_output
 from lab1.task1 import Task1Config, Task1Error, run_task1
 from lab1.task2 import Task2Config, run_task2
-from lab1.task3 import Task3Config, run_task3
+from lab1.task3 import Task3Config, Task3MaskConfig, run_task3, run_task3_masks
 
 LAB1_ROOT = Path("docs/lab1")
 OUTPUT_ROOT = Path("outputs/lab1")
@@ -16,6 +16,7 @@ TASK_HELP = {
     "task1": "题目一：静态场景 SfM（S1-1/S1-2/S1-3）",
     "task2": "题目二：子序列分析（S1-2）",
     "task3": "题目三：动态场景 SfM（S2-1/S2-2）",
+    "task3-mask": "题目三：为动态场景生成 mask（default/motion/yolo）",
     "task4": "题目四：位姿质量评估（annotations 01-10）",
 }
 
@@ -112,9 +113,7 @@ def run_task3_entry(args: argparse.Namespace) -> int:
         stage=args.stage,
         videos=args.videos,
         methods=tuple(args.methods or ("raw",)),
-        semantic_mask_root=Path(args.semantic_mask_root) if args.semantic_mask_root else None,
-        motion_threshold=args.motion_threshold,
-        motion_dilation=args.motion_dilation,
+        mask_source=args.mask_source,
         direction_arrows=args.direction_arrows,
         max_points_plot=args.max_points_plot,
     )
@@ -122,6 +121,32 @@ def run_task3_entry(args: argparse.Namespace) -> int:
         return run_task3(cfg)
     except Task1Error as exc:
         print(f"Task3 failed: {exc}")
+        return 2
+
+
+def run_task3_masks_entry(args: argparse.Namespace) -> int:
+    out_dir = _ensure_output_dir("task3")
+    cfg = Task3MaskConfig(
+        lab1_root=LAB1_ROOT,
+        output_root=out_dir,
+        fps=args.fps,
+        ffmpeg_bin=args.ffmpeg_bin,
+        force=args.force,
+        dry_run=args.dry_run,
+        videos=args.videos,
+        source=args.source,
+        motion_threshold=args.motion_threshold,
+        motion_dilation=args.motion_dilation,
+        model=args.model,
+        device=args.device,
+        conf=args.conf,
+        imgsz=args.imgsz,
+        yolo_dilation=args.yolo_dilation,
+    )
+    try:
+        return run_task3_masks(cfg)
+    except Task1Error as exc:
+        print(f"Task3 mask generation failed: {exc}")
         return 2
 
 
@@ -145,23 +170,13 @@ def _add_task3_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--methods",
         nargs="+",
-        help="task3 methods to run: raw static_roi_mask motion_mask semantic_mask",
+        help="task3 methods to run: raw mask",
     )
     parser.add_argument(
-        "--semantic-mask-root",
-        help="root directory of external semantic masks; per-video masks live under <root>/<video>_<fps>/",
-    )
-    parser.add_argument(
-        "--motion-threshold",
-        type=int,
-        default=28,
-        help="grayscale threshold for automatic motion-mask generation",
-    )
-    parser.add_argument(
-        "--motion-dilation",
-        type=int,
-        default=9,
-        help="max-filter size used to dilate automatic motion masks",
+        "--mask-source",
+        default="default",
+        choices=["default", "motion", "yolo"],
+        help="for --methods mask: read masks from outputs/lab1/task3/masks/<source>",
     )
     parser.add_argument(
         "--direction-arrows",
@@ -174,6 +189,64 @@ def _add_task3_args(parser: argparse.ArgumentParser) -> None:
         type=int,
         default=12000,
         help="maximum number of sparse 3D points to display in point-cloud plots",
+    )
+
+
+def _add_task3_mask_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--fps", type=float, default=5.0, help="frame sampling rate shared with task3")
+    parser.add_argument("--ffmpeg-bin", default="ffmpeg", help="ffmpeg executable name/path")
+    parser.add_argument("--force", action="store_true", help="overwrite previous extracted frames and generated masks")
+    parser.add_argument("--dry-run", action="store_true", help="print steps without executing")
+    parser.add_argument(
+        "--source",
+        default="default",
+        choices=["default", "motion", "yolo"],
+        help="mask generation source",
+    )
+    parser.add_argument(
+        "--videos",
+        nargs="+",
+        help="choose subset videos, e.g. --videos S2-1 S2-2",
+    )
+    parser.add_argument(
+        "--motion-threshold",
+        type=int,
+        default=28,
+        help="for --source motion: grayscale threshold for automatic motion-mask generation",
+    )
+    parser.add_argument(
+        "--motion-dilation",
+        type=int,
+        default=9,
+        help="for --source motion: max-filter size used to dilate automatic motion masks",
+    )
+    parser.add_argument(
+        "--model",
+        default="yolo11s-seg.pt",
+        help="for --source yolo: Ultralytics segmentation model checkpoint or local path",
+    )
+    parser.add_argument(
+        "--device",
+        default="auto",
+        help="inference device, e.g. auto, cpu, cuda:0",
+    )
+    parser.add_argument(
+        "--conf",
+        type=float,
+        default=0.25,
+        help="for --source yolo: YOLO confidence threshold",
+    )
+    parser.add_argument(
+        "--imgsz",
+        type=int,
+        default=960,
+        help="for --source yolo: YOLO inference image size",
+    )
+    parser.add_argument(
+        "--yolo-dilation",
+        type=int,
+        default=7,
+        help="for --source yolo: max-filter size used to dilate YOLO dynamic masks",
     )
 
 
@@ -234,6 +307,10 @@ def build_parser() -> argparse.ArgumentParser:
     task3_parser = subparsers.add_parser("task3", help=TASK_HELP["task3"])
     _add_task3_args(task3_parser)
     task3_parser.set_defaults(handler=run_task3_entry)
+
+    task3_mask_parser = subparsers.add_parser("task3-mask", help=TASK_HELP["task3-mask"])
+    _add_task3_mask_args(task3_mask_parser)
+    task3_mask_parser.set_defaults(handler=run_task3_masks_entry)
 
     task4_parser = subparsers.add_parser("task4", help=TASK_HELP["task4"])
     task4_parser.set_defaults(handler=lambda _args: _run_placeholder("task4"))

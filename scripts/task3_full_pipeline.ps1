@@ -2,7 +2,8 @@ param(
     [switch]$Force,
     [switch]$DryRun,
     [string[]]$Methods = @("raw"),
-    [string]$SemanticMaskRoot = ""
+    [ValidateSet("default", "motion", "yolo")]
+    [string]$MaskSource = "default"
 )
 
 $RootDir = Split-Path -Parent $MyInvocation.MyCommand.Path | Split-Path -Parent
@@ -16,26 +17,23 @@ $argsList = @(
     "--methods"
 ) + $Methods
 
+$argsList += @("--mask-source", $MaskSource)
+
 if ($Force) {
     $argsList += "--force"
 }
 if ($DryRun) {
     $argsList += "--dry-run"
 }
-if ($SemanticMaskRoot) {
-    $argsList += @("--semantic-mask-root", $SemanticMaskRoot)
-}
 
 Write-Host "Running Task3 for S2-1 and S2-2."
 Write-Host ("Methods: " + ($Methods -join ", "))
+Write-Host ("Mask source: " + $MaskSource)
 if ($Force) {
     Write-Host "Force: true"
 }
 if ($DryRun) {
     Write-Host "Dry run: true"
-}
-if ($SemanticMaskRoot) {
-    Write-Host ("Semantic mask root: " + $SemanticMaskRoot)
 }
 
 uv run @argsList
