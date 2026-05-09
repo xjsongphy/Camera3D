@@ -378,7 +378,9 @@ def _apply_sim3(points: np.ndarray, scale: float, rot: np.ndarray, trans: np.nda
 
 
 def _format_float_tag(value: float) -> str:
-    s = f"{value:.3f}".rstrip("0").rstrip(".")
+    s = f"{value:.3f}"
+    if "." in s:
+        s = s.rstrip("0").rstrip(".")
     return s.replace(".", "p")
 
 

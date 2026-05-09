@@ -14,7 +14,7 @@ fi
 format_param_tag() {
   local value="$1"
   local formatted
-  formatted="$(printf "%.3f" "$value" | sed 's/0*$//; s/\.$//; s/\./p/g')"
+  formatted="$(awk "BEGIN {printf \"%.3f\", $value}" | sed 's/\.0*$//; s/\./p/g')"
   echo "fps${formatted}"
 }
 

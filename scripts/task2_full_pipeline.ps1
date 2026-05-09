@@ -9,8 +9,10 @@ Set-Location $RootDir
 
 function Format-ParamTag {
     param([double]$Value)
-    $s = "{0:0.###}" -f $Value
-    $s = $s.TrimEnd("0").TrimEnd(".")
+    $s = "$Value"
+    if ($s.Contains(".")) {
+        $s = $s.TrimEnd("0").TrimEnd(".")
+    }
     return "fps" + ($s -replace "\.", "p")
 }
 
