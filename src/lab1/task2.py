@@ -115,6 +115,8 @@ def _run_colmap_subset(
             colmap_bin=colmap_bin,
             db_path=db_path,
             images_dir=images_dir,
+            mask_path=None,
+            camera_mask_path=None,
             dry_run=dry_run,
             error_cls=Task1Error,
         )

@@ -43,6 +43,7 @@ Camera3D/
 | task1 | `outputs/lab1/task1/<video>_<fps>/` |
 | task1 merge | `outputs/lab1/task1/merged/<video>/` |
 | task2 | `outputs/lab1/task2/S1-2_<fps>/` |
+| task3 | `outputs/lab1/task3/<video>_<fps>/<method>/` |
 
 ---
 
@@ -119,8 +120,27 @@ uv run lab1 task2 --source-fps 30 --stage analyze  # 对齐与统计
 ### Task3
 
 ```bash
-uv run lab1 task3
+# 原始 SfM
+uv run lab1 task3 --videos S2-1 S2-2 --fps 5 --methods raw
+
+# 基于静态先验区域的遮罩
+uv run lab1 task3 --videos S2-1 S2-2 --fps 5 --methods static_roi_mask
+
+# 基于帧间差分的动态区域遮罩
+uv run lab1 task3 --videos S2-1 S2-2 --fps 5 --methods motion_mask
+
+# 外部语义分割掩码（需预先生成）
+uv run lab1 task3 --videos S2-1 S2-2 --fps 5 --methods semantic_mask \
+  --semantic-mask-root /path/to/semantic_masks
 ```
+
+**Task3 输出：**
+- `trajectory_raw.png`
+- `trajectory_with_directions.png`
+- `sparse_points.png`
+- `analysis.txt`
+- `analysis.csv`
+- `method_summary.csv`
 
 ---
 
@@ -150,6 +170,18 @@ bash ./scripts/task2_full_pipeline.sh
 # 强制重跑
 ./scripts/task2_full_pipeline.ps1 -Force
 bash ./scripts/task2_full_pipeline.sh --force
+```
+
+### Task3 全流程
+
+```powershell
+# Windows
+./scripts/task3_full_pipeline.ps1
+./scripts/task3_full_pipeline.ps1 -Methods raw,static_roi_mask,motion_mask -Force
+
+# Linux/macOS
+bash ./scripts/task3_full_pipeline.sh
+bash ./scripts/task3_full_pipeline.sh --methods raw static_roi_mask motion_mask --force
 ```
 
 ---

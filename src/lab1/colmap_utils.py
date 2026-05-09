@@ -44,22 +44,29 @@ def run_feature_extractor(
     colmap_bin: str,
     db_path: Path,
     images_dir: Path,
+    mask_path: Path | None = None,
+    camera_mask_path: Path | None = None,
     dry_run: bool,
     error_cls: type[E],
 ) -> None:
+    cmd = [
+        colmap_bin,
+        "feature_extractor",
+        "--database_path",
+        str(db_path),
+        "--image_path",
+        str(images_dir),
+        "--ImageReader.single_camera",
+        "1",
+        "--ImageReader.camera_model",
+        "PINHOLE",
+    ]
+    if mask_path is not None:
+        cmd.extend(["--ImageReader.mask_path", str(mask_path)])
+    if camera_mask_path is not None:
+        cmd.extend(["--ImageReader.camera_mask_path", str(camera_mask_path)])
     run_cmd(
-        [
-            colmap_bin,
-            "feature_extractor",
-            "--database_path",
-            str(db_path),
-            "--image_path",
-            str(images_dir),
-            "--ImageReader.single_camera",
-            "1",
-            "--ImageReader.camera_model",
-            "PINHOLE",
-        ],
+        cmd,
         dry_run=dry_run,
         error_cls=error_cls,
     )

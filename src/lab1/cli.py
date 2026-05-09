@@ -9,7 +9,7 @@ from lab1.task1 import Task1Config, Task1Error, run_task1
 from lab1.task2 import Task2Config, run_task2
 from lab1.task3 import Task3Config, run_task3
 
-LAB1_ROOT = Path("lab1")
+LAB1_ROOT = Path("docs/lab1")
 OUTPUT_ROOT = Path("outputs/lab1")
 
 TASK_HELP = {
@@ -111,6 +111,12 @@ def run_task3_entry(args: argparse.Namespace) -> int:
         dry_run=args.dry_run,
         stage=args.stage,
         videos=args.videos,
+        methods=tuple(args.methods or ("raw",)),
+        semantic_mask_root=Path(args.semantic_mask_root) if args.semantic_mask_root else None,
+        motion_threshold=args.motion_threshold,
+        motion_dilation=args.motion_dilation,
+        direction_arrows=args.direction_arrows,
+        max_points_plot=args.max_points_plot,
     )
     try:
         return run_task3(cfg)
@@ -190,6 +196,39 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="+",
         help="task3 only: choose subset videos, e.g. --videos S2-1 S2-2",
     )
+    task3_parser.add_argument(
+        "--methods",
+        nargs="+",
+        help="task3 methods to run: raw static_roi_mask motion_mask semantic_mask",
+    )
+    task3_parser.add_argument(
+        "--semantic-mask-root",
+        help="root directory of external semantic masks; per-video masks live under <root>/<video>_<fps>/",
+    )
+    task3_parser.add_argument(
+        "--motion-threshold",
+        type=int,
+        default=28,
+        help="grayscale threshold for automatic motion-mask generation",
+    )
+    task3_parser.add_argument(
+        "--motion-dilation",
+        type=int,
+        default=9,
+        help="max-filter size used to dilate automatic motion masks",
+    )
+    task3_parser.add_argument(
+        "--direction-arrows",
+        type=int,
+        default=10,
+        help="number of camera-direction arrows to draw on task3 directional trajectory plots",
+    )
+    task3_parser.add_argument(
+        "--max-points-plot",
+        type=int,
+        default=12000,
+        help="maximum number of sparse 3D points to display in point-cloud plots",
+    )
     task3_parser.set_defaults(handler=run_task3_entry)
 
     task4_parser = subparsers.add_parser("task4", help=TASK_HELP["task4"])
@@ -262,6 +301,39 @@ def build_parser() -> argparse.ArgumentParser:
                     "--videos",
                     nargs="+",
                     help="task3 only: choose subset videos, e.g. --videos S2-1 S2-2",
+                )
+                sub.add_argument(
+                    "--methods",
+                    nargs="+",
+                    help="task3 methods to run: raw static_roi_mask motion_mask semantic_mask",
+                )
+                sub.add_argument(
+                    "--semantic-mask-root",
+                    help="root directory of external semantic masks; per-video masks live under <root>/<video>_<fps>/",
+                )
+                sub.add_argument(
+                    "--motion-threshold",
+                    type=int,
+                    default=28,
+                    help="grayscale threshold for automatic motion-mask generation",
+                )
+                sub.add_argument(
+                    "--motion-dilation",
+                    type=int,
+                    default=9,
+                    help="max-filter size used to dilate automatic motion masks",
+                )
+                sub.add_argument(
+                    "--direction-arrows",
+                    type=int,
+                    default=10,
+                    help="number of camera-direction arrows to draw on task3 directional trajectory plots",
+                )
+                sub.add_argument(
+                    "--max-points-plot",
+                    type=int,
+                    default=12000,
+                    help="maximum number of sparse 3D points to display in point-cloud plots",
                 )
                 sub.set_defaults(handler=run_task3_entry)
             else:
