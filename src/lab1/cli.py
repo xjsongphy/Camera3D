@@ -222,7 +222,7 @@ def _add_task3_mask_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--model",
-        default="yolo11s-seg.pt",
+        default="models/yolo11s-seg.pt",
         help="for --source yolo: Ultralytics segmentation model checkpoint or local path",
     )
     parser.add_argument(

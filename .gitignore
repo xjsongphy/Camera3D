@@ -19,3 +19,9 @@ records/
 
 # Generated outputs
 outputs/
+
+# YOLO / Ultralytics local artifacts
+/yolo*.pt
+/models/*.pt
+/runs/
+/ultralytics_settings.yaml

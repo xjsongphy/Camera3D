@@ -7,12 +7,13 @@ cd "$ROOT_DIR"
 FPS="5"
 FORCE=0
 DRY_RUN=0
-MASK_SOURCE="default"
-METHODS=("raw")
+SKIP_YOLO=0
+VIDEOS=("S2-1" "S2-2")
+SOURCES=("default" "motion" "yolo")
 
 usage() {
   cat <<'EOF' >&2
-Usage: bash ./scripts/task3_full_pipeline.sh [--force] [--dry-run] [--mask-source default|motion|yolo] [--methods raw mask]
+Usage: bash ./scripts/task3_full_pipeline.sh [--force] [--dry-run] [--skip-yolo]
 EOF
   exit 1
 }
@@ -27,19 +28,9 @@ while [[ $# -gt 0 ]]; do
       DRY_RUN=1
       shift
       ;;
-    --mask-source)
-      [[ $# -ge 2 ]] || usage
-      MASK_SOURCE="$2"
-      shift 2
-      ;;
-    --methods)
+    --skip-yolo)
+      SKIP_YOLO=1
       shift
-      METHODS=()
-      while [[ $# -gt 0 && "$1" != --* ]]; do
-        METHODS+=("$1")
-        shift
-      done
-      [[ ${#METHODS[@]} -gt 0 ]] || usage
       ;;
     *)
       usage
@@ -47,28 +38,68 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-EXTRA_ARGS=(--videos S2-1 S2-2 --fps "$FPS" --stage all --methods "${METHODS[@]}")
-EXTRA_ARGS+=(--mask-source "$MASK_SOURCE")
-if [[ $FORCE -eq 1 ]]; then
-  EXTRA_ARGS+=(--force)
+if [[ $SKIP_YOLO -eq 1 ]]; then
+  SOURCES=("default" "motion")
 fi
-if [[ $DRY_RUN -eq 1 ]]; then
-  EXTRA_ARGS+=(--dry-run)
-fi
-echo "Running Task3 for S2-1 and S2-2."
+
+echo "Running full Task3 pipeline for S2-1 and S2-2."
 echo "FPS: ${FPS}"
-echo "Methods: ${METHODS[*]}"
-echo "Mask source: ${MASK_SOURCE}"
+echo "Mask sources: ${SOURCES[*]}"
 if [[ $FORCE -eq 1 ]]; then
   echo "Force: true"
 fi
 if [[ $DRY_RUN -eq 1 ]]; then
   echo "Dry run: true"
 fi
-uv run lab1 task3 "${EXTRA_ARGS[@]}"
+if [[ $SKIP_YOLO -eq 1 ]]; then
+  echo "Skip YOLO: true"
+else
+  echo "Ensuring YOLO dependency (uv extra: task3-yolo)..."
+  uv sync --extra task3-yolo
+fi
+
+for source in "${SOURCES[@]}"; do
+  mask_args=(lab1 task3-mask --source "$source" --videos "${VIDEOS[@]}" --fps "$FPS")
+  if [[ $FORCE -eq 1 ]]; then
+    mask_args+=(--force)
+  fi
+  if [[ $DRY_RUN -eq 1 ]]; then
+    mask_args+=(--dry-run)
+  fi
+
+  echo
+  echo "[1/2] Generating masks: ${source}"
+  uv run "${mask_args[@]}"
+done
+
+task3_args=(lab1 task3 --videos "${VIDEOS[@]}" --fps "$FPS" --stage all --methods raw)
+if [[ $FORCE -eq 1 ]]; then
+  task3_args+=(--force)
+fi
+if [[ $DRY_RUN -eq 1 ]]; then
+  task3_args+=(--dry-run)
+fi
+
+echo
+echo "[2/2] Running reconstruction: raw"
+uv run "${task3_args[@]}"
+
+for source in "${SOURCES[@]}"; do
+  task3_args=(lab1 task3 --videos "${VIDEOS[@]}" --fps "$FPS" --stage all --methods mask --mask-source "$source")
+  if [[ $FORCE -eq 1 ]]; then
+    task3_args+=(--force)
+  fi
+  if [[ $DRY_RUN -eq 1 ]]; then
+    task3_args+=(--dry-run)
+  fi
+
+  echo
+  echo "[2/2] Running reconstruction: mask + ${source}"
+  uv run "${task3_args[@]}"
+done
 
 echo
 echo "Task3 outputs:"
-for video in S2-1 S2-2; do
+for video in "${VIDEOS[@]}"; do
   echo "- outputs/lab1/task3/${video}_fps${FPS}"
 done

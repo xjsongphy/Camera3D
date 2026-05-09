@@ -61,7 +61,7 @@ class Task3MaskConfig:
     source: str = "default"
     motion_threshold: int = 28
     motion_dilation: int = 9
-    model: str = "yolo11s-seg.pt"
+    model: str = "models/yolo11s-seg.pt"
     device: str = "auto"
     conf: float = 0.25
     imgsz: int = 960
