@@ -53,15 +53,18 @@ foreach ($video in $Videos) {
         Write-Host ""
         Write-Host "=== task1 / video=$video / fps=$fps / stage=all ==="
         uv run lab1 task1 --videos $video --fps $fps --stage all --force
+        uv run lab1 task1 cloud --videos $video --fps $fps --force
 
         $paramTag = "fps$fps"
         $caseRoot = Join-Path "outputs/lab1/task1" "${video}_${paramTag}"
         $timingCsv = Join-Path $caseRoot "timing.csv"
         $trajPng = Join-Path $caseRoot "trajectory.png"
+        $cloudPng = Join-Path $caseRoot "sparse_points.png"
         $imagesTxt = Join-Path $caseRoot "sparse/0/images.txt"
 
         if (!(Test-Path $timingCsv)) { throw "Missing timing file: $timingCsv" }
         if (!(Test-Path $imagesTxt)) { throw "Missing sparse poses file: $imagesTxt" }
+        if (!(Test-Path $cloudPng)) { throw "Missing sparse point cloud plot: $cloudPng" }
 
         $extract = Get-TimingValue -CsvPath $timingCsv -Stage "extract"
         $feature = Get-TimingValue -CsvPath $timingCsv -Stage "feature_extractor"

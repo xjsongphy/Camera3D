@@ -13,7 +13,7 @@ if (-not $SkipYolo) {
 }
 
 $videos = @("S2-1", "S2-2")
-$fps = "5"
+$fps = "30"
 
 Write-Host "Running full Task3 pipeline for S2-1 and S2-2."
 Write-Host ("Mask sources: " + ($sources -join ", "))
@@ -95,5 +95,5 @@ foreach ($source in $sources) {
 
 Write-Host ""
 Write-Host "Task3 outputs:"
-Write-Host "- outputs/lab1/task3/S2-1_fps5"
-Write-Host "- outputs/lab1/task3/S2-2_fps5"
+Write-Host "- outputs/lab1/task3/S2-1_fps${fps}"
+Write-Host "- outputs/lab1/task3/S2-2_fps${fps}"

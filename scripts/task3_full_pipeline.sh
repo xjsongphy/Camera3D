@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-FPS="5"
+FPS="30"
 FORCE=0
 DRY_RUN=0
 SKIP_YOLO=0

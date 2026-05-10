@@ -48,11 +48,13 @@ for video in "${VIDEOS[@]}"; do
     echo
     echo "=== task1 / video=${video} / fps=${fps} / stage=all ==="
     uv run lab1 task1 --videos "$video" --fps "$fps" --stage all --force
+    uv run lab1 task1 cloud --videos "$video" --fps "$fps" --force
 
     param_tag="fps${fps}"
     case_root="outputs/lab1/task1/${video}_${param_tag}"
     timing_csv="${case_root}/timing.csv"
     traj_png="${case_root}/trajectory.png"
+    cloud_png="${case_root}/sparse_points.png"
     images_txt="${case_root}/sparse/0/images.txt"
 
     if [[ ! -f "$timing_csv" ]]; then
@@ -61,6 +63,10 @@ for video in "${VIDEOS[@]}"; do
     fi
     if [[ ! -f "$images_txt" ]]; then
       echo "Missing sparse poses file: ${images_txt}" >&2
+      exit 1
+    fi
+    if [[ ! -f "$cloud_png" ]]; then
+      echo "Missing sparse point cloud plot: ${cloud_png}" >&2
       exit 1
     fi
 
