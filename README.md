@@ -1,150 +1,135 @@
 # Camera3D
 
-三维计算成像实验 - Structure from Motion 与相机位姿估计
+Camera3D labs managed by `uv`.
 
-使用 `uv` 管理环境与命令入口。
-
----
-
-## 快速开始
+## Quick Start
 
 ```bash
-# 环境安装
+# install dependencies
 uv sync
 
-# 运行任务
+# run task pipelines
 uv run lab1 task1 --videos S1-2 --fps 30 --stage all
 uv run lab1 task2 --source-fps 30 --stage all
-uv run lab1 task3
+uv run lab1 task3 --videos S2-1 S2-2 --fps 5 --methods raw
 ```
 
----
+## Project Layout
 
-## 目录结构
-
-```
+```text
 Camera3D/
-├── src/lab1/          # Lab1 实现代码
-├── docs/
-│   ├── lab1/
-│   │   ├── assets/
-│   │   │   └── videos/    # 输入视频（S1-*.mp4, S2-*.mp4）
-│   │   ├── report.md      # 报告
-│   │   └── report_assets/ # 报告素材
-│   └── lab2/
-├── scripts/           # 批处理脚本
-└── outputs/lab1/      # 运行输出（默认不提交）
+├─ src/lab1/                  # lab1 implementation
+├─ docs/lab1/assets/videos/   # input videos (S1-*.mp4, S2-*.mp4)
+├─ scripts/                   # helper scripts
+└─ outputs/lab1/              # generated outputs
 ```
 
-**输出目录约定：**
+## Output Conventions
 
-| 任务 | 输出路径 |
-|------|----------|
+| Task | Output Path |
+|---|---|
 | task1 | `outputs/lab1/task1/<video>_<fps>/` |
 | task1 merge | `outputs/lab1/task1/merged/<video>/` |
 | task2 | `outputs/lab1/task2/S1-2_<fps>/` |
+| task3-mask | `outputs/lab1/task3/masks/<source>/<video>_<fps>/` |
 | task3 | `outputs/lab1/task3/<video>_<fps>/<method>/` |
 
----
-
-## 环境准备
-
-### Python 依赖
+## Environment
 
 ```bash
 uv sync
 uv run lab1 --help
 ```
 
-### 外部工具
+External tools required in PATH:
 
-需安装并配置到 PATH：
+| Tool | Check | Purpose |
+|---|---|---|
+| `colmap` | `colmap -h` | SfM reconstruction |
+| `ffmpeg` | `ffmpeg -version` | frame extraction |
 
-| 工具 | 检查命令 | 作用 |
-|------|----------|------|
-| `colmap` | `colmap -h` | SfM 重建 |
-| `ffmpeg` | `ffmpeg -version` | 视频抽帧 |
+## CLI Overview
 
-**未在 PATH 时**：运行时通过参数指定
+Aliases:
 
-```bash
-uv run lab1 task1 --colmap-bin /path/to/colmap --ffmpeg-bin /path/to/ffmpeg
-```
-
----
-
-## Task 命令参考
-
-### 命令别名速查
-
-| 完整命令 | 别名 |
-|----------|------|
+| Full command | Alias |
+|---|---|
 | `task1` | `q1` |
-| `task1 merge` | `q2` |
-| `task2` | `q3` |
-| `task3` | `q4` |
+| `task2` | `q2` |
+| `task3` | `q3` |
+| `task4` | `q4` |
 
-### Task1：多 FPS 轨迹重建
+## Task1
 
 ```bash
-# 全流程
+# full run
 uv run lab1 task1 --videos S1-1 S1-2 S1-3 --fps 30 --stage all
 
-# 分阶段
-uv run lab1 task1 --videos S1-2 --fps 30 --stage extract  # 抽帧
-uv run lab1 task1 --videos S1-2 --fps 30 --stage sfm      # SfM
+# stages
+uv run lab1 task1 --videos S1-2 --fps 30 --stage extract
+uv run lab1 task1 --videos S1-2 --fps 30 --stage sfm
 
-# 合并多 FPS 轨迹（Sim(3) 对齐）
+# merge trajectories across fps (Sim3)
 uv run lab1 task1 merge --videos S1-2
+
+# redraw trajectory plots from existing outputs
+uv run lab1 task1 plot --videos S1-2 --fps 30
+
+# generate sparse point-cloud plot from existing sparse output only
+uv run lab1 task1 cloud --videos S1-2 --fps 30
 ```
 
-### Task2：子序列位姿分析
+`task1 cloud` only reads existing `sparse/0/{images,points3D}.txt` and writes:
 
-默认使用三段更有区分度的子序列：
-- `return_local`：局部折返短段，容易暴露独立 SfM 的失败模式
-- `scan_stable`：单向扫描段，通常能稳定独立重建
-- `return_long`：最长的长程折返段，是最接近“全局回返”结构的子序列
+- `sparse_points.png`
+
+## Task2
 
 ```bash
-# 全流程
+# full run
 uv run lab1 task2 --source-fps 30 --stage all
 
-# 分阶段
-uv run lab1 task2 --source-fps 30 --stage prepare  # 准备子序列
-uv run lab1 task2 --source-fps 30 --stage sfm      # 子序列重建
-uv run lab1 task2 --source-fps 30 --stage analyze  # 对齐与统计
+# stages
+uv run lab1 task2 --source-fps 30 --stage prepare
+uv run lab1 task2 --source-fps 30 --stage sfm
+uv run lab1 task2 --source-fps 30 --stage analyze
 ```
 
-**输出：** `summary.csv`、`metrics.txt`、`trajectory_overlay.png`
+Main outputs:
 
-### Task3
+- `summary.csv`
+- per-sequence `metrics.txt`
+- per-sequence `trajectory_overlay.png`
+
+## Task3
 
 ```bash
-# 1) 只生成 default mask
-# S2-1 保留顶部 20%，S2-2 保留左上 1/4
+# 1) default camera ROI mask
 uv run lab1 task3-mask --source default --videos S2-1 S2-2 --fps 5
 
-# 2) 只生成 motion mask
+# 2) motion mask
 uv run lab1 task3-mask --source motion --videos S2-1 S2-2 --fps 5
 
-# 3) 只生成 YOLO mask
+# 3) YOLO mask
 uv sync --extra task3-yolo
-uv run lab1 task3-mask --source yolo --videos S2-1 S2-2 --fps 5 --device cuda:0
+uv run lab1 task3-mask --source yolo --videos S2-1 S2-2 --fps 5
 
-# 4) 只运行 raw
+# 4) raw reconstruction
 uv run lab1 task3 --videos S2-1 S2-2 --fps 5 --methods raw
 
-# 5) 只调用已有 default mask
+# 5) masked reconstruction (default/motion/yolo)
 uv run lab1 task3 --videos S2-1 S2-2 --fps 5 --methods mask --mask-source default
-
-# 6) 只调用已有 motion mask
 uv run lab1 task3 --videos S2-1 S2-2 --fps 5 --methods mask --mask-source motion
-
-# 7) 只调用已有 YOLO mask
 uv run lab1 task3 --videos S2-1 S2-2 --fps 5 --methods mask --mask-source yolo
 ```
 
-**Task3 输出：**
+Notes:
+
+- `task3-mask generates masks and an overlay preview video (20 sampled frames) under each mask directory.
+- `task3` consumes existing masks only; missing masks will raise an error with a suggested command.
+
+Task3 method outputs include:
+
 - `trajectory_raw.png`
 - `trajectory_with_directions.png`
 - `sparse_points.png`
@@ -152,56 +137,60 @@ uv run lab1 task3 --videos S2-1 S2-2 --fps 5 --methods mask --mask-source yolo
 - `analysis.csv`
 - `method_summary.csv`
 
----
+## Scripts
 
-## 一键脚本
-
-### Task1 全量构建（S1-2）
+### Task1 full sweep
 
 ```powershell
 # Windows
-./scripts/task1_build_full_result.ps1 -Video S1-2 -Fps 30
+./scripts/task1_fps_sweep_full.ps1
+./scripts/task1_fps_sweep_full.ps1 -Videos S1-2
 
 # Linux/macOS
-bash ./scripts/task1_build_full_result.sh S1-2 30
+bash ./scripts/task1_fps_sweep_full.sh
+bash ./scripts/task1_fps_sweep_full.sh S1-2
 ```
 
-### Task2 全流程（自动检测前置依赖）
+Behavior:
 
-脚本会检测 task1 结果，缺失时自动构建，避免重复。
+- runs `task1 --stage all --force`
+- then runs `task1 cloud --force`
+- writes benchmark summary CSV under `outputs/lab1/task1/benchmarks/`
+
+### Task2 full pipeline
 
 ```powershell
 # Windows
 ./scripts/task2_full_pipeline.ps1
+./scripts/task2_full_pipeline.ps1 -Force
 
 # Linux/macOS
 bash ./scripts/task2_full_pipeline.sh
-
-# 强制重跑
-./scripts/task2_full_pipeline.ps1 -Force
 bash ./scripts/task2_full_pipeline.sh --force
 ```
 
-### Task3 全流程
+### Task3 full pipeline
 
 ```powershell
 # Windows
-uv run lab1 task3-mask --source default --videos S2-1 S2-2 --fps 5
-./scripts/task3_full_pipeline.ps1 -Methods mask -MaskSource default -Force
-uv run lab1 task3-mask --source yolo --videos S2-1 S2-2 --fps 5 --device cuda:0
-./scripts/task3_full_pipeline.ps1 -Methods mask -MaskSource yolo -Force
+./scripts/task3_full_pipeline.ps1
+./scripts/task3_full_pipeline.ps1 -Force
+./scripts/task3_full_pipeline.ps1 -SkipYolo
 
 # Linux/macOS
-bash ./scripts/task3_full_pipeline.sh --methods raw --force
-uv run lab1 task3-mask --source motion --videos S2-1 S2-2 --fps 5
-bash ./scripts/task3_full_pipeline.sh --methods mask --mask-source motion --force
+bash ./scripts/task3_full_pipeline.sh
+bash ./scripts/task3_full_pipeline.sh --force
+bash ./scripts/task3_full_pipeline.sh --skip-yolo
 ```
 
----
+Behavior:
 
-## 日志与耗时
+- generates masks in order: `default`, `motion`, `yolo` (unless skip yolo)
+- runs reconstruction: `raw`, then `mask + default/motion/yolo`
 
-| 类型 | 位置 |
-|------|------|
-| 运行日志 | `outputs/lab1/<task>/logs/<task>_YYYYMMDD_HHMMSS.log` |
-| 阶段耗时 | 各任务目录下的 `timing.csv` |
+## Logs and Timing
+
+| Type | Location |
+|---|---|
+| run logs | `outputs/lab1/<task>/logs/<task>_YYYYMMDD_HHMMSS.log` |
+| stage timings | task output `timing.csv` |
