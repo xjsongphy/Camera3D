@@ -14,8 +14,9 @@ from lab1.colmap_utils import (
     run_model_converter,
     run_sequential_matcher,
 )
+from lab1.geometry_utils import apply_sim3, parse_colmap_pose_map, umeyama_sim3
 from lab1.logging_utils import print_timing_summary, timed_block, write_timing_csv
-from lab1.task1 import Task1Error, _format_float_tag, _has_any_frames, _quat_to_rot
+from lab1.task1 import Task1Error, _format_float_tag, _has_any_frames
 
 TIMING_FILENAME = "timing.csv"
 
@@ -34,33 +35,7 @@ class Task2Config:
 
 
 def _parse_colmap_poses(images_txt: Path) -> dict[str, tuple[np.ndarray, np.ndarray]]:
-    poses: dict[str, tuple[np.ndarray, np.ndarray]] = {}
-    with images_txt.open("r", encoding="utf-8") as f:
-        while True:
-            pose_line = f.readline()
-            if not pose_line:
-                break
-            pose_line = pose_line.strip()
-            if not pose_line or pose_line.startswith("#"):
-                continue
-            parts = pose_line.split()
-            if len(parts) < 10:
-                raise Task1Error(f"Malformed COLMAP images.txt pose line: {pose_line}")
-            if not parts[0].isdigit():
-                raise Task1Error(f"Expected image id at pose line start, got: {pose_line}")
-
-            qw, qx, qy, qz = map(float, parts[1:5])
-            tx, ty, tz = map(float, parts[5:8])
-            name = parts[9]
-            r = _quat_to_rot(qw, qx, qy, qz)
-            t = np.array([tx, ty, tz], dtype=float)
-            c = -r.T @ t
-            poses[name] = (c, np.array([qw, qx, qy, qz, tx, ty, tz], dtype=float))
-
-            _ = f.readline()
-    if not poses:
-        raise Task1Error(f"No image poses parsed from {images_txt}")
-    return poses
+    return parse_colmap_pose_map(images_txt, error_cls=Task1Error)
 
 
 def _write_subset_images_txt(
@@ -173,26 +148,11 @@ def _require_prepared_subset_images(images_dir: Path, expected_names: list[str])
 
 
 def _umeyama_sim3(src: np.ndarray, dst: np.ndarray) -> tuple[float, np.ndarray, np.ndarray]:
-    if src.shape != dst.shape or src.shape[0] < 3:
-        raise Task1Error("Sim(3) alignment requires matched trajectories with at least 3 points.")
-    mu_src = src.mean(axis=0)
-    mu_dst = dst.mean(axis=0)
-    src_c = src - mu_src
-    dst_c = dst - mu_dst
-    cov = (dst_c.T @ src_c) / src.shape[0]
-    u, d, vt = np.linalg.svd(cov)
-    s = np.eye(3)
-    if np.linalg.det(u @ vt) < 0:
-        s[2, 2] = -1
-    r = u @ s @ vt
-    var_src = np.mean(np.sum(src_c * src_c, axis=1))
-    scale = float(np.trace(np.diag(d) @ s) / var_src)
-    t = mu_dst - scale * (r @ mu_src)
-    return scale, r, t
+    return umeyama_sim3(src, dst, error_cls=Task1Error)
 
 
 def _apply_sim3(points: np.ndarray, scale: float, rot: np.ndarray, trans: np.ndarray) -> np.ndarray:
-    return (scale * (rot @ points.T)).T + trans
+    return apply_sim3(points, scale, rot, trans)
 
 
 def _ate(ref: np.ndarray, est: np.ndarray) -> float:
@@ -218,14 +178,14 @@ def _plot_overlay(ref: np.ndarray, est_aligned: np.ndarray, out_path: Path, titl
 
 def _default_subseq_ranges(n: int) -> list[tuple[int, int, str]]:
     # 0-based half-open ranges.
-    # These defaults are chosen from the S1-2 full trajectory geometry:
-    # 1) a medium-length return segment with larger spatial extent than the failed short local return,
-    # 2) a clean single-direction scan segment that typically reconstructs stably,
-    # 3) a long return segment that contains the strongest global self-return cue short of the full sequence.
+    # Default segments for S1-2 (2070 frames at fps=30):
+    # 1) return_mid: 211-930 (720 frames, endpoint_ratio=0.39) - strong return pattern
+    # 2) scan_stable: 271-510 (240 frames, endpoint_ratio=0.87) - clean single-direction scan
+    # 3) return_long: 31-930 (900 frames, endpoint_ratio=0.41) - long return with good coverage
     specs = [
-        (round(n * 0.478261), round(n * 0.681159), "return_mid"),
-        (round(n * 0.594203), round(n * 0.768116), "scan_stable"),
-        (round(n * 0.492754), round(n * 0.927536), "return_long"),
+        (210, 930, "return_mid"),
+        (270, 510, "scan_stable"),
+        (30, 930, "return_long"),
     ]
     fixed: list[tuple[int, int, str]] = []
     for s, e, name in specs:
@@ -312,6 +272,12 @@ def run_task2(cfg: Task2Config) -> int:
         timing_path = sub_root / TIMING_FILENAME
 
         print(f"\n=== Task2 / {sub_tag} ===")
+
+        # Skip if already complete and not in force mode
+        if not cfg.force and not cfg.dry_run and metrics_txt.exists():
+            print(f"Reuse existing complete outputs: {sub_root}")
+            continue
+
         if not cfg.dry_run:
             method_a_sparse.mkdir(parents=True, exist_ok=True)
             method_b_images.mkdir(parents=True, exist_ok=True)
