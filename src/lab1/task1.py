@@ -17,10 +17,20 @@ from lab1.colmap_utils import (
     run_model_converter,
     run_sequential_matcher,
 )
+from lab1.geometry_utils import (
+    apply_sim3,
+    parse_image_centers_sorted,
+    parse_image_poses_sorted,
+    quat_to_rot,
+    umeyama_sim3,
+)
 from lab1.logging_utils import print_timing_summary, timed_block, write_timing_csv
 
 
 S1_VIDEOS = ["S1-1.mp4", "S1-2.mp4", "S1-3.mp4"]
+DEFAULT_FPS_LIST = [4.0, 8.0, 16.0, 30.0]
+ALL_FPS_SENTINEL = -1.0  # Special value to indicate "all fps"
+
 
 
 @dataclass
@@ -36,6 +46,7 @@ class Task1Config:
     stage: str = "all"
     mode: str = "run"
     direction_arrows: int = 12
+    max_points_plot: int = 12000
 
 
 class Task1Error(RuntimeError):
@@ -256,72 +267,15 @@ def _materialize_canonical_model_dir(model_dir: Path, canonical_dir: Path) -> Pa
 
 
 def _quat_to_rot(qw: float, qx: float, qy: float, qz: float) -> np.ndarray:
-    q = np.array([qw, qx, qy, qz], dtype=float)
-    norm = np.linalg.norm(q)
-    if norm <= 1e-12:
-        raise Task1Error("Encountered near-zero quaternion norm while parsing COLMAP poses.")
-    q /= norm
-    qw, qx, qy, qz = q
-    return np.array(
-        [
-            [1 - 2 * (qy * qy + qz * qz), 2 * (qx * qy - qz * qw), 2 * (qx * qz + qy * qw)],
-            [2 * (qx * qy + qz * qw), 1 - 2 * (qx * qx + qz * qz), 2 * (qy * qz - qx * qw)],
-            [2 * (qx * qz - qy * qw), 2 * (qy * qz + qx * qw), 1 - 2 * (qx * qx + qy * qy)],
-        ]
-    )
+    return quat_to_rot(qw, qx, qy, qz, error_cls=Task1Error)
 
 
 def _parse_image_poses(images_txt: Path) -> tuple[np.ndarray, np.ndarray, list[str]]:
-    centers: list[np.ndarray] = []
-    forward_dirs: list[np.ndarray] = []
-    names: list[str] = []
-    with images_txt.open("r", encoding="utf-8") as f:
-        while True:
-            pose_line = f.readline()
-            if not pose_line:
-                break
-            pose_line = pose_line.strip()
-            if not pose_line or pose_line.startswith("#"):
-                continue
-            parts = pose_line.split()
-            if len(parts) < 10:
-                raise Task1Error(f"Malformed COLMAP images.txt pose line: {pose_line}")
-            image_id = parts[0]
-            if not image_id.isdigit():
-                raise Task1Error(f"Expected image id at pose line start, got: {pose_line}")
-
-            qw, qx, qy, qz = map(float, parts[1:5])
-            tx, ty, tz = map(float, parts[5:8])
-            name = parts[9]
-
-            r = _quat_to_rot(qw, qx, qy, qz)
-            t = np.array([tx, ty, tz], dtype=float)
-            c = -r.T @ t
-            forward = r.T @ np.array([0.0, 0.0, 1.0], dtype=float)
-            forward_norm = np.linalg.norm(forward)
-            if forward_norm > 1e-12:
-                forward = forward / forward_norm
-
-            centers.append(c)
-            forward_dirs.append(forward)
-            names.append(name)
-            # COLMAP images.txt stores a second line of POINTS2D per image entry.
-            # Consume it explicitly to avoid accidental mis-parsing.
-            _ = f.readline()
-
-    if not centers:
-        raise Task1Error(f"No image poses parsed from {images_txt}")
-
-    order = np.argsort(np.array(names))
-    centers_arr = np.array(centers)[order]
-    forward_arr = np.array(forward_dirs)[order]
-    names_sorted = [names[i] for i in order]
-    return centers_arr, forward_arr, names_sorted
+    return parse_image_poses_sorted(images_txt, error_cls=Task1Error)
 
 
 def _parse_image_centers(images_txt: Path) -> tuple[np.ndarray, list[str]]:
-    centers, _forward_dirs, names = _parse_image_poses(images_txt)
-    return centers, names
+    return parse_image_centers_sorted(images_txt, error_cls=Task1Error)
 
 
 def _select_direction_indices(num_points: int, arrow_count: int) -> np.ndarray:
@@ -372,6 +326,61 @@ def _plot_trajectory(
     plt.close(fig)
 
 
+def _parse_points3d(points3d_txt: Path) -> tuple[np.ndarray, np.ndarray]:
+    xyzs: list[list[float]] = []
+    rgbs: list[list[float]] = []
+    with points3d_txt.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split()
+            if len(parts) < 7:
+                continue
+            xyzs.append([float(parts[1]), float(parts[2]), float(parts[3])])
+            rgbs.append([float(parts[4]) / 255.0, float(parts[5]) / 255.0, float(parts[6]) / 255.0])
+    if not xyzs:
+        return np.empty((0, 3), dtype=float), np.empty((0, 3), dtype=float)
+    return np.array(xyzs, dtype=float), np.array(rgbs, dtype=float)
+
+
+def _plot_sparse_point_cloud(
+    points_xyz: np.ndarray,
+    points_rgb: np.ndarray,
+    centers: np.ndarray,
+    out_path: Path,
+    title: str,
+    max_points: int,
+) -> None:
+    fig = plt.figure(figsize=(9, 7))
+    ax = fig.add_subplot(111, projection="3d")
+
+    if len(points_xyz) > 0:
+        if len(points_xyz) > max_points:
+            idx = np.linspace(0, len(points_xyz) - 1, max_points, dtype=int)
+            pts = points_xyz[idx]
+            colors = points_rgb[idx]
+        else:
+            pts = points_xyz
+            colors = points_rgb
+        ax.scatter(pts[:, 0], pts[:, 1], pts[:, 2], c=colors, s=1.2, alpha=0.65, linewidths=0)
+
+    if len(centers) > 0:
+        ax.plot(centers[:, 0], centers[:, 1], centers[:, 2], color="tab:red", linewidth=1.4, label="camera path")
+
+    ax.set_title(title)
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+    ax.set_zlabel("Z")
+    ax.set_box_aspect([1, 1, 1])
+    ax.grid(True)
+    if len(centers) > 0:
+        ax.legend(loc="best")
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=170)
+    plt.close(fig)
+
+
 def _plot_merged_trajectories(
     trajectories: list[tuple[float, str, np.ndarray]],
     out_path: Path,
@@ -405,26 +414,11 @@ def _plot_merged_trajectories(
 
 
 def _umeyama_sim3(src: np.ndarray, dst: np.ndarray) -> tuple[float, np.ndarray, np.ndarray]:
-    if src.shape != dst.shape or src.shape[0] < 3:
-        raise Task1Error("Sim(3) alignment requires matched trajectories with at least 3 points.")
-    mu_src = src.mean(axis=0)
-    mu_dst = dst.mean(axis=0)
-    src_c = src - mu_src
-    dst_c = dst - mu_dst
-    cov = (dst_c.T @ src_c) / src.shape[0]
-    u, d, vt = np.linalg.svd(cov)
-    s = np.eye(3)
-    if np.linalg.det(u @ vt) < 0:
-        s[2, 2] = -1
-    r = u @ s @ vt
-    var_src = np.mean(np.sum(src_c * src_c, axis=1))
-    scale = float(np.trace(np.diag(d) @ s) / var_src)
-    t = mu_dst - scale * (r @ mu_src)
-    return scale, r, t
+    return umeyama_sim3(src, dst, error_cls=Task1Error)
 
 
 def _apply_sim3(points: np.ndarray, scale: float, rot: np.ndarray, trans: np.ndarray) -> np.ndarray:
-    return (scale * (rot @ points.T)).T + trans
+    return apply_sim3(points, scale, rot, trans)
 
 
 def _format_float_tag(value: float) -> str:
@@ -681,32 +675,129 @@ def _run_task1_merge(cfg: Task1Config, selected_videos: list[str], strict: bool)
 def _run_task1_plot(cfg: Task1Config, selected_videos: list[str]) -> int:
     if cfg.stage != "all":
         raise Task1Error("task1 plot does not support --stage; it only reads existing outputs.")
-    if cfg.fps <= 0:
-        raise Task1Error(f"fps must be positive, got {cfg.fps}")
 
-    param_tag = _build_param_tag(cfg)
+    # Determine fps values to process
+    if cfg.fps == ALL_FPS_SENTINEL:
+        # Auto-discover existing fps for each video
+        fps_dict: dict[str, list[float]] = {}
+        for video_name in selected_videos:
+            case_name = Path(video_name).stem
+            fps_dict[case_name] = _discover_existing_fps(cfg.output_root, case_name)
+            print(f"Discovered fps for {case_name}: {fps_dict[case_name]}")
+    elif cfg.fps <= 0:
+        raise Task1Error(f"fps must be positive or {ALL_FPS_SENTINEL} for all, got {cfg.fps}")
+    else:
+        # Single fps specified
+        fps_dict = {Path(v).stem: [cfg.fps] for v in selected_videos}
+
     for video_name in selected_videos:
-        timings: dict[str, float] = {}
         case_name = Path(video_name).stem
-        case_root = cfg.output_root / f"{case_name}_{param_tag}"
-        print(f"\n=== Task1 Plot / {case_name} / {param_tag} ===")
-        if not case_root.exists():
-            raise Task1Error(f"Task1 output not found: {case_root}")
-        _plot_existing_case(
-            case_root=case_root,
-            case_name=case_name,
-            fps=cfg.fps,
-            direction_arrows=cfg.direction_arrows,
-            force=cfg.force,
-            dry_run=cfg.dry_run,
-            timings=timings,
-        )
-        if not cfg.dry_run:
-            write_timing_csv(case_root / TIMING_FILENAME, timings)
-            print(f"Saved timing summary: {case_root / TIMING_FILENAME}")
-        print_timing_summary(f"Timing / {case_name} / {param_tag} / plot", timings)
+        fps_list = fps_dict.get(case_name, [])
+
+        if not fps_list:
+            print(f"Skipping {case_name}: no existing results found")
+            continue
+
+        for fps in fps_list:
+            param_tag = f"fps{_format_float_tag(fps)}"
+            case_root = cfg.output_root / f"{case_name}_{param_tag}"
+            timings: dict[str, float] = {}
+            print(f"\n=== Task1 Plot / {case_name} / {param_tag} ===")
+            if not case_root.exists():
+                print(f"Skipping {case_root}: not found")
+                continue
+            _plot_existing_case(
+                case_root=case_root,
+                case_name=case_name,
+                fps=fps,
+                direction_arrows=cfg.direction_arrows,
+                force=cfg.force,
+                dry_run=cfg.dry_run,
+                timings=timings,
+            )
+            if not cfg.dry_run:
+                write_timing_csv(case_root / TIMING_FILENAME, timings)
+                print(f"Saved timing summary: {case_root / TIMING_FILENAME}")
+            print_timing_summary(f"Timing / {case_name} / {param_tag} / plot", timings)
 
     print("\nTask1 plot completed.")
+    return 0
+
+
+def _discover_existing_fps(output_root: Path, case_name: str) -> list[float]:
+    """Discover all existing fps values for a given case."""
+    fps_values: list[float] = []
+    case_prefix = f"{case_name}_fps"
+    for entry in output_root.iterdir():
+        if entry.is_dir() and entry.name.startswith(case_prefix):
+            # Extract fps from directory name like "S1-1_fps30"
+            fps_str = entry.name[len(case_prefix):]
+            try:
+                fps_values.append(float(fps_str))
+            except ValueError:
+                continue
+    return sorted(fps_values)
+
+
+def _run_task1_cloud(cfg: Task1Config, selected_videos: list[str]) -> int:
+    if cfg.stage != "all":
+        raise Task1Error("task1 cloud does not support --stage; it only reads existing outputs.")
+
+    # Determine fps values to process
+    if cfg.fps == ALL_FPS_SENTINEL:
+        # Auto-discover existing fps for each video
+        fps_dict: dict[str, list[float]] = {}
+        for video_name in selected_videos:
+            case_name = Path(video_name).stem
+            fps_dict[case_name] = _discover_existing_fps(cfg.output_root, case_name)
+            print(f"Discovered fps for {case_name}: {fps_dict[case_name]}")
+    elif cfg.fps <= 0:
+        raise Task1Error(f"fps must be positive or {ALL_FPS_SENTINEL} for all, got {cfg.fps}")
+    else:
+        # Single fps specified
+        fps_dict = {Path(v).stem: [cfg.fps] for v in selected_videos}
+
+    for video_name in selected_videos:
+        case_name = Path(video_name).stem
+        fps_list = fps_dict.get(case_name, [])
+
+        if not fps_list:
+            print(f"Skipping {case_name}: no existing results found")
+            continue
+
+        for fps in fps_list:
+            param_tag = f"fps{_format_float_tag(fps)}"
+            case_root = cfg.output_root / f"{case_name}_{param_tag}"
+            points3d_txt = case_root / "sparse" / "0" / "points3D.txt"
+            images_txt = case_root / "sparse" / "0" / "images.txt"
+            out_path = case_root / "sparse_points.png"
+            timings: dict[str, float] = {}
+            print(f"\n=== Task1 Cloud / {case_name} / {param_tag} ===")
+            if not points3d_txt.exists() or not images_txt.exists():
+                print(f"Skipping {case_root}: sparse model not found")
+                continue
+            if cfg.dry_run:
+                print(f"Would generate sparse point cloud plot: {out_path}")
+                continue
+            if out_path.exists() and not cfg.force:
+                print(f"Reuse sparse point cloud plot: {out_path}")
+                continue
+            with timed_block("cloud_plot", timings):
+                centers, _ = _parse_image_centers(images_txt)
+                points_xyz, points_rgb = _parse_points3d(points3d_txt)
+                _plot_sparse_point_cloud(
+                    points_xyz,
+                    points_rgb,
+                    centers,
+                    out_path,
+                    f"{case_name} Sparse Point Cloud (fps={fps:g})",
+                    max_points=cfg.max_points_plot,
+                )
+            write_timing_csv(case_root / "cloud_timing.csv", timings)
+            print(f"Saved sparse point cloud plot: {out_path}")
+            print_timing_summary(f"Timing / {case_name} / {param_tag} / cloud", timings)
+
+    print("\nTask1 cloud completed.")
     return 0
 
 
@@ -725,6 +816,8 @@ def run_task1(cfg: Task1Config) -> int:
         return _run_task1_merge(cfg, selected_videos, strict=cfg.videos is not None)
     if cfg.mode == "plot":
         return _run_task1_plot(cfg, selected_videos)
+    if cfg.mode == "cloud":
+        return _run_task1_cloud(cfg, selected_videos)
     if cfg.mode != "run":
         raise Task1Error(f"Unsupported task1 mode: {cfg.mode}")
 

@@ -72,6 +72,7 @@ def run_task1_entry(args: argparse.Namespace) -> int:
         stage=args.stage,
         mode=args.mode,
         direction_arrows=args.direction_arrows,
+        max_points_plot=args.max_points_plot,
     )
     try:
         return run_task1(cfg)
@@ -138,7 +139,6 @@ def run_task3_masks_entry(args: argparse.Namespace) -> int:
         motion_threshold=args.motion_threshold,
         motion_dilation=args.motion_dilation,
         model=args.model,
-        device=args.device,
         conf=args.conf,
         imgsz=args.imgsz,
         yolo_dilation=args.yolo_dilation,
@@ -218,17 +218,12 @@ def _add_task3_mask_args(parser: argparse.ArgumentParser) -> None:
         "--motion-dilation",
         type=int,
         default=9,
-        help="for --source motion: max-filter size used to dilate automatic motion masks",
+        help="for --source motion: kernel size used to dilate automatic motion masks",
     )
     parser.add_argument(
         "--model",
         default="models/yolo11s-seg.pt",
         help="for --source yolo: Ultralytics segmentation model checkpoint or local path",
-    )
-    parser.add_argument(
-        "--device",
-        default="auto",
-        help="inference device, e.g. auto, cpu, cuda:0",
     )
     parser.add_argument(
         "--conf",
@@ -246,7 +241,7 @@ def _add_task3_mask_args(parser: argparse.ArgumentParser) -> None:
         "--yolo-dilation",
         type=int,
         default=7,
-        help="for --source yolo: max-filter size used to dilate YOLO dynamic masks",
+        help="for --source yolo: kernel size used to dilate YOLO dynamic masks",
     )
 
 
@@ -259,10 +254,10 @@ def build_parser() -> argparse.ArgumentParser:
         "mode",
         nargs="?",
         default="run",
-        choices=["run", "merge", "plot"],
-        help="task1 mode: run (default), merge existing trajectories across fps, or redraw plots from existing outputs",
+        choices=["run", "merge", "plot", "cloud"],
+        help="task1 mode: run (default), merge trajectories, redraw trajectories, or generate sparse point-cloud plot from existing outputs",
     )
-    task1_parser.add_argument("--fps", type=float, default=2.0, help="frame sampling rate for task1")
+    task1_parser.add_argument("--fps", type=float, default=-1.0, help="frame sampling rate for task1 (default: -1 for all available fps)")
     task1_parser.add_argument("--colmap-bin", default="colmap", help="colmap executable name/path for task1")
     task1_parser.add_argument("--ffmpeg-bin", default="ffmpeg", help="ffmpeg executable name/path for task1")
     task1_parser.add_argument("--force", action="store_true", help="overwrite previous task1 outputs")
@@ -283,6 +278,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=12,
         help="number of camera-direction arrows to draw on the directional trajectory plot",
+    )
+    task1_parser.add_argument(
+        "--max-points-plot",
+        type=int,
+        default=12000,
+        help="maximum number of sparse 3D points to display in point-cloud plots",
     )
     task1_parser.set_defaults(handler=run_task1_entry)
 
@@ -323,8 +324,8 @@ def build_parser() -> argparse.ArgumentParser:
                     "mode",
                     nargs="?",
                     default="run",
-                    choices=["run", "merge", "plot"],
-                    help="task1 mode: run (default), merge existing trajectories across fps, or redraw plots from existing outputs",
+                    choices=["run", "merge", "plot", "cloud"],
+                    help="task1 mode: run (default), merge trajectories, redraw trajectories, or generate sparse point-cloud plot from existing outputs",
                 )
                 sub.add_argument("--fps", type=float, default=2.0, help="frame sampling rate for task1")
                 sub.add_argument("--colmap-bin", default="colmap", help="colmap executable name/path for task1")
@@ -347,6 +348,12 @@ def build_parser() -> argparse.ArgumentParser:
                     type=int,
                     default=12,
                     help="number of camera-direction arrows to draw on the directional trajectory plot",
+                )
+                sub.add_argument(
+                    "--max-points-plot",
+                    type=int,
+                    default=12000,
+                    help="maximum number of sparse 3D points to display in point-cloud plots",
                 )
                 sub.set_defaults(handler=run_task1_entry)
             elif target == "task2":
