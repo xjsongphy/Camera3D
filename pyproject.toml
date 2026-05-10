@@ -8,6 +8,8 @@ dependencies = [
   "matplotlib>=3.8.0",
   "numpy>=1.26.0",
   "pillow>=10.4.0",
+  "torch>=2.6.0",
+  "torchvision>=0.21.0",
 ]
 
 [project.optional-dependencies]

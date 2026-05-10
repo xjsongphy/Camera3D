@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageFilter
 
-from lab1.colmap_utils import require_tool
+from lab1.colmap_utils import require_tool, run_cmd
 from lab1.logging_utils import print_timing_summary, timed_block, write_timing_csv
 from lab1.task1 import (
     FRAME_MAP_FILENAME,
@@ -20,7 +20,9 @@ from lab1.task1 import (
     _has_any_frames,
     _normalize_video_name,
     _parse_image_centers,
+    _parse_points3d,
     _parse_image_poses,
+    _plot_sparse_point_cloud,
     _plot_trajectory,
     _run_colmap,
 )
@@ -62,7 +64,6 @@ class Task3MaskConfig:
     motion_threshold: int = 28
     motion_dilation: int = 9
     model: str = "models/yolo11s-seg.pt"
-    device: str = "auto"
     conf: float = 0.25
     imgsz: int = 960
     yolo_dilation: int = 7
@@ -120,62 +121,6 @@ def _compute_jump_stats(centers: np.ndarray) -> tuple[float, float, float]:
         jump_ratio = float(np.mean(step > (3.0 * median_step)))
     return median_step, max_step, jump_ratio
 
-
-def _parse_points3d(points3d_txt: Path) -> tuple[np.ndarray, np.ndarray]:
-    xyzs: list[list[float]] = []
-    rgbs: list[list[float]] = []
-    with points3d_txt.open("r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            parts = line.split()
-            if len(parts) < 7:
-                continue
-            xyzs.append([float(parts[1]), float(parts[2]), float(parts[3])])
-            rgbs.append([float(parts[4]) / 255.0, float(parts[5]) / 255.0, float(parts[6]) / 255.0])
-    if not xyzs:
-        return np.empty((0, 3), dtype=float), np.empty((0, 3), dtype=float)
-    return np.array(xyzs, dtype=float), np.array(rgbs, dtype=float)
-
-
-def _plot_sparse_point_cloud(
-    points_xyz: np.ndarray,
-    points_rgb: np.ndarray,
-    centers: np.ndarray,
-    out_path: Path,
-    title: str,
-    max_points: int,
-) -> None:
-    import matplotlib.pyplot as plt
-
-    fig = plt.figure(figsize=(9, 7))
-    ax = fig.add_subplot(111, projection="3d")
-
-    if len(points_xyz) > 0:
-        if len(points_xyz) > max_points:
-            idx = np.linspace(0, len(points_xyz) - 1, max_points, dtype=int)
-            pts = points_xyz[idx]
-            colors = points_rgb[idx]
-        else:
-            pts = points_xyz
-            colors = points_rgb
-        ax.scatter(pts[:, 0], pts[:, 1], pts[:, 2], c=colors, s=1.2, alpha=0.65, linewidths=0)
-
-    if len(centers) > 0:
-        ax.plot(centers[:, 0], centers[:, 1], centers[:, 2], color="tab:red", linewidth=1.4, label="camera path")
-
-    ax.set_title(title)
-    ax.set_xlabel("X")
-    ax.set_ylabel("Y")
-    ax.set_zlabel("Z")
-    ax.set_box_aspect([1, 1, 1])
-    ax.grid(True)
-    if len(centers) > 0:
-        ax.legend(loc="best")
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=170)
-    plt.close(fig)
 
 
 def _write_analysis(
@@ -320,6 +265,7 @@ def _write_motion_masks(images_dir: Path, mask_dir: Path, threshold: int, dilati
     dilation = max(3, dilation)
     if dilation % 2 == 0:
         dilation += 1
+    print(f"Motion mask device: {_select_auto_device()}")
 
     # Use sliding window to load each frame only once
     prev_img: np.ndarray | None = None
@@ -328,8 +274,8 @@ def _write_motion_masks(images_dir: Path, mask_dir: Path, threshold: int, dilati
     for idx in range(len(image_paths)):
         next_img = _load_gray_image(image_paths[idx + 1]) if idx + 1 < len(image_paths) else None
         mask = _build_dynamic_mask(prev_img, cur_img, next_img, threshold)
-        mask_img = Image.fromarray(mask, mode="L").filter(ImageFilter.MaxFilter(size=dilation))
-        mask_img.save(mask_dir / f"{image_paths[idx].name}.png")
+        dilated = _dilate_dynamic_mask(mask, dilation)
+        Image.fromarray(dilated, mode="L").save(mask_dir / f"{image_paths[idx].name}.png")
 
         prev_img = cur_img
         if next_img is not None:
@@ -389,8 +335,32 @@ def _check_default_camera_mask(mask_path: Path, *, missing_hint: str | None = No
     raise Task1Error(message)
 
 
+def _is_default_camera_mask_ready(mask_path: Path) -> bool:
+    return mask_path.exists()
+
+
+def _is_mask_dir_complete(mask_dir: Path, images_dir: Path) -> bool:
+    if not mask_dir.exists():
+        return False
+    image_paths = sorted(images_dir.glob("*.jpg"))
+    if not image_paths:
+        return False
+    for image_path in image_paths:
+        if not (mask_dir / f"{image_path.name}.png").exists():
+            return False
+    return True
+
+
 def _build_missing_mask_hint(case_name: str, fps: float, source: str) -> str:
     return f"Run: uv run lab1 task3-mask --source {source} --videos {case_name} --fps {fps:g}"
+
+
+def _is_method_run_complete(method_root: Path) -> bool:
+    """Check if a method run has complete outputs."""
+    images_txt = method_root / "sparse" / "0" / "images.txt"
+    points3d_txt = method_root / "sparse" / "0" / "points3D.txt"
+    analysis_txt = method_root / "analysis.txt"
+    return images_txt.exists() and points3d_txt.exists() and analysis_txt.exists()
 
 
 def _ensure_ultralytics_available() -> None:
@@ -399,6 +369,32 @@ def _ensure_ultralytics_available() -> None:
             "Ultralytics is not installed in the current uv environment. "
             "Run: uv sync --extra task3-yolo"
         )
+
+
+def _torch_cuda_available() -> bool:
+    if importlib.util.find_spec("torch") is None:
+        return False
+    import torch
+
+    return bool(torch.cuda.is_available())
+
+
+def _select_auto_device() -> str:
+    return "cuda:0" if _torch_cuda_available() else "cpu"
+
+
+def _dilate_dynamic_mask(mask: np.ndarray, dilation: int) -> np.ndarray:
+    if dilation <= 1:
+        return mask
+    import torch
+    import torch.nn.functional as F
+
+    device = _select_auto_device()
+    dynamic = (mask == 0).astype(np.float32)
+    t = torch.from_numpy(dynamic).to(device)
+    expanded = F.max_pool2d(t.unsqueeze(0).unsqueeze(0), kernel_size=dilation, stride=1, padding=dilation // 2)
+    out = (expanded.squeeze(0).squeeze(0) > 0.5).to(torch.uint8)
+    return np.where(out.cpu().numpy() > 0, 0, 255).astype(np.uint8)
 
 
 def _resize_binary_mask(mask: np.ndarray, target_size: tuple[int, int]) -> np.ndarray:
@@ -434,7 +430,6 @@ def _write_yolo_masks_for_images(
     images_dir: Path,
     mask_dir: Path,
     model_name: str,
-    device: str,
     conf: float,
     imgsz: int,
     dilation: int,
@@ -449,7 +444,8 @@ def _write_yolo_masks_for_images(
         dilation += 1
 
     model = _load_yolo_segmenter(model_name)
-    predict_device = None if device == "auto" else device
+    predict_device = _select_auto_device()
+    print(f"YOLO device: {predict_device}")
 
     for image_path in image_paths:
         with Image.open(image_path) as img:
@@ -468,8 +464,103 @@ def _write_yolo_masks_for_images(
         mask = np.where(dynamic, 0, 255).astype(np.uint8)
         mask_img = Image.fromarray(mask, mode="L")
         if dilation > 1:
-            mask_img = mask_img.filter(ImageFilter.MaxFilter(size=dilation))
+            # Mask convention: dynamic=0 (black), static=255 (white).
+            # To dilate dynamic regions, use MinFilter so black expands.
+            mask_img = mask_img.filter(ImageFilter.MinFilter(size=dilation))
         mask_img.save(mask_dir / f"{image_path.name}.png")
+
+
+def _select_sample_indices(total: int, sample_count: int) -> list[int]:
+    if total <= 0:
+        return []
+    count = min(total, max(1, sample_count))
+    return np.unique(np.linspace(0, total - 1, count, dtype=int)).tolist()
+
+
+def _compose_overlay_frame(image_path: Path, mask: np.ndarray) -> Image.Image:
+    rgb = np.asarray(Image.open(image_path).convert("RGB"), dtype=np.uint8)
+    if mask.shape != rgb.shape[:2]:
+        mask = np.asarray(Image.fromarray(mask, mode="L").resize((rgb.shape[1], rgb.shape[0]), Image.Resampling.NEAREST), dtype=np.uint8)
+    blocked = mask == 0
+
+    overlay = rgb.copy().astype(np.float32)
+    red = np.array([255.0, 40.0, 40.0], dtype=np.float32)
+    overlay[blocked] = 0.55 * overlay[blocked] + 0.45 * red
+    overlay = overlay.clip(0, 255).astype(np.uint8)
+
+    panel = np.concatenate([rgb, overlay], axis=1)
+    return Image.fromarray(panel, mode="RGB")
+
+
+def _export_mask_overlay_video(
+    *,
+    images_dir: Path,
+    mask_dir: Path,
+    camera_mask_path: Path | None,
+    ffmpeg_bin: str,
+    out_video_path: Path,
+    sample_count: int = 20,
+    force: bool = False,
+    dry_run: bool = False,
+) -> None:
+    image_paths = sorted(images_dir.glob("*.jpg"))
+    if not image_paths:
+        raise Task1Error(f"No extracted frames found under {images_dir}")
+    if out_video_path.exists() and not force:
+        print(f"Reuse mask overlay video: {out_video_path}")
+        return
+    if dry_run:
+        print(f"Would export mask overlay video: {out_video_path}")
+        return
+
+    indices = _select_sample_indices(len(image_paths), sample_count)
+    if not indices:
+        raise Task1Error("No frames available for mask overlay preview.")
+
+    tmp_dir = out_video_path.parent / "_overlay_frames"
+    if tmp_dir.exists():
+        for p in tmp_dir.glob("*.png"):
+            p.unlink()
+    else:
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+
+    if camera_mask_path is not None:
+        camera_mask = np.asarray(Image.open(camera_mask_path).convert("L"), dtype=np.uint8)
+    else:
+        camera_mask = None
+
+    for out_idx, frame_idx in enumerate(indices, start=1):
+        image_path = image_paths[frame_idx]
+        if camera_mask is not None:
+            mask = camera_mask
+        else:
+            mask_path = mask_dir / f"{image_path.name}.png"
+            if not mask_path.exists():
+                raise Task1Error(f"Mask missing for preview frame: {mask_path}")
+            mask = np.asarray(Image.open(mask_path).convert("L"), dtype=np.uint8)
+        panel = _compose_overlay_frame(image_path, mask)
+        panel.save(tmp_dir / f"{out_idx:06d}.png")
+
+    run_cmd(
+        [
+            ffmpeg_bin,
+            "-y",
+            "-framerate",
+            "5",
+            "-i",
+            str(tmp_dir / "%06d.png"),
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            str(out_video_path),
+        ],
+        dry_run=dry_run,
+        error_cls=Task1Error,
+    )
+    for p in tmp_dir.glob("*.png"):
+        p.unlink()
+    tmp_dir.rmdir()
 
 
 def _prepare_method_inputs(
@@ -602,10 +693,26 @@ def run_task3(cfg: Task3Config) -> int:
         summary_rows: list[dict[str, str | int | float]] = []
         for method in methods:
             timings: dict[str, float] = {}
-            method_root = base_root / method
+            if method == "mask" and mask_source:
+                method_root = base_root / f"mask_{mask_source}"
+            else:
+                method_root = base_root / method
             timing_path = method_root / TIMING_FILENAME
             model_dir = method_root / "sparse" / "0"
             print(f"\n--- Method: {method} ---")
+
+            # Skip if already complete and not in force mode
+            if not cfg.force and not cfg.dry_run and _is_method_run_complete(method_root):
+                print(f"Reuse existing complete outputs: {method_root}")
+                # Load existing analysis into summary_rows
+                analysis_csv = method_root / "analysis.csv"
+                if cfg.stage in {"all", "analyze"} and analysis_csv.exists():
+                    with analysis_csv.open("r", encoding="utf-8") as f:
+                        reader = csv.DictReader(f)
+                        for row in reader:
+                            summary_rows.append(row)
+                continue
+
             if not cfg.dry_run:
                 method_root.mkdir(parents=True, exist_ok=True)
 
@@ -740,6 +847,7 @@ def run_task3_masks(cfg: Task3MaskConfig) -> int:
         images_dir = base_root / "images"
         frame_map_path = base_root / FRAME_MAP_FILENAME
         mask_dir = _resolve_mask_dir(mask_root, case_name, param_tag)
+        preview_video_path = mask_dir / "overlay_preview.mp4"
         timings: dict[str, float] = {}
 
         print(f"\n=== Task3 Mask / {source} / {case_name} / {param_tag} ===")
@@ -774,33 +882,77 @@ def run_task3_masks(cfg: Task3MaskConfig) -> int:
                 )
             if source == "default":
                 mask_path = mask_dir / "camera_mask.png"
-                if not mask_dir.exists():
-                    mask_dir.mkdir(parents=True, exist_ok=True)
-                with timed_block("default_mask", timings):
-                    _write_static_roi_camera_mask(images_dir, mask_path, case_name)
-                print(f"Saved default ROI camera mask: {mask_path}")
-            elif source == "motion":
-                if cfg.force and mask_dir.exists():
-                    for child in mask_dir.glob("*.png"):
-                        child.unlink()
-                with timed_block("motion_mask", timings):
-                    _write_motion_masks(images_dir, mask_dir, cfg.motion_threshold, cfg.motion_dilation)
-                print(f"Saved motion masks: {mask_dir}")
-            else:
-                if cfg.force and mask_dir.exists():
-                    for child in mask_dir.glob("*.png"):
-                        child.unlink()
-                with timed_block("yolo_mask", timings):
-                    _write_yolo_masks_for_images(
+                if not cfg.force and _is_default_camera_mask_ready(mask_path):
+                    print(f"Reuse existing default ROI camera mask: {mask_path}")
+                else:
+                    if not mask_dir.exists():
+                        mask_dir.mkdir(parents=True, exist_ok=True)
+                    with timed_block("default_mask", timings):
+                        _write_static_roi_camera_mask(images_dir, mask_path, case_name)
+                    print(f"Saved default ROI camera mask: {mask_path}")
+                with timed_block("overlay_preview", timings):
+                    _export_mask_overlay_video(
                         images_dir=images_dir,
                         mask_dir=mask_dir,
-                        model_name=cfg.model,
-                        device=cfg.device,
-                        conf=cfg.conf,
-                        imgsz=cfg.imgsz,
-                        dilation=cfg.yolo_dilation,
+                        camera_mask_path=mask_path,
+                        ffmpeg_bin=cfg.ffmpeg_bin,
+                        out_video_path=preview_video_path,
+                        sample_count=20,
+                        force=cfg.force,
+                        dry_run=cfg.dry_run,
                     )
-                print(f"Saved YOLO masks: {mask_dir}")
+                print(f"Saved mask overlay preview video: {preview_video_path}")
+            elif source == "motion":
+                if not cfg.force and _is_mask_dir_complete(mask_dir, images_dir):
+                    print(f"Reuse existing complete motion masks: {mask_dir}")
+                else:
+                    if cfg.force and mask_dir.exists():
+                        for child in mask_dir.glob("*.png"):
+                            child.unlink()
+                    with timed_block("motion_mask", timings):
+                        _write_motion_masks(images_dir, mask_dir, cfg.motion_threshold, cfg.motion_dilation)
+                    print(f"Saved motion masks: {mask_dir}")
+                with timed_block("overlay_preview", timings):
+                    _export_mask_overlay_video(
+                        images_dir=images_dir,
+                        mask_dir=mask_dir,
+                        camera_mask_path=None,
+                        ffmpeg_bin=cfg.ffmpeg_bin,
+                        out_video_path=preview_video_path,
+                        sample_count=20,
+                        force=cfg.force,
+                        dry_run=cfg.dry_run,
+                    )
+                print(f"Saved mask overlay preview video: {preview_video_path}")
+            else:
+                if not cfg.force and _is_mask_dir_complete(mask_dir, images_dir):
+                    print(f"Reuse existing complete YOLO masks: {mask_dir}")
+                else:
+                    if cfg.force and mask_dir.exists():
+                        for child in mask_dir.glob("*.png"):
+                            child.unlink()
+                    with timed_block("yolo_mask", timings):
+                        _write_yolo_masks_for_images(
+                            images_dir=images_dir,
+                            mask_dir=mask_dir,
+                            model_name=cfg.model,
+                            conf=cfg.conf,
+                            imgsz=cfg.imgsz,
+                            dilation=cfg.yolo_dilation,
+                        )
+                    print(f"Saved YOLO masks: {mask_dir}")
+                with timed_block("overlay_preview", timings):
+                    _export_mask_overlay_video(
+                        images_dir=images_dir,
+                        mask_dir=mask_dir,
+                        camera_mask_path=None,
+                        ffmpeg_bin=cfg.ffmpeg_bin,
+                        out_video_path=preview_video_path,
+                        sample_count=20,
+                        force=cfg.force,
+                        dry_run=cfg.dry_run,
+                    )
+                print(f"Saved mask overlay preview video: {preview_video_path}")
 
         if not cfg.dry_run:
             write_timing_csv(mask_dir / TIMING_FILENAME, timings)
