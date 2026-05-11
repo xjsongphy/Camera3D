@@ -36,6 +36,7 @@ function Test-Task1ResultReady {
 Write-Host "Running Task2 full pipeline for S1-2."
 Write-Host "Source FPS: 30"
 Write-Host "Force: $($Force.IsPresent)"
+Write-Host ""
 
 $commonArgs = @()
 if ($Force) {
@@ -45,8 +46,7 @@ $SourceFps = 30.0
 $paramTag = Format-ParamTag -Value $SourceFps
 $task1CaseRoot = Join-Path "outputs/lab1/task1" "S1-2_$paramTag"
 
-Write-Host ""
-Write-Host "=== Step 1/4: Build full-sequence task1 result for S1-2 ==="
+Write-Host "=== Step 1/2: Build full-sequence task1 result for S1-2 ==="
 if ($Force -or !(Test-Task1ResultReady -CaseRoot $task1CaseRoot)) {
     uv run lab1 task1 --videos S1-2 --fps $SourceFps --stage all @commonArgs
 } else {
@@ -54,16 +54,10 @@ if ($Force -or !(Test-Task1ResultReady -CaseRoot $task1CaseRoot)) {
 }
 
 Write-Host ""
-Write-Host "=== Step 2/4: Prepare task2 subsequences (method A subset + method B frames) ==="
-uv run lab1 task2 --source-fps $SourceFps --stage prepare @commonArgs
-
-Write-Host ""
-Write-Host "=== Step 3/4: Run task2 subset SfM (method B) ==="
-uv run lab1 task2 --source-fps $SourceFps --stage sfm @commonArgs
-
-Write-Host ""
-Write-Host "=== Step 4/4: Analyze alignment and ATE ==="
-uv run lab1 task2 --source-fps $SourceFps --stage analyze @commonArgs
+Write-Host "=== Step 2/2: Run task2 with optimized default subsequences ==="
+Write-Host "Using default subsequences (return_mid, scan_stable, return_long)"
+Write-Host "Already completed subsequences will be automatically skipped."
+uv run lab1 task2 --source-fps $SourceFps --stage all @commonArgs
 
 $task2Root = Join-Path "outputs/lab1/task2" "S1-2_$paramTag"
 $summaryCsv = Join-Path $task2Root "summary.csv"

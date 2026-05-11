@@ -101,5 +101,13 @@ done
 echo
 echo "Task3 outputs:"
 for video in "${VIDEOS[@]}"; do
-  echo "- outputs/lab1/task3/${video}_fps${FPS}"
+  echo "- outputs/lab1/task3/${video}_fps${FPS}/"
+  echo "  - raw/           (baseline reconstruction)"
+  echo "  - mask_default/  (static ROI mask)"
+  if [[ $SKIP_YOLO -eq 0 ]]; then
+    echo "  - mask_motion/   (temporal difference mask)"
+    echo "  - mask_yolo/     (YOLO semantic segmentation mask)"
+  fi
 done
+echo ""
+echo "Note: Each mask method outputs to a separate directory to avoid overwriting."

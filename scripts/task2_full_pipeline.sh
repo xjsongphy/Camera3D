@@ -43,11 +43,11 @@ fi
 echo "Running Task2 full pipeline for S1-2."
 echo "Source FPS: ${SOURCE_FPS}"
 echo "Force: ${FORCE_FLAG:-false}"
+echo ""
 PARAM_TAG="$(format_param_tag "$SOURCE_FPS")"
 TASK1_CASE_ROOT="outputs/lab1/task1/S1-2_${PARAM_TAG}"
 
-echo
-echo "=== Step 1/4: Build full-sequence task1 result for S1-2 ==="
+echo "=== Step 1/2: Build full-sequence task1 result for S1-2 ==="
 if [[ "$FORCE_FLAG" == "--force" ]] || ! task1_result_ready "$TASK1_CASE_ROOT"; then
   uv run lab1 task1 --videos S1-2 --fps "$SOURCE_FPS" --stage all "${EXTRA_ARGS[@]}"
 else
@@ -55,16 +55,10 @@ else
 fi
 
 echo
-echo "=== Step 2/4: Prepare task2 subsequences (method A subset + method B frames) ==="
-uv run lab1 task2 --source-fps "$SOURCE_FPS" --stage prepare "${EXTRA_ARGS[@]}"
-
-echo
-echo "=== Step 3/4: Run task2 subset SfM (method B) ==="
-uv run lab1 task2 --source-fps "$SOURCE_FPS" --stage sfm "${EXTRA_ARGS[@]}"
-
-echo
-echo "=== Step 4/4: Analyze alignment and ATE ==="
-uv run lab1 task2 --source-fps "$SOURCE_FPS" --stage analyze "${EXTRA_ARGS[@]}"
+echo "=== Step 2/2: Run task2 with optimized default subsequences ==="
+echo "Using default subsequences (return_mid, scan_stable, return_long)"
+echo "Already completed subsequences will be automatically skipped."
+uv run lab1 task2 --source-fps "$SOURCE_FPS" --stage all "${EXTRA_ARGS[@]}"
 
 TASK2_ROOT="outputs/lab1/task2/S1-2_${PARAM_TAG}"
 SUMMARY_CSV="${TASK2_ROOT}/summary.csv"

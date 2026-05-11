@@ -95,5 +95,14 @@ foreach ($source in $sources) {
 
 Write-Host ""
 Write-Host "Task3 outputs:"
-Write-Host "- outputs/lab1/task3/S2-1_fps${fps}"
-Write-Host "- outputs/lab1/task3/S2-2_fps${fps}"
+Write-Host "- outputs/lab1/task3/S2-1_fps${fps}/"
+Write-Host "  - raw/           (baseline reconstruction)"
+Write-Host "  - mask_default/  (static ROI mask)"
+if (-not $SkipYolo) {
+    Write-Host "  - mask_motion/   (temporal difference mask)"
+    Write-Host "  - mask_yolo/     (YOLO semantic segmentation mask)"
+}
+Write-Host "- outputs/lab1/task3/S2-2_fps${fps}/"
+Write-Host "  - Same structure as S2-1"
+Write-Host ""
+Write-Host "Note: Each mask method outputs to a separate directory to avoid overwriting."
