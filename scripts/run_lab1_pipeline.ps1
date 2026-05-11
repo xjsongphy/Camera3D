@@ -1,4 +1,36 @@
+<#
+.SYNOPSIS
+    Run Camera3D Lab1 pipeline tasks in sequence.
+
+.DESCRIPTION
+    Executes specified Lab1 tasks (task1, task2, task3) in dependency order.
+    Skips already completed tasks unless --force is used.
+
+.PARAMETER Tasks
+    Array of task names to run. Valid values: "task1", "task2", "task3"
+    Default: @("task1", "task2", "task3")
+
+.PARAMETER Force
+    Force rerun all tasks even if already completed.
+
+.PARAMETER DryRun
+    Show what would be executed without actually running.
+
+.PARAMETER SkipYolo
+    Skip YOLO mask generation in task3.
+
+.EXAMPLE
+    # Run all tasks
+    .\scripts\run_lab1_pipeline.ps1
+
+    # Run only task2 and task3
+    .\scripts\run_lab1_pipeline.ps1 -Tasks task2,task3
+
+    # Run only task1 with dry-run
+    .\scripts\run_lab1_pipeline.ps1 -Tasks task1 --dry-run
+#>
 param(
+    [string[]$Tasks = @("task1", "task2", "task3"),
     [switch]$Force,
     [switch]$DryRun,
     [switch]$SkipYolo
@@ -9,10 +41,25 @@ $ErrorActionPreference = "Stop"
 $RootDir = Split-Path -Parent $PSScriptRoot | Split-Path -Parent
 Set-Location $RootDir
 
+# Valid task list
+$validTasks = @("task1", "task2", "task3")
+
+# Validate tasks
+foreach ($task in $Tasks) {
+    if ($task -notin $validTasks) {
+        Write-Host "Invalid task: $task" -ForegroundColor Red
+        Write-Host "`nValid tasks: $($validTasks -join ', ')" -ForegroundColor Cyan
+        exit 1
+    }
+}
+
+# Display what will run
+Write-Host "Tasks to run: $($Tasks -join ', ')" -ForegroundColor Green
+
 # Task definitions with their scripts and check functions
 $tasks = @(
     @{
-        Name = "task1_fps_sweep"
+        Name = "task1"
         Description = "Task1 FPS sweep (4, 8, 16, 30 fps) for S1-1, S1-2, S1-3"
         Script = "scripts/task1_fps_sweep_full.ps1"
         Args = @()
@@ -39,7 +86,7 @@ $tasks = @(
         }
     },
     @{
-        Name = "task2_full"
+        Name = "task2"
         Description = "Task2 with optimized default subsequences (return_mid, scan_stable, return_long)"
         Script = "scripts/task2_full_pipeline.ps1"
         Args = @()
@@ -50,7 +97,7 @@ $tasks = @(
         }
     },
     @{
-        Name = "task3_full"
+        Name = "task3"
         Description = "Task3 with raw, default, motion, yolo masks"
         Script = "scripts/task3_full_pipeline.ps1"
         Args = @()

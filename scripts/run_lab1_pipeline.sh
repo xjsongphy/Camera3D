@@ -7,20 +7,37 @@ cd "$ROOT_DIR"
 FORCE=0
 DRY_RUN=0
 SKIP_YOLO=0
+SELECTED_TASKS="task1,task2,task3"
 
 usage() {
   cat <<'EOF' >&2
-Usage: bash ./scripts/run_lab1_pipeline.sh [--force] [--dry-run] [--skip-yolo]
+Usage: bash ./scripts/run_lab1_pipeline.sh [TASKS...] [--force] [--dry-run] [--skip-yolo]
+
+Arguments:
+  TASKS                 Task names to run (default: task1,task2,task3)
+                        Valid values: task1, task2, task3
+                        Example: run_lab1_pipeline.sh task2 task3
 
 Options:
   --force     Force rerun all tasks even if completed
   --dry-run   Print commands without executing
   --skip-yolo Skip YOLO mask generation in task3
 
+Examples:
+  # Run all tasks
+  bash ./scripts/run_lab1_pipeline.sh
+
+  # Run only task2 and task3
+  bash ./scripts/run_lab1_pipeline.sh task2 task3
+
+  # Run only task1 with dry-run
+  bash ./scripts/run_lab1_pipeline.sh task1 --dry-run
+
 EOF
   exit 1
 }
 
+# Parse tasks from positional arguments
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --force)
@@ -35,10 +52,32 @@ while [[ $# -gt 0 ]]; do
       SKIP_YOLO=1
       shift
       ;;
+    task1|task2|task3)
+      # Accumulate task names
+      if [[ -n "$SELECTED_TASKS" ]]; then
+        SELECTED_TASKS="${SELECTED_TASKS},$1"
+      else
+        SELECTED_TASKS="$1"
+      fi
+      shift
+      ;;
     *)
       usage
       ;;
   esac
+done
+
+# Convert comma-separated list to array
+IFS=',' read -ra selected_tasks_array <<< "$SELECTED_TASKS"
+valid_tasks=(task1 task2 task3)
+
+# Validate tasks
+for task in "${selected_tasks_array[@]}"; do
+  if [[ ! " ${valid_tasks[*]} " =~ " $task " ]]; then
+    echo "Invalid task: $task" >&2
+    echo "Valid tasks: ${valid_tasks[*]}" >&2
+    exit 1
+  fi
 done
 
 echo ""
@@ -47,6 +86,7 @@ echo "║   Camera3D Complete Lab1 Pipeline Runner    ║"
 echo "╚══════════════════════════════════════════════╝"
 echo ""
 echo "Configuration:"
+echo "  Tasks:     ${SELECTED_TASKS}"
 echo "  Force:     $FORCE"
 echo "  Dry Run:    $DRY_RUN"
 echo "  Skip YOLO: $SKIP_YOLO"
@@ -152,13 +192,27 @@ run_task() {
 failed_tasks=()
 success_count=0
 
-for task_key in "task1_fps_sweep" "task2_full" "task3_full"; do
-  IFS='|' read -r desc script <<< "${TASKS[$task_key]}"
+for task_name in "${selected_tasks_array[@]}"; do
+  # Map task name to script path
+  case "$task_name" in
+    task1)
+      script="scripts/task1_fps_sweep_full.sh"
+      desc="Task1 FPS sweep (4, 8, 16, 30 fps) for S1-1, S1-2, S1-3"
+      ;;
+    task2)
+      script="scripts/task2_full_pipeline.sh"
+      desc="Task2 with optimized default subsequences (return_mid, scan_stable, return_long)"
+      ;;
+    task3)
+      script="scripts/task3_full_pipeline.sh"
+      desc="Task3 with raw, default, motion, yolo masks"
+      ;;
+  esac
 
-  if run_task "$task_key" "$desc" "$script"; then
+  if run_task "$task_name" "$desc" "$script"; then
     ((success_count++))
   else
-    failed_tasks+=("$task_key")
+    failed_tasks+=("$task_name")
   fi
 done
 
@@ -169,7 +223,7 @@ echo "Pipeline Execution Summary"
 echo "========================================"
 echo ""
 
-echo "Total tasks: 3"
+echo "Total tasks: ${#selected_tasks_array[@]}"
 echo "  Successful: $success_count"
 echo "  Failed:    ${#failed_tasks[@]}"
 
