@@ -8,6 +8,7 @@ from lab1.logging_utils import build_timestamped_log_path, tee_console_output
 from lab1.task1 import Task1Config, Task1Error, run_task1
 from lab1.task2 import Task2Config, run_task2
 from lab1.task3 import Task3Config, Task3MaskConfig, run_task3, run_task3_masks
+from lab1.task4 import Task4Config, run_task4
 
 LAB1_ROOT = Path("docs/lab1")
 OUTPUT_ROOT = Path("outputs/lab1")
@@ -150,6 +151,22 @@ def run_task3_masks_entry(args: argparse.Namespace) -> int:
         return 2
 
 
+def run_task4_entry(args: argparse.Namespace) -> int:
+    out_dir = _ensure_output_dir("task4")
+    cfg = Task4Config(
+        lab1_root=LAB1_ROOT,
+        output_root=out_dir,
+        force=args.force,
+        dry_run=args.dry_run,
+        cases=args.cases,
+    )
+    try:
+        return run_task4(cfg)
+    except Task1Error as exc:
+        print(f"Task4 failed: {exc}")
+        return 2
+
+
 def _add_task3_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--fps", type=float, default=5.0, help="frame sampling rate for task3 dynamic videos")
     parser.add_argument("--colmap-bin", default="colmap", help="colmap executable name/path for task3")
@@ -245,6 +262,16 @@ def _add_task3_mask_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_task4_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--force", action="store_true", help="overwrite previous task4 outputs")
+    parser.add_argument("--dry-run", action="store_true", help="print steps without executing for task4")
+    parser.add_argument(
+        "--cases",
+        nargs="+",
+        help="optional subset of annotation cases, e.g. --cases 01 02 06",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Camera3D Lab1 task runner")
     subparsers = parser.add_subparsers(dest="task", required=True)
@@ -314,7 +341,8 @@ def build_parser() -> argparse.ArgumentParser:
     task3_mask_parser.set_defaults(handler=run_task3_masks_entry)
 
     task4_parser = subparsers.add_parser("task4", help=TASK_HELP["task4"])
-    task4_parser.set_defaults(handler=lambda _args: _run_placeholder("task4"))
+    _add_task4_args(task4_parser)
+    task4_parser.set_defaults(handler=run_task4_entry)
 
     for alias, target in ALIASES.items():
         if alias.startswith("q"):
@@ -376,6 +404,9 @@ def build_parser() -> argparse.ArgumentParser:
             elif target == "task3":
                 _add_task3_args(sub)
                 sub.set_defaults(handler=run_task3_entry)
+            elif target == "task4":
+                _add_task4_args(sub)
+                sub.set_defaults(handler=run_task4_entry)
             else:
                 sub.set_defaults(handler=lambda _args, task_name=target: _run_placeholder(task_name))
     return parser

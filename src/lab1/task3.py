@@ -14,6 +14,7 @@ from lab1.task1 import (
     FRAME_MAP_FILENAME,
     TIMING_FILENAME,
     Task1Error,
+    _apply_sim3,
     _count_registered_images_in_model,
     _extract_frames,
     _format_float_tag,
@@ -22,9 +23,12 @@ from lab1.task1 import (
     _parse_image_centers,
     _parse_points3d,
     _parse_image_poses,
+    _parse_registered_pose_map,
     _plot_sparse_point_cloud,
+    _plot_merged_trajectories,
     _plot_trajectory,
     _run_colmap,
+    _umeyama_sim3,
 )
 
 S2_VIDEOS = ["S2-1.mp4", "S2-2.mp4"]
@@ -323,6 +327,102 @@ def _save_method_summary(base_root: Path, rows: list[dict[str, str | int | float
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(final_rows)
+
+
+def _collect_existing_method_trajectories(
+    base_root: Path,
+) -> list[tuple[str, str, dict[str, np.ndarray]]]:
+    candidates = [
+        ("raw", "raw", base_root / "raw"),
+        ("mask_default", "default", base_root / "mask_default"),
+        ("mask_motion", "motion", base_root / "mask_motion"),
+        ("mask_yolo", "yolo", base_root / "mask_yolo"),
+    ]
+    found: list[tuple[str, str, dict[str, np.ndarray]]] = []
+    for method_variant, label, method_root in candidates:
+        images_txt = method_root / "sparse" / "0" / "images.txt"
+        if not images_txt.exists():
+            continue
+        pose_map = _parse_registered_pose_map(images_txt)
+        if not pose_map:
+            continue
+        found.append((method_variant, label, pose_map))
+    return found
+
+
+def _align_method_trajectories_to_reference(
+    trajectories: list[tuple[str, str, dict[str, np.ndarray]]],
+) -> tuple[list[tuple[float, str, np.ndarray]], list[dict[str, str | int | float]]]:
+    ref_variant, ref_label, ref_pose_map = trajectories[0]
+    ref_names_sorted = sorted(ref_pose_map)
+    ref_full = np.array([ref_pose_map[name] for name in ref_names_sorted])
+    aligned: list[tuple[float, str, np.ndarray]] = [(0.0, ref_label, ref_full)]
+    summary: list[dict[str, str | int | float]] = [
+        {"method_variant": ref_variant, "label": ref_label, "common_frames": len(ref_names_sorted), "scale": 1.0}
+    ]
+
+    for method_variant, label, pose_map in trajectories[1:]:
+        common_names = sorted(set(ref_pose_map) & set(pose_map))
+        if len(common_names) < 3:
+            raise Task1Error(
+                f"Need at least 3 common registered frames to align {method_variant} to {ref_variant}, "
+                f"found {len(common_names)}"
+            )
+        ref_common = np.array([ref_pose_map[name] for name in common_names])
+        cur_common = np.array([pose_map[name] for name in common_names])
+        scale, rot, trans = _umeyama_sim3(cur_common, ref_common)
+        cur_names_sorted = sorted(pose_map)
+        cur_full = np.array([pose_map[name] for name in cur_names_sorted])
+        cur_aligned = _apply_sim3(cur_full, scale, rot, trans)
+        aligned.append((0.0, label, cur_aligned))
+        summary.append(
+            {
+                "method_variant": method_variant,
+                "label": label,
+                "common_frames": len(common_names),
+                "scale": scale,
+            }
+        )
+    return aligned, summary
+
+
+def _write_merged_method_trajectory(
+    *,
+    base_root: Path,
+    case_name: str,
+    force: bool,
+    dry_run: bool,
+    timings: dict[str, float],
+) -> None:
+    trajectories = _collect_existing_method_trajectories(base_root)
+    if len(trajectories) < 2:
+        print(f"Skip merged trajectory: found only {len(trajectories)} method(s) under {base_root}")
+        return
+
+    out_path = base_root / "trajectory_overlay.png"
+    summary_path = base_root / "trajectory_overlay_summary.csv"
+    if dry_run:
+        print(f"Would save merged method trajectory: {out_path}")
+        return
+    if out_path.exists() and not force:
+        print(f"Reuse merged method trajectory: {out_path}")
+        return
+
+    with timed_block("merge_align", timings):
+        aligned_trajectories, alignment_summary = _align_method_trajectories_to_reference(trajectories)
+    with timed_block("merge_plot", timings):
+        _plot_merged_trajectories(
+            aligned_trajectories,
+            out_path,
+            f"{case_name} Trajectory Overlay Across Methods",
+        )
+    with timed_block("merge_write_summary", timings):
+        with summary_path.open("w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["method_variant", "label", "common_frames", "scale"])
+            writer.writeheader()
+            writer.writerows(alignment_summary)
+    print(f"Saved merged trajectory: {out_path}")
+    print(f"Saved merged trajectory summary: {summary_path}")
 
 
 def _load_gray_image(path: Path) -> np.ndarray:
@@ -634,6 +734,7 @@ def _export_mask_overlay_video(
     camera_mask_path: Path | None,
     ffmpeg_bin: str,
     out_video_path: Path,
+    output_fps: float,
     force: bool = False,
     dry_run: bool = False,
 ) -> None:
@@ -675,7 +776,7 @@ def _export_mask_overlay_video(
             ffmpeg_bin,
             "-y",
             "-framerate",
-            "5",
+            f"{output_fps:g}",
             "-i",
             str(tmp_dir / "%06d.png"),
             "-c:v",
@@ -952,6 +1053,20 @@ def run_task3(cfg: Task3Config) -> int:
         if summary_rows and not cfg.dry_run:
             _save_method_summary(base_root, summary_rows)
             print(f"Saved method summary: {base_root / 'method_summary.csv'}")
+        if cfg.stage in {"all", "analyze"}:
+            merge_timings: dict[str, float] = {}
+            _write_merged_method_trajectory(
+                base_root=base_root,
+                case_name=case_name,
+                force=cfg.force,
+                dry_run=cfg.dry_run,
+                timings=merge_timings,
+            )
+            if merge_timings and not cfg.dry_run:
+                merge_timing_path = base_root / "trajectory_overlay_timing.csv"
+                write_timing_csv(merge_timing_path, merge_timings)
+                print(f"Saved merged trajectory timing: {merge_timing_path}")
+                print_timing_summary(f"Timing / {case_name} / {param_tag} / merge", merge_timings)
 
     print("\nTask3 completed.")
     return 0
@@ -1040,6 +1155,7 @@ def run_task3_masks(cfg: Task3MaskConfig) -> int:
                         camera_mask_path=mask_path,
                         ffmpeg_bin=cfg.ffmpeg_bin,
                         out_video_path=preview_video_path,
+                        output_fps=cfg.fps,
                         force=cfg.force,
                         dry_run=cfg.dry_run,
                     )

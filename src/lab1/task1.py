@@ -353,11 +353,8 @@ def _plot_sparse_point_cloud(
     max_points: int,
     crop_percentile: float | None = 1.0,
 ) -> None:
-    fig = plt.figure(figsize=(12, 10))
-    ax3d = fig.add_subplot(221, projection="3d")
-    ax_xy = fig.add_subplot(222)
-    ax_xz = fig.add_subplot(223)
-    ax_yz = fig.add_subplot(224)
+    fig = plt.figure(figsize=(10, 8))
+    ax = fig.add_subplot(111, projection="3d")
 
     pts = np.empty((0, 3), dtype=float)
     colors = np.empty((0, 3), dtype=float)
@@ -379,43 +376,19 @@ def _plot_sparse_point_cloud(
         else:
             pts = pts_all
             colors = colors_all
-        ax3d.scatter(pts[:, 0], pts[:, 1], pts[:, 2], c=colors, s=1.2, alpha=0.65, linewidths=0)
-        ax_xy.scatter(pts[:, 0], pts[:, 1], c=colors, s=1.2, alpha=0.65, linewidths=0)
-        ax_xz.scatter(pts[:, 0], pts[:, 2], c=colors, s=1.2, alpha=0.65, linewidths=0)
-        ax_yz.scatter(pts[:, 1], pts[:, 2], c=colors, s=1.2, alpha=0.65, linewidths=0)
+        ax.scatter(pts[:, 0], pts[:, 1], pts[:, 2], c=colors, s=1.2, alpha=0.65, linewidths=0)
 
     if len(centers) > 0:
-        ax3d.plot(centers[:, 0], centers[:, 1], centers[:, 2], color="tab:red", linewidth=1.4, label="camera path")
-        ax_xy.plot(centers[:, 0], centers[:, 1], color="tab:red", linewidth=1.2)
-        ax_xz.plot(centers[:, 0], centers[:, 2], color="tab:red", linewidth=1.2)
-        ax_yz.plot(centers[:, 1], centers[:, 2], color="tab:red", linewidth=1.2)
+        ax.plot(centers[:, 0], centers[:, 1], centers[:, 2], color="tab:red", linewidth=1.4, label="camera path")
 
-    ax3d.set_title(title)
-    ax3d.set_xlabel("X")
-    ax3d.set_ylabel("Y")
-    ax3d.set_zlabel("Z")
-    ax3d.set_box_aspect([1, 1, 1])
-    ax3d.grid(True)
+    ax.set_title(title)
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+    ax.set_zlabel("Z")
+    ax.set_box_aspect([1, 1, 1])
+    ax.grid(True)
     if len(centers) > 0:
-        ax3d.legend(loc="best")
-
-    ax_xy.set_title("Top View (X-Y)")
-    ax_xy.set_xlabel("X")
-    ax_xy.set_ylabel("Y")
-    ax_xy.set_aspect("equal", adjustable="box")
-    ax_xy.grid(True, alpha=0.35)
-
-    ax_xz.set_title("Side View (X-Z)")
-    ax_xz.set_xlabel("X")
-    ax_xz.set_ylabel("Z")
-    ax_xz.set_aspect("equal", adjustable="box")
-    ax_xz.grid(True, alpha=0.35)
-
-    ax_yz.set_title("Side View (Y-Z)")
-    ax_yz.set_xlabel("Y")
-    ax_yz.set_ylabel("Z")
-    ax_yz.set_aspect("equal", adjustable="box")
-    ax_yz.grid(True, alpha=0.35)
+        ax.legend(loc="best")
 
     fig.tight_layout()
     fig.savefig(out_path, dpi=170)

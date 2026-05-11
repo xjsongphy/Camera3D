@@ -25,3 +25,6 @@ outputs/
 /models/*.pt
 /runs/
 /ultralytics_settings.yaml
+
+# Manuscript local artifacts
+TODO.md

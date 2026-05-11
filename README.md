@@ -125,7 +125,7 @@ uv run lab1 task3 --videos S2-1 S2-2 --fps 5 --methods mask --mask-source yolo
 
 Notes:
 
-- `task3-mask generates masks and an overlay preview video (20 sampled frames) under each mask directory.
+- `task3-mask generates masks and an overlay preview video (all frames) under each mask directory.
 - `task3` consumes existing masks only; missing masks will raise an error with a suggested command.
 
 Task3 method outputs include:
