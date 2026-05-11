@@ -69,6 +69,14 @@ class Task3MaskConfig:
     yolo_dilation: int = 7
 
 
+@dataclass
+class PointCloudQuality:
+    xyz: np.ndarray
+    rgb: np.ndarray
+    reproj_error: np.ndarray
+    track_length: np.ndarray
+
+
 def _normalize_method_name(name: str) -> str:
     value = name.strip().lower()
     aliases = {
@@ -122,20 +130,115 @@ def _compute_jump_stats(centers: np.ndarray) -> tuple[float, float, float]:
     return median_step, max_step, jump_ratio
 
 
+def _parse_points3d_quality(points3d_txt: Path) -> PointCloudQuality:
+    xyzs: list[list[float]] = []
+    rgbs: list[list[float]] = []
+    reproj_error: list[float] = []
+    track_length: list[int] = []
+    with points3d_txt.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split()
+            if len(parts) < 8:
+                continue
+            xyzs.append([float(parts[1]), float(parts[2]), float(parts[3])])
+            rgbs.append([float(parts[4]) / 255.0, float(parts[5]) / 255.0, float(parts[6]) / 255.0])
+            reproj_error.append(float(parts[7]))
+            track_length.append((len(parts) - 8) // 2)
+    if not xyzs:
+        empty_xyz = np.empty((0, 3), dtype=float)
+        empty_rgb = np.empty((0, 3), dtype=float)
+        empty_scalar = np.empty((0,), dtype=float)
+        return PointCloudQuality(
+            xyz=empty_xyz,
+            rgb=empty_rgb,
+            reproj_error=empty_scalar,
+            track_length=empty_scalar.astype(int),
+        )
+    return PointCloudQuality(
+        xyz=np.array(xyzs, dtype=float),
+        rgb=np.array(rgbs, dtype=float),
+        reproj_error=np.array(reproj_error, dtype=float),
+        track_length=np.array(track_length, dtype=int),
+    )
+
+
+def _build_reliable_point_mask(point_cloud: PointCloudQuality) -> np.ndarray:
+    if len(point_cloud.xyz) == 0:
+        return np.zeros((0,), dtype=bool)
+
+    xyz = point_cloud.xyz
+    reproj_error = point_cloud.reproj_error
+    track_length = point_cloud.track_length
+
+    spatial_lo = np.percentile(xyz, 1.0, axis=0)
+    spatial_hi = np.percentile(xyz, 99.0, axis=0)
+    spatial_mask = np.all((xyz >= spatial_lo) & (xyz <= spatial_hi), axis=1)
+
+    error_threshold = min(float(np.percentile(reproj_error, 90.0)), 2.0)
+    track_threshold = max(4, int(np.percentile(track_length, 30.0)))
+    quality_mask = (reproj_error <= error_threshold) & (track_length >= track_threshold)
+
+    reliable = spatial_mask & quality_mask
+    if np.count_nonzero(reliable) < max(128, len(xyz) // 50):
+        reliable = quality_mask
+    return reliable
+
+
+def _summarize_point_cloud_quality(point_cloud: PointCloudQuality, reliable_mask: np.ndarray) -> dict[str, int | float]:
+    if len(point_cloud.xyz) == 0:
+        return {
+            "points3d_reliable": 0,
+            "points3d_reliable_ratio": 0.0,
+            "reproj_error_median": 0.0,
+            "reproj_error_p90": 0.0,
+            "reproj_error_p99": 0.0,
+            "track_length_median": 0.0,
+            "track_length_p10": 0.0,
+        }
+    return {
+        "points3d_reliable": int(np.count_nonzero(reliable_mask)),
+        "points3d_reliable_ratio": float(np.mean(reliable_mask)),
+        "reproj_error_median": float(np.median(point_cloud.reproj_error)),
+        "reproj_error_p90": float(np.percentile(point_cloud.reproj_error, 90.0)),
+        "reproj_error_p99": float(np.percentile(point_cloud.reproj_error, 99.0)),
+        "track_length_median": float(np.median(point_cloud.track_length)),
+        "track_length_p10": float(np.percentile(point_cloud.track_length, 10.0)),
+    }
+
+
+def _cleanup_legacy_point_cloud_plots(method_root: Path) -> None:
+    for name in ("sparse_points_full.png", "sparse_points_reliable.png"):
+        path = method_root / name
+        if path.exists():
+            path.unlink()
+
+
 
 def _write_analysis(
     *,
     method_root: Path,
     case_name: str,
     method: str,
+    mask_source: str | None,
     fps: float,
     total_frames: int,
     registered_frames: int,
     points3d_count: int,
+    points3d_reliable: int,
+    points3d_reliable_ratio: float,
+    reproj_error_median: float,
+    reproj_error_p90: float,
+    reproj_error_p99: float,
+    track_length_median: float,
+    track_length_p10: float,
     median_step: float,
     max_step: float,
     jump_ratio: float,
 ) -> dict[str, str | int | float]:
+    method_variant = method if method != "mask" or not mask_source else f"mask_{mask_source}"
     registration_ratio = (registered_frames / total_frames) if total_frames > 0 else 0.0
     analysis_txt = method_root / "analysis.txt"
     analysis_csv = method_root / "analysis.csv"
@@ -143,11 +246,20 @@ def _write_analysis(
     lines = [
         f"video={case_name}",
         f"method={method}",
+        f"method_variant={method_variant}",
+        f"mask_source={mask_source or ''}",
         f"fps={fps:g}",
         f"total_frames={total_frames}",
         f"registered_frames={registered_frames}",
         f"registration_ratio={registration_ratio:.8f}",
         f"points3d={points3d_count}",
+        f"points3d_reliable={points3d_reliable}",
+        f"points3d_reliable_ratio={points3d_reliable_ratio:.8f}",
+        f"reproj_error_median={reproj_error_median:.8f}",
+        f"reproj_error_p90={reproj_error_p90:.8f}",
+        f"reproj_error_p99={reproj_error_p99:.8f}",
+        f"track_length_median={track_length_median:.8f}",
+        f"track_length_p10={track_length_p10:.8f}",
         f"trajectory_step_median={median_step:.8f}",
         f"trajectory_step_max={max_step:.8f}",
         f"trajectory_jump_ratio={jump_ratio:.8f}",
@@ -157,11 +269,20 @@ def _write_analysis(
     row = {
         "video": case_name,
         "method": method,
+        "method_variant": method_variant,
+        "mask_source": mask_source or "",
         "fps": f"{fps:g}",
         "total_frames": total_frames,
         "registered_frames": registered_frames,
         "registration_ratio": f"{registration_ratio:.8f}",
         "points3d": points3d_count,
+        "points3d_reliable": points3d_reliable,
+        "points3d_reliable_ratio": f"{points3d_reliable_ratio:.8f}",
+        "reproj_error_median": f"{reproj_error_median:.8f}",
+        "reproj_error_p90": f"{reproj_error_p90:.8f}",
+        "reproj_error_p99": f"{reproj_error_p99:.8f}",
+        "track_length_median": f"{track_length_median:.8f}",
+        "track_length_p10": f"{track_length_p10:.8f}",
         "trajectory_step_median": f"{median_step:.8f}",
         "trajectory_step_max": f"{max_step:.8f}",
         "trajectory_jump_ratio": f"{jump_ratio:.8f}",
@@ -176,11 +297,32 @@ def _write_analysis(
 def _save_method_summary(base_root: Path, rows: list[dict[str, str | int | float]]) -> None:
     if not rows:
         return
+    existing_rows: list[dict[str, str | int | float]] = []
     out_path = base_root / "method_summary.csv"
+    if out_path.exists():
+        with out_path.open("r", encoding="utf-8", newline="") as f:
+            reader = csv.DictReader(f)
+            existing_rows = []
+            for row in reader:
+                if row.get("method") == "mask" and not row.get("method_variant"):
+                    continue
+                existing_rows.append(row)
+
+    merged: dict[str, dict[str, str | int | float]] = {}
+    for row in existing_rows + rows:
+        key = str(row.get("method_variant") or row.get("method", ""))
+        merged[key] = row
+
+    final_rows = list(merged.values())
+    fieldnames: list[str] = []
+    for row in final_rows:
+        for key in row:
+            if key not in fieldnames:
+                fieldnames.append(key)
     with out_path.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(rows[0]))
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows(final_rows)
 
 
 def _load_gray_image(path: Path) -> np.ndarray:
@@ -470,13 +612,6 @@ def _write_yolo_masks_for_images(
         mask_img.save(mask_dir / f"{image_path.name}.png")
 
 
-def _select_sample_indices(total: int, sample_count: int) -> list[int]:
-    if total <= 0:
-        return []
-    count = min(total, max(1, sample_count))
-    return np.unique(np.linspace(0, total - 1, count, dtype=int)).tolist()
-
-
 def _compose_overlay_frame(image_path: Path, mask: np.ndarray) -> Image.Image:
     rgb = np.asarray(Image.open(image_path).convert("RGB"), dtype=np.uint8)
     if mask.shape != rgb.shape[:2]:
@@ -499,7 +634,6 @@ def _export_mask_overlay_video(
     camera_mask_path: Path | None,
     ffmpeg_bin: str,
     out_video_path: Path,
-    sample_count: int = 20,
     force: bool = False,
     dry_run: bool = False,
 ) -> None:
@@ -513,10 +647,6 @@ def _export_mask_overlay_video(
         print(f"Would export mask overlay video: {out_video_path}")
         return
 
-    indices = _select_sample_indices(len(image_paths), sample_count)
-    if not indices:
-        raise Task1Error("No frames available for mask overlay preview.")
-
     tmp_dir = out_video_path.parent / "_overlay_frames"
     if tmp_dir.exists():
         for p in tmp_dir.glob("*.png"):
@@ -529,8 +659,7 @@ def _export_mask_overlay_video(
     else:
         camera_mask = None
 
-    for out_idx, frame_idx in enumerate(indices, start=1):
-        image_path = image_paths[frame_idx]
+    for out_idx, image_path in enumerate(image_paths, start=1):
         if camera_mask is not None:
             mask = camera_mask
         else:
@@ -773,7 +902,11 @@ def run_task3(cfg: Task3Config) -> int:
                         centers, _ = _parse_image_centers(images_txt)
                         registered_frames = _count_registered_images_in_model(images_txt)
                         total_frames = len(list(images_dir.glob("*.jpg")))
-                        points_xyz, points_rgb = _parse_points3d(points3d_txt)
+                        point_cloud = _parse_points3d_quality(points3d_txt)
+                        points_xyz = point_cloud.xyz
+                        points_rgb = point_cloud.rgb
+                        reliable_mask = _build_reliable_point_mask(point_cloud)
+                        quality_stats = _summarize_point_cloud_quality(point_cloud, reliable_mask)
                         median_step, max_step, jump_ratio = _compute_jump_stats(centers)
 
                         summary_rows.append(
@@ -781,22 +914,32 @@ def run_task3(cfg: Task3Config) -> int:
                                 method_root=method_root,
                                 case_name=case_name,
                                 method=method,
+                                mask_source=(mask_source if method == "mask" else None),
                                 fps=cfg.fps,
                                 total_frames=total_frames,
                                 registered_frames=registered_frames,
                                 points3d_count=len(points_xyz),
+                                points3d_reliable=int(quality_stats["points3d_reliable"]),
+                                points3d_reliable_ratio=float(quality_stats["points3d_reliable_ratio"]),
+                                reproj_error_median=float(quality_stats["reproj_error_median"]),
+                                reproj_error_p90=float(quality_stats["reproj_error_p90"]),
+                                reproj_error_p99=float(quality_stats["reproj_error_p99"]),
+                                track_length_median=float(quality_stats["track_length_median"]),
+                                track_length_p10=float(quality_stats["track_length_p10"]),
                                 median_step=median_step,
                                 max_step=max_step,
                                 jump_ratio=jump_ratio,
                             )
                         )
+                        _cleanup_legacy_point_cloud_plots(method_root)
                         _plot_sparse_point_cloud(
-                            points_xyz,
-                            points_rgb,
+                            points_xyz[reliable_mask],
+                            points_rgb[reliable_mask],
                             centers,
                             method_root / "sparse_points.png",
                             f"{case_name} {method} Sparse Point Cloud",
                             max_points=cfg.max_points_plot,
+                            crop_percentile=1.0,
                         )
                     print(f"Saved analysis: {method_root / 'analysis.txt'}")
                     print(f"Saved point cloud plot: {method_root / 'sparse_points.png'}")
@@ -897,7 +1040,6 @@ def run_task3_masks(cfg: Task3MaskConfig) -> int:
                         camera_mask_path=mask_path,
                         ffmpeg_bin=cfg.ffmpeg_bin,
                         out_video_path=preview_video_path,
-                        sample_count=20,
                         force=cfg.force,
                         dry_run=cfg.dry_run,
                     )
@@ -919,7 +1061,6 @@ def run_task3_masks(cfg: Task3MaskConfig) -> int:
                         camera_mask_path=None,
                         ffmpeg_bin=cfg.ffmpeg_bin,
                         out_video_path=preview_video_path,
-                        sample_count=20,
                         force=cfg.force,
                         dry_run=cfg.dry_run,
                     )
@@ -948,7 +1089,6 @@ def run_task3_masks(cfg: Task3MaskConfig) -> int:
                         camera_mask_path=None,
                         ffmpeg_bin=cfg.ffmpeg_bin,
                         out_video_path=preview_video_path,
-                        sample_count=20,
                         force=cfg.force,
                         dry_run=cfg.dry_run,
                     )

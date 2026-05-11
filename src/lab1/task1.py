@@ -351,34 +351,81 @@ def _plot_sparse_point_cloud(
     out_path: Path,
     title: str,
     max_points: int,
+    crop_percentile: float | None = 1.0,
 ) -> None:
-    fig = plt.figure(figsize=(9, 7))
-    ax = fig.add_subplot(111, projection="3d")
+    fig = plt.figure(figsize=(12, 10))
+    ax3d = fig.add_subplot(221, projection="3d")
+    ax_xy = fig.add_subplot(222)
+    ax_xz = fig.add_subplot(223)
+    ax_yz = fig.add_subplot(224)
 
+    pts = np.empty((0, 3), dtype=float)
+    colors = np.empty((0, 3), dtype=float)
     if len(points_xyz) > 0:
-        if len(points_xyz) > max_points:
-            idx = np.linspace(0, len(points_xyz) - 1, max_points, dtype=int)
-            pts = points_xyz[idx]
-            colors = points_rgb[idx]
+        pts_all = points_xyz
+        colors_all = points_rgb
+        if crop_percentile is not None and 0.0 < crop_percentile < 50.0 and len(points_xyz) >= 32:
+            lo = np.percentile(points_xyz, crop_percentile, axis=0)
+            hi = np.percentile(points_xyz, 100.0 - crop_percentile, axis=0)
+            keep = np.all((points_xyz >= lo) & (points_xyz <= hi), axis=1)
+            if np.any(keep):
+                pts_all = points_xyz[keep]
+                colors_all = points_rgb[keep]
+
+        if len(pts_all) > max_points:
+            idx = np.linspace(0, len(pts_all) - 1, max_points, dtype=int)
+            pts = pts_all[idx]
+            colors = colors_all[idx]
         else:
-            pts = points_xyz
-            colors = points_rgb
-        ax.scatter(pts[:, 0], pts[:, 1], pts[:, 2], c=colors, s=1.2, alpha=0.65, linewidths=0)
+            pts = pts_all
+            colors = colors_all
+        ax3d.scatter(pts[:, 0], pts[:, 1], pts[:, 2], c=colors, s=1.2, alpha=0.65, linewidths=0)
+        ax_xy.scatter(pts[:, 0], pts[:, 1], c=colors, s=1.2, alpha=0.65, linewidths=0)
+        ax_xz.scatter(pts[:, 0], pts[:, 2], c=colors, s=1.2, alpha=0.65, linewidths=0)
+        ax_yz.scatter(pts[:, 1], pts[:, 2], c=colors, s=1.2, alpha=0.65, linewidths=0)
 
     if len(centers) > 0:
-        ax.plot(centers[:, 0], centers[:, 1], centers[:, 2], color="tab:red", linewidth=1.4, label="camera path")
+        ax3d.plot(centers[:, 0], centers[:, 1], centers[:, 2], color="tab:red", linewidth=1.4, label="camera path")
+        ax_xy.plot(centers[:, 0], centers[:, 1], color="tab:red", linewidth=1.2)
+        ax_xz.plot(centers[:, 0], centers[:, 2], color="tab:red", linewidth=1.2)
+        ax_yz.plot(centers[:, 1], centers[:, 2], color="tab:red", linewidth=1.2)
 
-    ax.set_title(title)
-    ax.set_xlabel("X")
-    ax.set_ylabel("Y")
-    ax.set_zlabel("Z")
-    ax.set_box_aspect([1, 1, 1])
-    ax.grid(True)
+    ax3d.set_title(title)
+    ax3d.set_xlabel("X")
+    ax3d.set_ylabel("Y")
+    ax3d.set_zlabel("Z")
+    ax3d.set_box_aspect([1, 1, 1])
+    ax3d.grid(True)
     if len(centers) > 0:
-        ax.legend(loc="best")
+        ax3d.legend(loc="best")
+
+    ax_xy.set_title("Top View (X-Y)")
+    ax_xy.set_xlabel("X")
+    ax_xy.set_ylabel("Y")
+    ax_xy.set_aspect("equal", adjustable="box")
+    ax_xy.grid(True, alpha=0.35)
+
+    ax_xz.set_title("Side View (X-Z)")
+    ax_xz.set_xlabel("X")
+    ax_xz.set_ylabel("Z")
+    ax_xz.set_aspect("equal", adjustable="box")
+    ax_xz.grid(True, alpha=0.35)
+
+    ax_yz.set_title("Side View (Y-Z)")
+    ax_yz.set_xlabel("Y")
+    ax_yz.set_ylabel("Z")
+    ax_yz.set_aspect("equal", adjustable="box")
+    ax_yz.grid(True, alpha=0.35)
+
     fig.tight_layout()
     fig.savefig(out_path, dpi=170)
     plt.close(fig)
+
+
+def _cleanup_legacy_point_cloud_plots(case_root: Path) -> None:
+    path = case_root / "sparse_points_full.png"
+    if path.exists():
+        path.unlink()
 
 
 def _plot_merged_trajectories(
@@ -780,9 +827,10 @@ def _run_task1_cloud(cfg: Task1Config, selected_videos: list[str]) -> int:
                 print(f"Would generate sparse point cloud plot: {out_path}")
                 continue
             if out_path.exists() and not cfg.force:
-                print(f"Reuse sparse point cloud plot: {out_path}")
+                print(f"Reuse sparse point cloud plot: {case_root}")
                 continue
             with timed_block("cloud_plot", timings):
+                _cleanup_legacy_point_cloud_plots(case_root)
                 centers, _ = _parse_image_centers(images_txt)
                 points_xyz, points_rgb = _parse_points3d(points3d_txt)
                 _plot_sparse_point_cloud(
@@ -792,6 +840,7 @@ def _run_task1_cloud(cfg: Task1Config, selected_videos: list[str]) -> int:
                     out_path,
                     f"{case_name} Sparse Point Cloud (fps={fps:g})",
                     max_points=cfg.max_points_plot,
+                    crop_percentile=1.0,
                 )
             write_timing_csv(case_root / "cloud_timing.csv", timings)
             print(f"Saved sparse point cloud plot: {out_path}")
