@@ -7,7 +7,7 @@ cd "$ROOT_DIR"
 FORCE=0
 DRY_RUN=0
 SKIP_YOLO=0
-SELECTED_TASKS="task1,task2,task3"
+SELECTED_TASKS=""
 
 usage() {
   cat <<'EOF' >&2
@@ -66,6 +66,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+# Use default if no tasks specified
+if [[ -z "$SELECTED_TASKS" ]]; then
+  SELECTED_TASKS="task1,task2,task3"
+fi
 
 # Convert comma-separated list to array
 IFS=',' read -ra selected_tasks_array <<< "$SELECTED_TASKS"

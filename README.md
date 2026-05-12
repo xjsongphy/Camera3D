@@ -48,6 +48,26 @@ External tools required in PATH:
 | `colmap` | `colmap -h` | SfM reconstruction |
 | `ffmpeg` | `ffmpeg -version` | frame extraction |
 
+### Installing COLMAP and ffmpeg
+
+**Linux (Ubuntu/Debian):**
+```bash
+sudo apt-get update
+sudo apt-get install colmap ffmpeg
+```
+
+**macOS (Homebrew):**
+```bash
+brew install colmap ffmpeg
+```
+
+If `colmap` command is not found on macOS, add to PATH:
+```bash
+export PATH="/opt/homebrew/opt/colmap/bin:$PATH"  # Apple Silicon
+# or
+export PATH="/usr/local/opt/colmap/bin:$PATH"     # Intel
+```
+
 ## CLI Overview
 
 Aliases:

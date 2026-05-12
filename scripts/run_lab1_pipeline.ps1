@@ -1,5 +1,5 @@
 param(
-    [string[]$Tasks = @("task1", "task2", "task3"),
+    [string[]]$Tasks = @("task1", "task2", "task3"),
     [switch]$Force,
     [switch]$DryRun,
     [switch]$SkipYolo
@@ -7,11 +7,15 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$RootDir = Split-Path -Parent $PSScriptRoot | Split-Path -Parent
+$RootDir = Split-Path -Parent $PSScriptRoot
 Set-Location $RootDir
+$PowerShellExe = if (Get-Command pwsh -ErrorAction SilentlyContinue) { "pwsh" } else { "powershell" }
 
 # Valid task list
 $validTasks = @("task1", "task2", "task3")
+
+# Normalize task inputs so both -Tasks task2 task3 and -Tasks task2,task3 work.
+$Tasks = @($Tasks | ForEach-Object { $_ -split "," } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 
 # Validate tasks
 foreach ($task in $Tasks) {
@@ -56,19 +60,18 @@ function Invoke-Task {
     Write-Host "========================================"
 
     # Build command
-    $cmdList = @("pwsh", "-ExecutionPolicy", "Bypass", "-File", $Script)
+    $cmdList = @("-ExecutionPolicy", "Bypass", "-File", $Script)
     if ($Force) { $cmdList += "--force" }
     if ($DryRun) { $cmdList += "--dry-run" }
     if ($SkipYolo -and $Name -eq "task3") { $cmdList += "--skip-yolo" }
-
-    Write-Host "Running: $Script $($cmdList[4..$($cmdList.Length-1)] -join ' ')" -ForegroundColor Yellow
+    Write-Host "Running: $PowerShellExe $($cmdList -join ' ')" -ForegroundColor Yellow
 
     if ($DryRun) {
         return $true
     }
 
     # Execute
-    $process = Start-Process -FilePath "pwsh" -ArgumentList $cmdList -Wait -PassThru -NoNewWindow
+    $process = Start-Process -FilePath $PowerShellExe -ArgumentList $cmdList -Wait -PassThru -NoNewWindow
     return $process.ExitCode -eq 0
 }
 
