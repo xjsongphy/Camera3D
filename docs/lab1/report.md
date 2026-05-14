@@ -72,96 +72,84 @@
 | S1-3 | 16 | 400  | 152 | 0.380 | 522.49 |
 | S1-3 | 30 | 750  | 750 | 1.000 | 5936.41 |
 
-## 题目二：子序列位姿分析
+## Task 2: Subsequence Pose Analysis
 
-题目二以 `S1-2 @ 30 fps` 的完整重建结果作为参考。实现上，采用两种方式构造同一段子序列的位姿：**Method A** 直接从完整序列的 `images.txt` 中裁出对应帧的位姿，作为参考轨迹；**Method B** 则只保留该子序列图像，重新独立运行一次 `feature_extractor + sequential_matcher + mapper`，得到子序列自身的 SfM 结果。由于两个重建都只在各自的任意坐标系内成立，所以比较前需要先基于公共注册帧的相机中心做 **Sim(3)** 对齐，再计算 **ATE（Absolute Trajectory Error）**。
+Task 2 still uses the full reconstruction of `S1-2` as reference. We compare two pose extraction modes: **Method A** slices poses directly from the full `images.txt`, while **Method B** reconstructs only the subsequence images independently. We align them with Sim(3) on common registered frames, then compute ATE and trajectory-shape metrics. New runs are added for `fps=8` and `fps=16`, and compared with existing `fps=30`.
 
-结合完整轨迹形状与实际重建结果，最终选取三段更有代表性的子序列：一段局部折返短段 `return_local`，一段稳定单向扫描段 `scan_stable`，以及一段较长的折返段 `return_long`。其中第一段用于观察独立 SfM 在局部折返段上的失败模式，后两段用于比较独立重建与完整重建之间的轨迹一致性。
+The three subsequences represent a medium return segment, a stable scan segment, and a long return segment. This design covers local loop-like motion, one-way scanning, and long-path accumulation, so it directly exposes how sampling density affects independent SfM stability.
 
-### 轨迹叠加图
+### Quantitative Results (new fps8/fps16)
 
-`return_local` 这一段中，Method A 和 Method B 最终只有极少数公共注册帧，叠加图里也只能看到几个点，说明独立 SfM 在这段局部折返短片段上基本没有成功重建起来。此时虽然仍然可以做 Sim(3) 对齐，但由于公共点太少，ATE 已经不再适合拿来代表整段质量。
+| fps | subsequence | subset_frames | common_registered | ATE | scale | endpoint_distance | path_length | endpoint_ratio |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| 8  | `seq01_return_mid_000211-000930` | 342 | 342 | 0.0243 | 0.7662 | 5.0496 | 19.0368 | 0.2653 |
+| 8  | `seq02_scan_stable_000271-000510` | 240 | 240 | 0.0156 | 0.7455 | 4.0574 | 14.1398 | 0.2869 |
+| 8  | `seq03_return_long_000031-000930` | 522 | 522 | 0.0208 | 0.9884 | 1.6498 | 30.2798 | 0.0545 |
+| 16 | `seq01_return_mid_000211-000930` | 720 | 720 | 0.3171 | 9.8198 | 89.1655 | 220.4054 | 0.4046 |
+| 16 | `seq02_scan_stable_000271-000510` | 240 | 240 | 0.1689 | 3.8903 | 43.9332 | 68.7391 | 0.6391 |
+| 16 | `seq03_return_long_000031-000930` | 900 | 900 | 0.5309 | 10.8194 | 50.4905 | 290.0049 | 0.1741 |
+| 30 | `seq01_return_mid_000211-000930` | 720 | 720 | 0.0723 | 2.3574 | 18.3934 | 47.2025 | 0.3897 |
+| 30 | `seq02_scan_stable_000271-000510` | 240 | 240 | 0.0107 | 1.2277 | 15.1095 | 17.3702 | 0.8698 |
+| 30 | `seq03_return_long_000031-000930` | 900 | 900 | 0.0668 | 3.0209 | 26.0765 | 63.3635 | 0.4115 |
 
-![Task2 seq01 overlay](report_assets/task2/seq01_return_local_overlay.png)
+Across ATE, scale, and endpoint ratio, `fps=8` is the most stable setting overall. It gives the lowest error on `seq01` and `seq03`, and a much smaller endpoint ratio on the long-return segment, indicating stronger shape consistency after alignment. `fps=30` is best only on `seq02_scan_stable`, while `fps=16` degrades significantly on all three segments.
 
-`scan_stable` 是一段单向扫描段。两种方法得到的轨迹几乎完全重合，说明在这一类纹理和视角变化都较稳定的片段上，仅用子序列本身也足以支撑可靠的 SfM 重建。
+This shows that independent subsequence SfM does not follow a simple "denser is better" rule. Excessive frame redundancy can amplify scale instability and drift instead of strengthening constraints. For this dataset, `fps=8` is the best-balanced sampling density.
 
-![Task2 seq02 overlay](report_assets/task2/seq02_scan_stable_overlay.png)
+## Task 3: Dynamic-Scene SfM
 
-`return_long` 覆盖范围更大，也更接近整段视频中能够观察到的折返结构。虽然这一段的 ATE 明显高于 `scan_stable`，但叠加图仍能看出两条轨迹的主体形状高度一致，只是在长程范围上存在更明显的累计偏移。
+Task 3 compares `raw` reconstruction against masking strategies. The primary criteria are registration ratio, reprojection error, reliable-point ratio, trajectory step behavior, and jump ratio, rather than visual impression of sparse point clouds.
 
-![Task2 seq03 overlay](report_assets/task2/seq03_return_long_overlay.png)
+### S2-1 (fps30)
 
-### 定量结果
-
-定量结果表明，这三段片段可以分成两类：`return_local` 基本没有独立重建成功，而 `scan_stable` 和 `return_long` 都能与完整重建建立高质量对应关系。其中 `scan_stable` 的误差最小，`return_long` 的误差更大，但两者都远比 `return_local` 更有比较意义。
-
-| 子序列 | 帧范围 | 子序列帧数 | 公共注册帧数 | ATE | Sim(3) scale |
-|---|---|---:|---:|---:|---:|
-| `return_local` | `000841-001140` | 300 | 4 | 0.2111 | 1.4414 |
-| `scan_stable` | `001231-001530` | 300 | 300 | 0.0491 | 8.2871 |
-| `return_long` | `001021-001920` | 900 | 900 | 0.3020 | 17.0878 |
-
-这个结果说明，两种方法的差异并不只由“是否存在折返”决定，还强烈依赖于子序列本身能否独立形成稳定重建。局部折返短段 `return_local` 虽然在完整轨迹里看起来存在回折，但独立 SfM 时几乎只注册了几个点，因此无法形成可靠比较；相比之下，`scan_stable` 和 `return_long` 都能完整注册，并且与 Method A 的轨迹主体保持较高一致性。进一步看，`scan_stable` 的重合度最高，说明单向但纹理稳定、视角连续的片段并不难独立重建；`return_long` 则展示了另一种情况，即使整体形状仍然对得上，更长的路径和更复杂的长程约束仍会带来更明显的累计偏移。这也说明，对 `S1-2` 来说，真正能够把两种方法拉开差异的，不是简单的“短回折 vs 扫描”，而是“独立 SfM 是否有足够观测支撑全局 BA 收敛到稳定结果”。
-
-## 题目三：动态场景 SfM
-
-题目三仍然使用 `ffmpeg + COLMAP`，但先屏蔽动态区域再重建。使用直接重建的 `raw` 作为基线，并比较三种 mask：人工 ROI 的 `default mask`、基于前后帧差分的 `motion mask`、基于实例分割的 `yolo mask`。
-
-### Mask 方案
-
-`default mask` 直接保留人工挑选的静态区域：`S2-1` 取顶部 `20%`，`S2-2` 取左上区域。它最简单，但也最依赖人工先验。
-
-`motion mask` 用前后帧差分检测独立运动区域，并在小范围平移补偿后做膨胀。
-
-`yolo mask` 逐帧分割 `person / bicycle / car / motorcycle / bus / truck` 等动态类别，并将其并集作为 COLMAP mask。
-
-### 评价指标
-
-由于稀疏点云本身很难直接看出完整场景，因此使用 `registration_ratio`、`reproj_error`、`points3d_reliable_ratio`、`track_length_median` 和 `trajectory_jump_ratio` 等指标对比不同的方法。动态物体若误导匹配与三角化，通常会表现为误差增大、可靠点减少、track 变短，或轨迹出现不合理跳变。
-
-### 点云与轨迹展示
-
-点云图只做展示，不作为主要结论依据。题目一展示三段静态视频 `30 FPS` 的点云拼图；题目三展示两段动态视频的 `raw` 点云。轨迹图则用于直观比较不同方法的位姿稳定性。
-
-![Task1 sparse point clouds](report_assets/task1/task1_sparse_points_triptych.png)
-
-![Task3 raw sparse point clouds](report_assets/task3/task3_sparse_points_raw_pair.png)
-
-`S2-1` 四种方法的合并轨迹如下：
-
-![Task3 S2-1 trajectory overlay](../../outputs/lab1/task3/S2-1_fps30/trajectory_overlay.png)
-
-`S2-2` 四种方法的合并轨迹如下：
-
-![Task3 S2-2 trajectory overlay](../../outputs/lab1/task3/S2-2_fps30/trajectory_overlay.png)
-
-### 定量结果
-
-#### S2-1
-
-| 方法 | 注册率 | 可靠点比例 | 重投影误差中位数 | 重投影误差 P90 | track 中位数 | 跳变比例 |
+| method | registration_ratio | reliable_ratio | reproj_median | reproj_p90 | track_median | jump_ratio |
 |---|---:|---:|---:|---:|---:|---:|
-| `raw` | 1.000 | 0.580 | 0.501 | 4.248 | 17 | 0.0033 |
-| `default` | 0.413 | 0.611 | 0.707 | 1.591 | 28 | 0.0121 |
-| `motion` | 0.597 | 0.616 | 0.576 | 1.578 | 26 | 0.0056 |
-| `yolo` | 0.568 | 0.638 | 0.362 | 1.088 | 17 | 0.0147 |
+| `raw` | 0.1400 | 0.6319 | 0.7495 | 1.7014 | 7  | 0.0723 |
+| `mask_default` | 0.2167 | 0.6189 | 0.5101 | 1.0582 | 54 | 0.0388 |
+| `mask_motion` | 0.5683 | 0.6391 | 0.5137 | 1.5263 | 20 | 0.0235 |
+| `mask_yolo` | 0.2083 | 0.6601 | 0.7080 | 1.5844 | 10 | 0.0000 |
 
-#### S2-2
+For `S2-1`, `mask_motion` is the best tradeoff: highest registration ratio with low jump ratio. `mask_yolo` gives the smoothest trajectory (zero jumps) but much lower registration, which behaves like high-precision/low-recall filtering. `raw` has the lowest registration and higher jumps, showing stronger dynamic contamination.
 
-| 方法 | 注册率 | 可靠点比例 | 重投影误差中位数 | 重投影误差 P90 | track 中位数 | 跳变比例 |
+### S2-2 (fps30)
+
+| method | registration_ratio | reliable_ratio | reproj_median | reproj_p90 | track_median | jump_ratio |
 |---|---:|---:|---:|---:|---:|---:|
-| `raw` | 0.569 | 0.688 | 0.597 | 1.573 | 6 | 0.0671 |
-| `default` | 0.385 | 0.630 | 0.456 | 1.133 | 13 | 0.4224 |
-| `motion` | 0.569 | 0.688 | 0.644 | 1.662 | 6 | 0.2274 |
-| `yolo` | 0.359 | 0.602 | 0.596 | 1.505 | 7 | 0.0046 |
+| `raw` | 0.3438 | 0.7094 | 0.6118 | 1.6038 | 6 | 0.0145 |
+| `mask_default` | 0.0430 | 0.5860 | 0.5739 | 1.5191 | 7 | 0.0000 |
 
-### 结果分析
+For `S2-2`, only `raw` and `mask_default` are stably available in the latest outputs. `mask_default` has seemingly moderate error values but only `4.3%` registration, which is a clear reconstruction failure. `raw` is still the only practically usable result.
 
-`S2-1` 的 `raw` 并没有失败，注册率达到 `1.000`，轨迹也很平滑；但它的 `reproj_error_p90 = 4.248` 明显高于三种 mask 方法，说明动态目标主要污染了点质量，而不是直接破坏了整条轨迹。三种改进方案里，`yolo` 的重投影误差最低、可靠点比例最高，说明它最有效地去掉了动态点；`motion` 则是更稳妥的折中。
+### Conclusion
 
-`S2-2` 更敏感。`raw` 只注册了约 `56.9%` 的帧，而 `default` 和 `motion` 都没有稳定改进，反而让轨迹跳变更明显，尤其 `default` 的跳变比例达到 `0.4224`。相比之下，`yolo` 虽然注册率最低，但跳变比例最小，轨迹也最连贯，因此它在这段视频上给出了最稳定的位姿结果。
+Task 2 and Task 3 now support the same core conclusion: **constraints must be balanced; stronger sampling or stronger masking is not automatically better**. In Task 2, `fps=8` is more robust than `fps=16/30`. In Task 3, medium-strength adaptive masking (`mask_motion`) outperforms both weak filtering (`raw`) and overly aggressive masking (`mask_default/yolo`) on `S2-1`.
 
-### 小结
+## Task 4: Pose-Quality Evaluation (annotations 01-10)
 
-本题最重要的结论有两点。第一，动态场景下稀疏点云是否“混乱”，应主要通过重投影误差、可靠点比例、track length 和轨迹跳变判断，而不是看点云图里能不能直接认出场景。第二，三种改进方案里，`yolo mask` 的整体表现最稳定：它在 `S2-1` 上明显改善了点质量，在 `S2-2` 上明显改善了轨迹平滑性，因此最符合“先排除动态物体再做 SfM”的预期。
+Task 4 uses exactly four metric categories, one metric per category:
+
+- smoothness of adjacent poses: `smooth_jump_ratio`
+- epipolar consistency of matched points: `epi_dist_px` (symmetric point-to-epiline distance, pixel)
+- triangulation reprojection error: `reproj_err_px` (pixel)
+- multi-frame composition consistency: `compose_rot_err_deg` (rotation residual of `R_ik` vs `R_jk R_ij`, degree)
+
+Implementation notes:
+
+- feature matching is done from each case `video.mp4` (ORB + BFMatcher) on sampled frames;
+- relative pose for pairwise geometry uses Essential matrix (`findEssentialMat + recoverPose`);
+- each case summarizes metrics by robust median over valid pairs/triples.
+
+The final quality score mixes these four metrics:
+
+`penalty = 0.25 * (6*smooth_jump_ratio) + 0.25 * log(1 + epi_dist_px/1.5) + 0.25 * log(1 + reproj_err_px/1.5) + 0.25 * log(1 + compose_rot_err_deg/2.0)`
+
+`quality_score = 100 * exp(-penalty)`  (higher is better)
+
+### Classification Effect (10 cases)
+
+- best threshold: `3.0812`
+- accuracy: `0.8000` (8/10)
+- precision (good): `0.7143`
+- recall (good): `1.0000`
+- AUC: `0.8000`
+- confusion: `TP=5, TN=3, FP=2, FN=0`
