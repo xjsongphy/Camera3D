@@ -17,6 +17,7 @@ from lab1.task1 import TIMING_FILENAME, Task1Error, _parse_image_poses, _plot_tr
 
 ANNOTATION_CASES = tuple(f"{idx:02d}" for idx in range(1, 11))
 ACCEL_JUMP_RATIO = 4.0
+ROT_ACCEL_JUMP_RATIO = 4.0
 EPI_INLIER_THRESHOLD_PX = 1.5
 EPI_TRIANG_GATE_PX = 3.0
 REPROJ_INLIER_THRESHOLD_PX = 2.0
@@ -25,6 +26,7 @@ COMPOSE_MIN_MATCHES = 30
 COMPOSE_ROT_THRESHOLD_DEG = 2.0
 ZIGZAG_WINDOW = 7
 ZIGZAG_RESIDUAL_THRESHOLD = 2.0
+POSE_COMPOSE_THRESHOLD_DEG = 1.0
 
 
 @dataclass
@@ -37,6 +39,13 @@ class Task4Config:
     mode: str = "run"
     direction_arrows: int = 12
     heavy_geometry: bool = False
+    epi_threshold_px: float = EPI_INLIER_THRESHOLD_PX
+    reproj_threshold_px: float = REPROJ_INLIER_THRESHOLD_PX
+    compose_threshold_deg: float = POSE_COMPOSE_THRESHOLD_DEG
+    geometry_max_triplets: int = 80
+    zigzag_residual_threshold: float = ZIGZAG_RESIDUAL_THRESHOLD
+    accel_jump_ratio: float = ACCEL_JUMP_RATIO
+    rot_accel_jump_ratio: float = ROT_ACCEL_JUMP_RATIO
 
 
 def _normalize_case_name(name: str) -> str:
@@ -319,6 +328,74 @@ def _compute_accel_jump_ratio(images: list[dict[str, object]], ratio: float = AC
     return float(np.mean(finite > ratio * accel_ref))
 
 
+def _compute_rot_accel_metrics(
+    images: list[dict[str, object]],
+    ratio: float = ROT_ACCEL_JUMP_RATIO,
+) -> float:
+    if len(images) < 3:
+        return 0.0
+
+    frame_idx = np.array([int(im["frame_idx"]) for im in images], dtype=float)
+    dirs = []
+    for im in images:
+        r = np.asarray(im["R"], dtype=float)
+        d = r.T @ np.array([0.0, 0.0, 1.0], dtype=float)
+        norm = float(np.linalg.norm(d))
+        if norm <= 1e-12:
+            dirs.append(np.array([0.0, 0.0, 1.0], dtype=float))
+        else:
+            dirs.append(d / norm)
+    dirs_arr = np.asarray(dirs, dtype=float)
+
+    dt = np.diff(frame_idx)
+    valid_dt = dt > 1e-9
+    if np.count_nonzero(valid_dt) < 2:
+        return 0.0
+
+    dots = np.sum(dirs_arr[:-1] * dirs_arr[1:], axis=1)
+    angles_deg = np.degrees(np.arccos(np.clip(dots, -1.0, 1.0)))
+    ang_vel = angles_deg[valid_dt] / dt[valid_dt]
+    dt_valid = dt[valid_dt]
+    if len(ang_vel) < 2:
+        return 0.0
+
+    accel_dt = 0.5 * (dt_valid[:-1] + dt_valid[1:])
+    valid_accel_dt = accel_dt > 1e-9
+    if np.count_nonzero(valid_accel_dt) == 0:
+        return 0.0
+
+    ang_accel = np.abs((ang_vel[1:] - ang_vel[:-1])[valid_accel_dt] / accel_dt[valid_accel_dt])
+    finite = ang_accel[np.isfinite(ang_accel)]
+    if finite.size == 0:
+        return 0.0
+    ref = float(np.median(finite))
+    if ref <= 1e-12:
+        return 0.0
+    return float(np.mean(finite > ratio * ref))
+
+
+def _compute_pose_compose_ratio(
+    images: list[dict[str, object]],
+    threshold_deg: float = POSE_COMPOSE_THRESHOLD_DEG,
+) -> float:
+    if len(images) < 3:
+        return 0.0
+
+    residuals: list[float] = []
+    for i in range(len(images) - 2):
+        r12, _t12 = _relative_pose_from_images(images[i], images[i + 1])
+        r23, _t23 = _relative_pose_from_images(images[i + 1], images[i + 2])
+        r13, _t13 = _relative_pose_from_images(images[i], images[i + 2])
+        r_err = (r23 @ r12) @ r13.T
+        residuals.append(_rotation_angle_deg(r_err))
+
+    values = np.array(residuals, dtype=float)
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return 0.0
+    return float(np.mean(finite > threshold_deg))
+
+
 def _project_points_px(k: np.ndarray, x_cam: np.ndarray) -> np.ndarray:
     z = np.maximum(1e-9, x_cam[:, 2:3])
     xy = x_cam[:, :2] / z
@@ -335,6 +412,7 @@ def _robust_pair_reproj_px(
     r_gt: np.ndarray,
     t_gt: np.ndarray,
     epi_raw: np.ndarray,
+    reproj_threshold_px: float,
 ) -> tuple[float, float]:
     if len(p1) < 8:
         return float("nan"), float("nan")
@@ -405,7 +483,7 @@ def _robust_pair_reproj_px(
     finite = finite[finite < 80.0]
     if finite.size < 8:
         return float("nan"), float("nan")
-    violation_ratio = float(np.mean(finite > REPROJ_INLIER_THRESHOLD_PX))
+    violation_ratio = float(np.mean(finite > reproj_threshold_px))
     median_err = float(np.median(finite))
     return violation_ratio, median_err
 
@@ -479,6 +557,11 @@ def _compute_geometry_metrics(
     images: list[dict[str, object]],
     k_map: dict[int, np.ndarray],
     video_path: Path,
+    *,
+    epi_threshold_px: float,
+    reproj_threshold_px: float,
+    compose_threshold_deg: float,
+    max_triplets: int,
 ) -> tuple[float, float, float]:
     frame_cache: dict[int, np.ndarray] = {}
     feature_cache: dict[int, tuple[tuple[cv2.KeyPoint, ...], np.ndarray | None]] = {}
@@ -489,7 +572,7 @@ def _compute_geometry_metrics(
     pair_cache: dict[tuple[int, int], tuple[np.ndarray, np.ndarray, np.ndarray] | None] = {}
     rot_adj_cache: dict[tuple[int, int], np.ndarray] = {}
 
-    triplet_indices = _geometry_eval_indices(len(images), max_triplets=140)
+    triplet_indices = _geometry_eval_indices(len(images), max_triplets=max_triplets)
     pair_indices = sorted({i for start in triplet_indices for i in (start, start + 1) if i + 1 < len(images)})
     for a in pair_indices:
         im1 = images[a]
@@ -520,9 +603,18 @@ def _compute_geometry_metrics(
         epi_raw = epi_raw[finite_epi_mask]
         p1 = p1[finite_epi_mask]
         p2 = p2[finite_epi_mask]
-        epi_violation_all.append(float(np.mean(epi_raw > EPI_INLIER_THRESHOLD_PX)))
+        epi_violation_all.append(float(np.mean(epi_raw > epi_threshold_px)))
         pair_cache[(a, a + 1)] = (p1, p2, k1)
-        reproj_violation, _reproj_median = _robust_pair_reproj_px(p1, p2, k1, k2, r_gt, t_gt, epi_raw)
+        reproj_violation, _reproj_median = _robust_pair_reproj_px(
+            p1,
+            p2,
+            k1,
+            k2,
+            r_gt,
+            t_gt,
+            epi_raw,
+            reproj_threshold_px,
+        )
         if np.isfinite(reproj_violation):
             reproj_violation_all.append(float(reproj_violation))
         r_est_adj = _estimate_relative_rotation_from_matches(p1, p2, k1, k2)
@@ -538,7 +630,7 @@ def _compute_geometry_metrics(
             continue
         r13_gt, _ = _relative_pose_from_images(images[i], images[i + 2])
         r_err = (r23 @ r12) @ r13_gt.T
-        compose_violation_all.append(float(_rotation_angle_deg(r_err) > COMPOSE_ROT_THRESHOLD_DEG))
+        compose_violation_all.append(float(_rotation_angle_deg(r_err) > compose_threshold_deg))
 
     epi_metric = float(np.median(np.array(epi_violation_all, dtype=float))) if epi_violation_all else 1.0
     reproj_metric = float(np.median(np.array(reproj_violation_all, dtype=float))) if reproj_violation_all else 1.0
@@ -550,71 +642,8 @@ def _skew(v: np.ndarray) -> np.ndarray:
     return np.array([[0.0, -v[2], v[1]], [v[2], 0.0, -v[0]], [-v[1], v[0], 0.0]], dtype=float)
 
 
-def _compute_quality_score(metrics: dict[str, float]) -> tuple[float, float]:
-    zigzag_term = math.log1p(50.0 * metrics["zigzag_score"])
-    accel_term = math.log1p(4.0 * metrics["smooth_jump_ratio"])
-    traj_term = math.log1p(0.5 * metrics["traj_smoothness"])
-    penalty = 0.90 * zigzag_term + 0.05 * accel_term + 0.05 * traj_term
-    score = 100.0 * math.exp(-penalty)
-    return score, penalty
-
-
 def _case_label(case_name: str) -> str:
     return "bad" if int(case_name) <= 5 else "good"
-
-
-def _evaluate_threshold(rows: list[dict[str, object]]) -> dict[str, float]:
-    scores = [float(row["quality_score"]) for row in rows]
-    labels = [1 if row["label"] == "good" else 0 for row in rows]
-
-    candidate_thresholds = sorted(set(scores))
-    best_acc = -1.0
-    best_threshold = candidate_thresholds[0] if candidate_thresholds else 0.0
-    best_preds: list[int] = []
-    for threshold in candidate_thresholds:
-        preds = [1 if score >= threshold else 0 for score in scores]
-        acc = float(np.mean([pred == label for pred, label in zip(preds, labels)]))
-        if acc > best_acc:
-            best_acc = acc
-            best_threshold = threshold
-            best_preds = preds
-
-    tp = sum(pred == 1 and label == 1 for pred, label in zip(best_preds, labels))
-    tn = sum(pred == 0 and label == 0 for pred, label in zip(best_preds, labels))
-    fp = sum(pred == 1 and label == 0 for pred, label in zip(best_preds, labels))
-    fn = sum(pred == 0 and label == 1 for pred, label in zip(best_preds, labels))
-    precision = tp / max(1, tp + fp)
-    recall = tp / max(1, tp + fn)
-
-    auc = _compute_pairwise_auc(scores, labels)
-    return {
-        "best_threshold": float(best_threshold),
-        "accuracy": best_acc,
-        "precision_good": precision,
-        "recall_good": recall,
-        "tp": float(tp),
-        "tn": float(tn),
-        "fp": float(fp),
-        "fn": float(fn),
-        "auc": auc,
-    }
-
-
-def _compute_pairwise_auc(scores: list[float], labels: list[int]) -> float:
-    positives = [score for score, label in zip(scores, labels) if label == 1]
-    negatives = [score for score, label in zip(scores, labels) if label == 0]
-    if not positives or not negatives:
-        return 0.0
-    wins = 0.0
-    total = 0
-    for pos in positives:
-        for neg in negatives:
-            total += 1
-            if pos > neg:
-                wins += 1.0
-            elif pos == neg:
-                wins += 0.5
-    return wins / total
 
 
 def _plot_trajectories(
@@ -675,39 +704,13 @@ def _plot_trajectories(
         )
 
 
-def _plot_quality_scores(rows: list[dict[str, object]], out_path: Path) -> None:
-    case_names = [str(row["case"]) for row in rows]
-    scores = [float(row["quality_score"]) for row in rows]
-    colors = ["tab:red" if row["label"] == "bad" else "tab:green" for row in rows]
-
-    fig, ax = plt.subplots(figsize=(10, 4.8))
-    ax.bar(case_names, scores, color=colors)
-    ax.set_xlabel("Case")
-    ax.set_ylabel("Quality Score")
-    ax.set_title("Task4 Pose Quality Scores")
-    ax.grid(axis="y", alpha=0.25)
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=170)
-    plt.close(fig)
-
-
 def _write_summary(
     out_path: Path,
     rows: list[dict[str, object]],
-    eval_stats: dict[str, float],
 ) -> None:
     lines = [
         "task4_pose_quality_summary",
         f"cases={len(rows)}",
-        f"best_threshold={eval_stats['best_threshold']:.6f}",
-        f"accuracy={eval_stats['accuracy']:.6f}",
-        f"precision_good={eval_stats['precision_good']:.6f}",
-        f"recall_good={eval_stats['recall_good']:.6f}",
-        f"auc={eval_stats['auc']:.6f}",
-        f"tp={int(eval_stats['tp'])}",
-        f"tn={int(eval_stats['tn'])}",
-        f"fp={int(eval_stats['fp'])}",
-        f"fn={int(eval_stats['fn'])}",
     ]
     out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -774,28 +777,35 @@ def run_task4(cfg: Task4Config) -> int:
             k_map = _parse_camera_intrinsics(cameras_txt)
             images = _parse_images(images_txt)
             points3d_count = sum(1 for _ in points3d_txt.open("r", encoding="utf-8") if _.strip() and not _.startswith("#"))
-            zigzag_score, zigzag_violation_ratio, zigzag_residual_p95 = _compute_zigzag_metrics(images)
+            zigzag_score, _zigzag_violation_ratio, _zigzag_residual_p95 = _compute_zigzag_metrics(
+                images,
+                residual_threshold=cfg.zigzag_residual_threshold,
+            )
+            rot_accel_jump_ratio = _compute_rot_accel_metrics(
+                images,
+                ratio=cfg.rot_accel_jump_ratio,
+            )
             if cfg.heavy_geometry:
-                epi_dist_px, reproj_err_px, compose_rot_err_deg = _compute_geometry_metrics(images, k_map, video_path)
-            else:
-                epi_dist_px, reproj_err_px, compose_rot_err_deg = float("nan"), float("nan"), float("nan")
+                raise Task1Error(
+                    "--heavy-geometry is disabled for annotations because images.txt has empty POINTS2D "
+                    "and points3D.txt has no reconstructed points; task4 now avoids reprocessing video."
+                )
+            epi_dist_px = float("nan")
+            reproj_err_px = float("nan")
+            compose_rot_err_deg = _compute_pose_compose_ratio(images, threshold_deg=cfg.compose_threshold_deg)
             metrics = {
                 "case": case_name,
                 "label": _case_label(case_name),
                 "num_poses": len(images),
                 "points3d": points3d_count,
                 "zigzag_score": zigzag_score,
-                "zigzag_violation_ratio": zigzag_violation_ratio,
-                "zigzag_residual_p95": zigzag_residual_p95,
-                "smooth_jump_ratio": _compute_accel_jump_ratio(images),
+                "smooth_jump_ratio": _compute_accel_jump_ratio(images, ratio=cfg.accel_jump_ratio),
                 "traj_smoothness": _compute_trajectory_smoothness(images),
+                "rot_accel_jump_ratio": rot_accel_jump_ratio,
                 "epi_dist_px": epi_dist_px,
                 "reproj_err_px": reproj_err_px,
                 "compose_rot_err_deg": compose_rot_err_deg,
             }
-            quality_score, penalty = _compute_quality_score(metrics)
-            metrics["quality_score"] = quality_score
-            metrics["penalty"] = penalty
             rows.append(metrics)
 
     rows.sort(key=lambda row: str(row["case"]))
@@ -811,12 +821,8 @@ def run_task4(cfg: Task4Config) -> int:
         writer.writeheader()
         writer.writerows(rows)
 
-    eval_stats = _evaluate_threshold(rows)
     summary_path = out_root / "summary.txt"
-    _write_summary(summary_path, rows, eval_stats)
-
-    plot_path = out_root / "quality_scores.png"
-    _plot_quality_scores(rows, plot_path)
+    _write_summary(summary_path, rows)
 
     traj_dir = out_root / "trajectories"
     traj_dir.mkdir(exist_ok=True)

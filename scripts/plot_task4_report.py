@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import csv
 from pathlib import Path
@@ -8,23 +8,37 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 CSV_PATH = ROOT / "outputs" / "lab1" / "task4" / "case_metrics.csv"
+GEOMETRY_CSV_PATH = ROOT / "outputs" / "lab1" / "task4_geometry_fps16" / "case_metrics.csv"
 OUT = ROOT / "docs" / "lab1" / "report_assets" / "task4"
 
 
 def _load_rows():
-    rows = []
+    """Load and merge trajectory metrics with geometry metrics."""
+    rows = {}
+
+    # Load trajectory metrics
     with CSV_PATH.open("r", encoding="utf-8", newline="") as f:
         for r in csv.DictReader(f):
-            rows.append({
-                "case": r["case"],
+            case = r["case"]
+            rows[case] = {
+                "case": case,
                 "label": r["label"],
                 "zigzag_score": float(r["zigzag_score"]),
-                "zigzag_residual_p95": float(r["zigzag_residual_p95"]),
                 "smooth_jump_ratio": float(r["smooth_jump_ratio"]),
                 "traj_smoothness": float(r["traj_smoothness"]),
-                "quality_score": float(r["quality_score"]),
-            })
-    return rows
+                "rot_accel_jump_ratio": float(r["rot_accel_jump_ratio"]),
+            }
+
+    # Load geometry metrics and merge
+    if GEOMETRY_CSV_PATH.exists():
+        with GEOMETRY_CSV_PATH.open("r", encoding="utf-8", newline="") as f:
+            for r in csv.DictReader(f):
+                case = r["case"]
+                if case in rows:
+                    rows[case]["epi_dist_px"] = float(r["epi_dist_px"])
+                    rows[case]["reproj_err_px"] = float(r["reproj_err_px"])
+
+    return list(rows.values())
 
 
 def main() -> None:
@@ -36,64 +50,52 @@ def main() -> None:
     colors = ["tab:red" if v == "bad" else "tab:green" for v in labels]
 
     zigzag = np.array([r["zigzag_score"] for r in rows], dtype=float)
-    zigzag_p95 = np.array([r["zigzag_residual_p95"] for r in rows], dtype=float)
     smooth = np.array([r["smooth_jump_ratio"] for r in rows], dtype=float)
-    traj = np.array([r["traj_smoothness"] for r in rows], dtype=float)
-    qscore = np.array([r["quality_score"] for r in rows], dtype=float)
+    rot_smooth = np.array([r["rot_accel_jump_ratio"] for r in rows], dtype=float)
+    epi_dist = np.array([r.get("epi_dist_px", np.nan) for r in rows], dtype=float)
+    reproj_err = np.array([r.get("reproj_err_px", np.nan) for r in rows], dtype=float)
 
-    # individual metrics
-    fig, axes = plt.subplots(2, 2, figsize=(11, 7), sharex=True)
-    axes = axes.flatten()
+    # individual metrics - 5 metrics in 3 rows (2+2+1 layout)
+    fig, axes = plt.subplots(3, 2, figsize=(9, 9), sharex=True,
+                             gridspec_kw={'wspace': 0.2, 'hspace': 0.35})
     x = np.arange(len(rows))
-    items = [
-        (zigzag, "zigzag_score"),
-        (zigzag_p95, "zigzag_residual_p95"),
-        (smooth, "smooth_jump_ratio"),
-        (traj, "traj_smoothness"),
+
+    # Row 1: zigzag_score, smooth_jump_ratio
+    items_row1 = [
+        (axes[0, 0], zigzag, "zigzag_score"),
+        (axes[0, 1], smooth, "smooth_jump_ratio"),
     ]
-    for ax, (vals, title) in zip(axes, items):
+
+    # Row 2: rot_accel_jump_ratio, epi_dist_px
+    items_row2 = [
+        (axes[1, 0], rot_smooth, "rot_accel_jump_ratio"),
+        (axes[1, 1], epi_dist, "epi_dist_px"),
+    ]
+
+    # Row 3: reproj_err_px (spans two columns)
+    items_row3 = [
+        (axes[2, 0], reproj_err, "reproj_err_px"),
+    ]
+
+    for ax, vals, title in items_row1 + items_row2 + items_row3:
         ax.bar(x, vals, color=colors)
         ax.set_title(title)
         ax.grid(axis="y", alpha=0.25)
         ax.set_xticks(x)
         ax.set_xticklabels(cases)
-    fig.suptitle("Task4 Lightweight Trajectory Metrics")
+
+    # Hide the unused subplot (axes[2, 1])
+    axes[2, 1].set_visible(False)
+
+    # Let reproj_err_px span both columns in row 3
+    axes[2, 0].set_position([0.125, 0.11, 0.775, 0.18])
+
+    fig.suptitle("Task4 Pose Quality Metrics")
     fig.tight_layout()
     fig.savefig(OUT / "task4_individual_metrics.png", dpi=180)
     plt.close(fig)
 
-    # penalty breakdown
-    zigzag_term = 0.90 * np.log1p(50.0 * zigzag)
-    accel_term = 0.05 * np.log1p(4.0 * smooth)
-    traj_term = 0.05 * np.log1p(0.5 * traj)
-
-    fig, ax = plt.subplots(figsize=(10.5, 5.2))
-    bottom = np.zeros(len(rows), dtype=float)
-    for vals, name, color in [
-        (zigzag_term, "zigzag", "#4e79a7"),
-        (accel_term, "accel", "#f28e2b"),
-        (traj_term, "trajectory", "#76b7b2"),
-    ]:
-        ax.bar(cases, vals, bottom=bottom, label=name, color=color)
-        bottom += vals
-    ax.set_title("Task4 Penalty Breakdown")
-    ax.set_ylabel("Penalty Contribution")
-    ax.grid(axis="y", alpha=0.25)
-    ax.legend()
-    fig.tight_layout()
-    fig.savefig(OUT / "task4_penalty_breakdown.png", dpi=180)
-    plt.close(fig)
-
-    # quality score
-    fig, ax = plt.subplots(figsize=(10, 4.8))
-    ax.bar(cases, qscore, color=colors)
-    ax.set_title("Task4 Quality Score")
-    ax.set_xlabel("Case")
-    ax.set_ylabel("Quality Score")
-    ax.grid(axis="y", alpha=0.25)
-    fig.tight_layout()
-    fig.savefig(OUT / "task4_quality_score.png", dpi=180)
-    plt.close(fig)
+    print(f"Saved: {OUT / 'task4_individual_metrics.png'}")
 
 
 if __name__ == "__main__":
