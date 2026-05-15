@@ -132,8 +132,24 @@ def _match_pair(gray1: np.ndarray, gray2: np.ndarray) -> tuple[np.ndarray, np.nd
     k2, d2 = orb.detectAndCompute(gray2, None)
     if d1 is None or d2 is None or len(k1) < 20 or len(k2) < 20:
         return np.zeros((0, 2), dtype=float), np.zeros((0, 2), dtype=float)
-    bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
-    matches = bf.match(d1, d2)
+    bf = cv2.BFMatcher(cv2.NORM_HAMMING)
+    knn12 = bf.knnMatch(d1, d2, k=2)
+    knn21 = bf.knnMatch(d2, d1, k=2)
+    forward: dict[int, cv2.DMatch] = {}
+    reverse_best: dict[int, int] = {}
+    for pair in knn12:
+        if len(pair) < 2:
+            continue
+        m, n = pair
+        if m.distance < 0.75 * n.distance:
+            forward[m.queryIdx] = m
+    for pair in knn21:
+        if len(pair) < 2:
+            continue
+        m, n = pair
+        if m.distance < 0.75 * n.distance:
+            reverse_best[m.queryIdx] = m.trainIdx
+    matches = [m for qidx, m in forward.items() if reverse_best.get(m.trainIdx) == qidx]
     if len(matches) < 20:
         return np.zeros((0, 2), dtype=float), np.zeros((0, 2), dtype=float)
     matches = sorted(matches, key=lambda m: m.distance)[:400]
@@ -157,7 +173,21 @@ def _rotation_angle_deg(r: np.ndarray) -> float:
     return float(np.degrees(np.arccos(val)))
 
 
-def _estimate_pair_relative_pose(p1: np.ndarray, p2: np.ndarray, k: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
+def _relative_pose_from_images(im1: dict[str, object], im2: dict[str, object]) -> tuple[np.ndarray, np.ndarray]:
+    r1 = np.asarray(im1["R"], dtype=float)
+    t1 = np.asarray(im1["t"], dtype=float).reshape(3)
+    r2 = np.asarray(im2["R"], dtype=float)
+    t2 = np.asarray(im2["t"], dtype=float).reshape(3)
+    r_rel = r2 @ r1.T
+    t_rel = t2 - r_rel @ t1
+    return r_rel, t_rel
+
+
+def _estimate_pair_rotation(
+    p1: np.ndarray,
+    p2: np.ndarray,
+    k: np.ndarray,
+) -> np.ndarray | None:
     if len(p1) < 20:
         return None
     e, inlier = cv2.findEssentialMat(p1, p2, cameraMatrix=k, method=cv2.RANSAC, prob=0.999, threshold=1.5)
@@ -171,12 +201,10 @@ def _estimate_pair_relative_pose(p1: np.ndarray, p2: np.ndarray, k: np.ndarray) 
     ok, r, t, mask_pose = cv2.recoverPose(e, p1i, p2i, cameraMatrix=k)
     if ok < 12 or mask_pose is None:
         return None
-    pose_mask = mask_pose.ravel().astype(bool)
-    p1f = p1i[pose_mask]
-    p2f = p2i[pose_mask]
-    if len(p1f) < 12:
+    if np.count_nonzero(mask_pose) < 12:
         return None
-    return r, t.reshape(3), p1f, p2f
+    _ = t
+    return r
 
 
 def _compute_smoothness_metric(images: list[dict[str, object]]) -> float:
@@ -196,12 +224,12 @@ def _compute_geometry_metrics(
     video_path: Path,
 ) -> tuple[float, float, float]:
     frame_cache: dict[int, np.ndarray] = {}
-    pair_cache: dict[tuple[int, int], tuple[np.ndarray, np.ndarray] | None] = {}
+    pair_cache: dict[tuple[int, int], dict[str, np.ndarray] | None] = {}
     epi_all: list[float] = []
     reproj_all: list[float] = []
     comp_all: list[float] = []
 
-    def get_pair(a: int, b: int) -> tuple[np.ndarray, np.ndarray] | None:
+    def get_pair(a: int, b: int) -> dict[str, np.ndarray] | None:
         key = (a, b)
         if key in pair_cache:
             return pair_cache[key]
@@ -217,41 +245,55 @@ def _compute_geometry_metrics(
             pair_cache[key] = None
             return None
         k = k_map[int(im1["camera_id"])]
-        rel = _estimate_pair_relative_pose(p1, p2, k)
-        if rel is None:
-            pair_cache[key] = None
-            return None
-        r, t, p1f, p2f = rel
+        r_gt, t_gt = _relative_pose_from_images(im1, im2)
 
-        fmat = np.linalg.inv(k).T @ (_skew(t) @ r) @ np.linalg.inv(k)
-        epi_all.extend(_symmetric_epipolar_distance(p1f, p2f, fmat).tolist())
+        fmat_gt = np.linalg.inv(k).T @ (_skew(t_gt) @ r_gt) @ np.linalg.inv(k)
+        epi_raw = _symmetric_epipolar_distance(p1, p2, fmat_gt)
+        epi_raw = epi_raw[np.isfinite(epi_raw) & (epi_raw < 1e4)]
+        if epi_raw.size:
+            gt_inlier_mask = epi_raw < 3.0
+            if np.count_nonzero(gt_inlier_mask) >= 12:
+                epi_all.append(float(np.median(epi_raw[gt_inlier_mask])))
 
-        pmat1 = k @ np.hstack([np.eye(3), np.zeros((3, 1), dtype=float)])
-        pmat2 = k @ np.hstack([r, t.reshape(3, 1)])
-        x4 = cv2.triangulatePoints(pmat1, pmat2, p1f.T.astype(np.float64), p2f.T.astype(np.float64))
-        x3 = (x4[:3] / np.maximum(1e-12, x4[3:4])).T
-        x3_h = np.column_stack([x3, np.ones(len(x3), dtype=float)])
-        z1 = (pmat1 @ x3_h.T).T[:, 2]
-        z2 = (pmat2 @ x3_h.T).T[:, 2]
-        valid_depth = (z1 > 1e-6) & (z2 > 1e-6) & np.isfinite(z1) & np.isfinite(z2)
-        if np.count_nonzero(valid_depth) < 8:
-            pair_cache[key] = (r, t)
-            return pair_cache[key]
-        x3 = x3[valid_depth]
-        p1f = p1f[valid_depth]
-        p2f = p2f[valid_depth]
-        pr1 = (pmat1 @ np.column_stack([x3, np.ones(len(x3), dtype=float)]).T).T
-        pr2 = (pmat2 @ np.column_stack([x3, np.ones(len(x3), dtype=float)]).T).T
-        uv1 = pr1[:, :2] / np.maximum(1e-12, pr1[:, 2:3])
-        uv2 = pr2[:, :2] / np.maximum(1e-12, pr2[:, 2:3])
-        e1 = np.linalg.norm(uv1 - p1f, axis=1)
-        e2 = np.linalg.norm(uv2 - p2f, axis=1)
-        e = 0.5 * (e1 + e2)
-        e = e[np.isfinite(e) & (e < 1000.0)]
-        if e.size:
-            reproj_all.extend(e.tolist())
+                p1f = p1[gt_inlier_mask]
+                p2f = p2[gt_inlier_mask]
+                p1n = cv2.undistortPoints(
+                    p1f.reshape(-1, 1, 2).astype(np.float64),
+                    cameraMatrix=k,
+                    distCoeffs=None,
+                ).reshape(-1, 2)
+                p2n = cv2.undistortPoints(
+                    p2f.reshape(-1, 1, 2).astype(np.float64),
+                    cameraMatrix=k,
+                    distCoeffs=None,
+                ).reshape(-1, 2)
+                pmat1_n = np.hstack([np.eye(3), np.zeros((3, 1), dtype=float)])
+                pmat2_n = np.hstack([r_gt, t_gt.reshape(3, 1)])
+                x4 = cv2.triangulatePoints(pmat1_n, pmat2_n, p1n.T, p2n.T)
+                x3 = (x4[:3] / np.maximum(1e-12, x4[3:4])).T
+                x3_h = np.column_stack([x3, np.ones(len(x3), dtype=float)])
+                z1 = (pmat1_n @ x3_h.T).T[:, 2]
+                z2 = (pmat2_n @ x3_h.T).T[:, 2]
+                valid_depth = (z1 > 1e-6) & (z2 > 1e-6) & np.isfinite(z1) & np.isfinite(z2)
+                if np.count_nonzero(valid_depth) >= 8:
+                    x3 = x3[valid_depth]
+                    p1f = p1f[valid_depth]
+                    p2f = p2f[valid_depth]
+                    pmat1 = k @ pmat1_n
+                    pmat2 = k @ pmat2_n
+                    pr1 = (pmat1 @ np.column_stack([x3, np.ones(len(x3), dtype=float)]).T).T
+                    pr2 = (pmat2 @ np.column_stack([x3, np.ones(len(x3), dtype=float)]).T).T
+                    uv1 = pr1[:, :2] / np.maximum(1e-12, pr1[:, 2:3])
+                    uv2 = pr2[:, :2] / np.maximum(1e-12, pr2[:, 2:3])
+                    e1 = np.linalg.norm(uv1 - p1f, axis=1)
+                    e2 = np.linalg.norm(uv2 - p2f, axis=1)
+                    e = 0.5 * (e1 + e2)
+                    e = e[np.isfinite(e) & (e < 1000.0)]
+                    if e.size:
+                        reproj_all.append(float(np.median(e)))
 
-        pair_cache[key] = (r, t)
+        r_est = _estimate_pair_rotation(p1, p2, k)
+        pair_cache[key] = None if r_est is None else {"R_est": r_est}
         return pair_cache[key]
 
     for i in range(len(images) - 1):
@@ -260,13 +302,10 @@ def _compute_geometry_metrics(
     for i in range(len(images) - 2):
         ij = get_pair(i, i + 1)
         jk = get_pair(i + 1, i + 2)
-        ik = get_pair(i, i + 2)
-        if ij is None or jk is None or ik is None:
+        if ij is None or jk is None:
             continue
-        rij, _tij = ij
-        rjk, _tjk = jk
-        rik, _tik = ik
-        comp_all.append(_rotation_angle_deg(rik.T @ (rjk @ rij)))
+        rik_gt, _tik_gt = _relative_pose_from_images(images[i], images[i + 2])
+        comp_all.append(_rotation_angle_deg(rik_gt.T @ (jk["R_est"] @ ij["R_est"])))
 
     epi_metric = float(np.median(np.array(epi_all, dtype=float))) if epi_all else 1e6
     reproj_metric = float(np.median(np.array(reproj_all, dtype=float))) if reproj_all else 1e6
