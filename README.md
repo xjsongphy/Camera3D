@@ -33,6 +33,7 @@ uv run lab1 task3 --videos S2-1 S2-2 --fps 30 --methods mask --mask-source motio
 
 # task4: 位姿质量评估
 uv run lab1 task4
+uv run lab1 task4 plot
 ```
 
 别名：
@@ -177,11 +178,20 @@ uv run lab1 task3 --videos S2-1 S2-2 --fps 30 --methods mask --mask-source yolo
 ### Task4
 
 ```bash
-# 跑全部 10 个标注 case
+# 跑全部 10 个标注 case（含质量评估 + 轨迹绘制）
 uv run lab1 task4
 
 # 只跑部分 case
 uv run lab1 task4 --cases 01 02 06
+
+# 仅重新绘制轨迹图（无需重新计算指标）
+uv run lab1 task4 plot
+
+# 调整方向箭头数量
+uv run lab1 task4 plot --direction-arrows 20
+
+# 视频三角化几何指标：fps16 抽帧、10 个 case 并行
+uv run python scripts/task4_video_geometry_fps16.py --workers 10 --target-fps 16 --max-pairs 160
 ```
 
 输出目录：
@@ -194,13 +204,20 @@ uv run lab1 task4 --cases 01 02 06
 - `summary.txt`
 - `quality_scores.png`
 - `timing.csv`
+- `trajectories/trajectories.png` — 10 条轨迹总览
+- `trajectories/trajectory_*.png` — 逐 case 轨迹图
 
 当前实现的质量指标：
 
 - `smooth_jump_ratio`
+- `traj_smoothness`
+- `zigzag_score`
 - `epi_dist_px`
 - `reproj_err_px`
+- `reproj_median_px`
 - `compose_rot_err_deg`
+
+视频三角化几何指标输出到 `outputs/lab1/task4_geometry_fps16/`，报告图输出到 `docs/lab1/report_assets/task4_geometry_fps16/`。
 
 ## 批处理脚本
 
@@ -229,17 +246,6 @@ bash ./scripts/run_lab1_pipeline.sh
 - `task3_full_pipeline` 会依次生成 `default / motion / yolo` 掩膜，并运行 `raw + mask_*` 重建。
 - `run_lab1_pipeline` 用于串联执行 `task1~task3` 的完整实验流程。
 
-## 实验结果摘要
-
-完整分析见 `docs/lab1/report.md`。
-
-当前报告中的主要结论：
-
-- Task1：抽帧率不是越高越好。`S1-2` 在 `4 / 8 / 16 / 30 fps` 下都能 100% 注册；`S1-1` 最优在 `16 fps`；`S1-3` 对抽帧率最敏感。
-- Task2：对子序列做独立 SfM 后再与全量轨迹对齐，稳定扫描片段的 ATE 明显低于回环片段；`8 fps` 在当前实验中比 `16/30 fps` 更稳。
-- Task3：`mask_motion` 在两个动态视频上都取得了最好的综合效果，`S2-1` 注册率从 `14.0%` 提升到 `56.8%`，`S2-2` 从 `34.4%` 提升到 `45.1%`。
-- Task4：当前混合质量分数在 10 个标注 case 上达到 `0.70` 准确率，最有区分力的单项指标是 `smooth_jump_ratio`。
-
 报告配图位于 `docs/lab1/report_assets/`，例如：
 
 - `docs/lab1/report_assets/task1/task1_fps_sweep.png`
@@ -254,8 +260,3 @@ bash ./scripts/run_lab1_pipeline.sh
 - `outputs/lab1/<task>/logs/<task>_YYYYMMDD_HHMMSS.log`
 
 所有任务的阶段耗时都会写入各自输出目录下的 `timing.csv`。
-
-## 备注
-
-- 仓库当前重点是 `lab1`，`src/lab2` 还没有对外 CLI。
-- 仓库里可能存在历史输出和 `sync-conflict` 文件，它们不是运行所必需的结果文件。
