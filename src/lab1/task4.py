@@ -16,6 +16,13 @@ from lab1.task1 import TIMING_FILENAME, Task1Error
 
 
 ANNOTATION_CASES = tuple(f"{idx:02d}" for idx in range(1, 11))
+ACCEL_JUMP_RATIO = 4.0
+EPI_INLIER_THRESHOLD_PX = 0.3
+EPI_TRIANG_GATE_PX = 3.0
+REPROJ_INLIER_THRESHOLD_PX = 0.2
+MIN_PARALLAX_DEG_FOR_TRIANG = 0.2
+COMPOSE_MIN_MATCHES = 30
+COMPOSE_ROT_THRESHOLD_DEG = 0.05
 
 
 @dataclass
@@ -110,6 +117,15 @@ def _sample_images(images: list[dict[str, object]], max_samples: int = 140) -> l
     return [images[int(i)] for i in idx]
 
 
+def _geometry_eval_indices(num_images: int, max_triplets: int = 140) -> list[int]:
+    if num_images < 3:
+        return []
+    if num_images - 2 <= max_triplets:
+        return list(range(num_images - 2))
+    stride = max(1, (num_images - 2) // max_triplets)
+    return list(range(0, num_images - 2, stride))
+
+
 def _read_frame(video_path: Path, frame_idx: int, cache: dict[int, np.ndarray]) -> np.ndarray | None:
     if frame_idx in cache:
         return cache[frame_idx]
@@ -127,12 +143,12 @@ def _read_frame(video_path: Path, frame_idx: int, cache: dict[int, np.ndarray]) 
 
 
 def _match_pair(gray1: np.ndarray, gray2: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    orb = cv2.ORB_create(nfeatures=2000)
-    k1, d1 = orb.detectAndCompute(gray1, None)
-    k2, d2 = orb.detectAndCompute(gray2, None)
+    sift = cv2.SIFT_create(nfeatures=2000)
+    k1, d1 = sift.detectAndCompute(gray1, None)
+    k2, d2 = sift.detectAndCompute(gray2, None)
     if d1 is None or d2 is None or len(k1) < 20 or len(k2) < 20:
         return np.zeros((0, 2), dtype=float), np.zeros((0, 2), dtype=float)
-    bf = cv2.BFMatcher(cv2.NORM_HAMMING)
+    bf = cv2.BFMatcher(cv2.NORM_L2)
     knn12 = bf.knnMatch(d1, d2, k=2)
     knn21 = bf.knnMatch(d2, d1, k=2)
     forward: dict[int, cv2.DMatch] = {}
@@ -173,6 +189,13 @@ def _rotation_angle_deg(r: np.ndarray) -> float:
     return float(np.degrees(np.arccos(val)))
 
 
+def _finite_median(values: np.ndarray, fallback: float) -> float:
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return fallback
+    return float(np.median(finite))
+
+
 def _relative_pose_from_images(im1: dict[str, object], im2: dict[str, object]) -> tuple[np.ndarray, np.ndarray]:
     r1 = np.asarray(im1["R"], dtype=float)
     t1 = np.asarray(im1["t"], dtype=float).reshape(3)
@@ -183,39 +206,187 @@ def _relative_pose_from_images(im1: dict[str, object], im2: dict[str, object]) -
     return r_rel, t_rel
 
 
-def _estimate_pair_rotation(
+def _compute_accel_jump_ratio(images: list[dict[str, object]], ratio: float = ACCEL_JUMP_RATIO) -> float:
+    centers = np.array([np.asarray(im["C"], dtype=float) for im in images], dtype=float)
+    frame_idx = np.array([int(im["frame_idx"]) for im in images], dtype=float)
+    if len(centers) < 3:
+        return 1.0
+
+    dt = np.diff(frame_idx)
+    valid_dt = dt > 1e-9
+    if np.count_nonzero(valid_dt) < 2:
+        return 1.0
+
+    velocity = np.diff(centers, axis=0)[valid_dt] / dt[valid_dt, None]
+    dt_valid = dt[valid_dt]
+    if len(velocity) < 2:
+        return 1.0
+
+    accel_dt = 0.5 * (dt_valid[:-1] + dt_valid[1:])
+    valid_accel_dt = accel_dt > 1e-9
+    if np.count_nonzero(valid_accel_dt) == 0:
+        return 1.0
+
+    accel = (velocity[1:] - velocity[:-1])[valid_accel_dt] / accel_dt[valid_accel_dt, None]
+    accel_norm = np.linalg.norm(accel, axis=1)
+    finite = accel_norm[np.isfinite(accel_norm)]
+    if finite.size == 0:
+        return 1.0
+    accel_ref = float(np.median(finite))
+    if accel_ref <= 1e-12:
+        return 0.0
+    return float(np.mean(finite > ratio * accel_ref))
+
+
+def _project_points_px(k: np.ndarray, x_cam: np.ndarray) -> np.ndarray:
+    z = np.maximum(1e-9, x_cam[:, 2:3])
+    xy = x_cam[:, :2] / z
+    fx, fy = k[0, 0], k[1, 1]
+    cx, cy = k[0, 2], k[1, 2]
+    return np.column_stack([fx * xy[:, 0] + cx, fy * xy[:, 1] + cy])
+
+
+def _robust_pair_reproj_px(
+    p1: np.ndarray,
+    p2: np.ndarray,
+    k: np.ndarray,
+    r_gt: np.ndarray,
+    t_gt: np.ndarray,
+    epi_raw: np.ndarray,
+) -> tuple[float, float]:
+    if len(p1) < 8:
+        return float("nan"), float("nan")
+    tri_mask = epi_raw < EPI_TRIANG_GATE_PX
+    if np.count_nonzero(tri_mask) < 8:
+        keep = min(max(24, len(p1) // 4), len(p1))
+        best_idx = np.argsort(epi_raw)[:keep]
+    else:
+        best_idx = np.flatnonzero(tri_mask)
+
+    p1s = p1[best_idx]
+    p2s = p2[best_idx]
+    p1n = cv2.undistortPoints(p1s.reshape(-1, 1, 2).astype(np.float64), cameraMatrix=k, distCoeffs=None).reshape(-1, 2)
+    p2n = cv2.undistortPoints(p2s.reshape(-1, 1, 2).astype(np.float64), cameraMatrix=k, distCoeffs=None).reshape(-1, 2)
+    rays1 = np.column_stack([p1n, np.ones(len(p1n), dtype=float)])
+    rays1 /= np.linalg.norm(rays1, axis=1, keepdims=True)
+    rays2_local = np.column_stack([p2n, np.ones(len(p2n), dtype=float)])
+    rays2_local /= np.linalg.norm(rays2_local, axis=1, keepdims=True)
+    rays2 = (r_gt.T @ rays2_local.T).T
+    cos_parallax = np.sum(rays1 * rays2, axis=1)
+    parallax_deg = np.degrees(np.arccos(np.clip(cos_parallax, -1.0, 1.0)))
+    good_parallax = parallax_deg >= MIN_PARALLAX_DEG_FOR_TRIANG
+    if np.count_nonzero(good_parallax) >= 8:
+        p1n = p1n[good_parallax]
+        p2n = p2n[good_parallax]
+        p1s = p1s[good_parallax]
+        p2s = p2s[good_parallax]
+    if len(p1n) < 8:
+        return float("nan"), float("nan")
+
+    pmat1 = np.hstack([np.eye(3, dtype=float), np.zeros((3, 1), dtype=float)])
+    pmat2 = np.hstack([r_gt, t_gt.reshape(3, 1)])
+    x4 = cv2.triangulatePoints(
+        pmat1.astype(np.float64),
+        pmat2.astype(np.float64),
+        p1n.T.astype(np.float64),
+        p2n.T.astype(np.float64),
+    )
+    w = x4[3]
+    finite_mask = np.isfinite(w) & (np.abs(w) > 1e-12)
+    if np.count_nonzero(finite_mask) < 8:
+        return float("nan"), float("nan")
+    x = (x4[:3, finite_mask] / w[finite_mask]).T
+
+    z1 = x[:, 2]
+    x2 = (r_gt @ x.T + t_gt.reshape(3, 1)).T
+    z2 = x2[:, 2]
+    cheirality = (z1 > 1e-8) & (z2 > 1e-8)
+    if np.count_nonzero(cheirality) >= 8:
+        x = x[cheirality]
+        x2 = x2[cheirality]
+        p1_obs = p1s[finite_mask][cheirality]
+        p2_obs = p2s[finite_mask][cheirality]
+    else:
+        p1_obs = p1s[finite_mask]
+        p2_obs = p2s[finite_mask]
+
+    if len(x) < 8:
+        return float("nan"), float("nan")
+    p1_rep = _project_points_px(k, x)
+    p2_rep = _project_points_px(k, x2)
+    e1 = np.linalg.norm(p1_rep - p1_obs, axis=1)
+    e2 = np.linalg.norm(p2_rep - p2_obs, axis=1)
+    errs = 0.5 * (e1 + e2)
+    finite = errs[np.isfinite(errs)]
+    if finite.size == 0:
+        return float("nan"), float("nan")
+    finite = finite[finite < 80.0]
+    if finite.size < 8:
+        return float("nan"), float("nan")
+    violation_ratio = float(np.mean(finite > REPROJ_INLIER_THRESHOLD_PX))
+    median_err = float(np.median(finite))
+    return violation_ratio, median_err
+
+
+def _estimate_relative_rotation_from_matches(
     p1: np.ndarray,
     p2: np.ndarray,
     k: np.ndarray,
 ) -> np.ndarray | None:
-    if len(p1) < 20:
+    if len(p1) < COMPOSE_MIN_MATCHES:
         return None
-    e, inlier = cv2.findEssentialMat(p1, p2, cameraMatrix=k, method=cv2.RANSAC, prob=0.999, threshold=1.5)
-    if e is None or inlier is None:
+    e, mask = cv2.findEssentialMat(
+        p1.astype(np.float64),
+        p2.astype(np.float64),
+        cameraMatrix=k.astype(np.float64),
+        method=cv2.RANSAC,
+        prob=0.999,
+        threshold=1.5,
+    )
+    if e is None:
         return None
-    inlier_mask = inlier.ravel().astype(bool)
-    if np.count_nonzero(inlier_mask) < 16:
-        return None
-    p1i = p1[inlier_mask]
-    p2i = p2[inlier_mask]
-    ok, r, t, mask_pose = cv2.recoverPose(e, p1i, p2i, cameraMatrix=k)
-    if ok < 12 or mask_pose is None:
-        return None
-    if np.count_nonzero(mask_pose) < 12:
-        return None
-    _ = t
-    return r
+    if e.ndim == 2 and e.shape == (3, 3):
+        e_candidates = [e]
+    else:
+        e_candidates = [e[i : i + 3, :] for i in range(0, e.shape[0], 3)]
+    best_r = None
+    best_inliers = -1
+    for e_i in e_candidates:
+        ok, r_est, _t_est, pose_mask = cv2.recoverPose(
+            e_i.astype(np.float64),
+            p1.astype(np.float64),
+            p2.astype(np.float64),
+            cameraMatrix=k.astype(np.float64),
+            mask=mask,
+        )
+        if ok <= 0:
+            continue
+        inliers = int(np.count_nonzero(pose_mask)) if pose_mask is not None else int(ok)
+        if inliers > best_inliers:
+            best_inliers = inliers
+            best_r = r_est
+    return best_r
 
 
-def _compute_smoothness_metric(images: list[dict[str, object]]) -> float:
-    centers = np.array([np.asarray(im["C"], dtype=float) for im in images], dtype=float)
-    if len(centers) < 3:
-        return 1.0
-    step = np.linalg.norm(np.diff(centers, axis=0), axis=1)
-    step_med = float(np.median(step))
-    if step_med <= 1e-12:
-        return 0.0
-    return float(np.mean(step > 3.0 * step_med))
+def _ransac_filter_matches(p1: np.ndarray, p2: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    if len(p1) < 16:
+        return p1, p2
+    try:
+        f_img, mask = cv2.findFundamentalMat(
+            p1.astype(np.float64),
+            p2.astype(np.float64),
+            cv2.FM_RANSAC,
+            1.5,
+            0.999,
+        )
+    except cv2.error:
+        return p1, p2
+    if f_img is None or mask is None:
+        return p1, p2
+    inliers = mask.reshape(-1).astype(bool)
+    if np.count_nonzero(inliers) < 12:
+        return p1, p2
+    return p1[inliers], p2[inliers]
 
 
 def _compute_geometry_metrics(
@@ -224,93 +395,64 @@ def _compute_geometry_metrics(
     video_path: Path,
 ) -> tuple[float, float, float]:
     frame_cache: dict[int, np.ndarray] = {}
-    pair_cache: dict[tuple[int, int], dict[str, np.ndarray] | None] = {}
-    epi_all: list[float] = []
-    reproj_all: list[float] = []
-    comp_all: list[float] = []
+    epi_violation_all: list[float] = []
+    reproj_violation_all: list[float] = []
+    compose_violation_all: list[float] = []
+    pair_cache: dict[tuple[int, int], tuple[np.ndarray, np.ndarray, np.ndarray] | None] = {}
+    rot_adj_cache: dict[tuple[int, int], np.ndarray] = {}
 
-    def get_pair(a: int, b: int) -> dict[str, np.ndarray] | None:
-        key = (a, b)
-        if key in pair_cache:
-            return pair_cache[key]
+    triplet_indices = _geometry_eval_indices(len(images), max_triplets=140)
+    pair_indices = sorted({i for start in triplet_indices for i in (start, start + 1) if i + 1 < len(images)})
+    for a in pair_indices:
         im1 = images[a]
-        im2 = images[b]
+        im2 = images[a + 1]
         g1 = _read_frame(video_path, int(im1["frame_idx"]), frame_cache)
         g2 = _read_frame(video_path, int(im2["frame_idx"]), frame_cache)
         if g1 is None or g2 is None:
-            pair_cache[key] = None
-            return None
+            continue
         p1, p2 = _match_pair(g1, g2)
         if len(p1) < 20:
-            pair_cache[key] = None
-            return None
+            continue
+        p1, p2 = _ransac_filter_matches(p1, p2)
+        if len(p1) < 12:
+            pair_cache[(a, a + 1)] = None
+            continue
         k = k_map[int(im1["camera_id"])]
         r_gt, t_gt = _relative_pose_from_images(im1, im2)
 
         fmat_gt = np.linalg.inv(k).T @ (_skew(t_gt) @ r_gt) @ np.linalg.inv(k)
         epi_raw = _symmetric_epipolar_distance(p1, p2, fmat_gt)
-        epi_raw = epi_raw[np.isfinite(epi_raw) & (epi_raw < 1e4)]
-        if epi_raw.size:
-            gt_inlier_mask = epi_raw < 3.0
-            if np.count_nonzero(gt_inlier_mask) >= 12:
-                epi_all.append(float(np.median(epi_raw[gt_inlier_mask])))
-
-                p1f = p1[gt_inlier_mask]
-                p2f = p2[gt_inlier_mask]
-                p1n = cv2.undistortPoints(
-                    p1f.reshape(-1, 1, 2).astype(np.float64),
-                    cameraMatrix=k,
-                    distCoeffs=None,
-                ).reshape(-1, 2)
-                p2n = cv2.undistortPoints(
-                    p2f.reshape(-1, 1, 2).astype(np.float64),
-                    cameraMatrix=k,
-                    distCoeffs=None,
-                ).reshape(-1, 2)
-                pmat1_n = np.hstack([np.eye(3), np.zeros((3, 1), dtype=float)])
-                pmat2_n = np.hstack([r_gt, t_gt.reshape(3, 1)])
-                x4 = cv2.triangulatePoints(pmat1_n, pmat2_n, p1n.T, p2n.T)
-                x3 = (x4[:3] / np.maximum(1e-12, x4[3:4])).T
-                x3_h = np.column_stack([x3, np.ones(len(x3), dtype=float)])
-                z1 = (pmat1_n @ x3_h.T).T[:, 2]
-                z2 = (pmat2_n @ x3_h.T).T[:, 2]
-                valid_depth = (z1 > 1e-6) & (z2 > 1e-6) & np.isfinite(z1) & np.isfinite(z2)
-                if np.count_nonzero(valid_depth) >= 8:
-                    x3 = x3[valid_depth]
-                    p1f = p1f[valid_depth]
-                    p2f = p2f[valid_depth]
-                    pmat1 = k @ pmat1_n
-                    pmat2 = k @ pmat2_n
-                    pr1 = (pmat1 @ np.column_stack([x3, np.ones(len(x3), dtype=float)]).T).T
-                    pr2 = (pmat2 @ np.column_stack([x3, np.ones(len(x3), dtype=float)]).T).T
-                    uv1 = pr1[:, :2] / np.maximum(1e-12, pr1[:, 2:3])
-                    uv2 = pr2[:, :2] / np.maximum(1e-12, pr2[:, 2:3])
-                    e1 = np.linalg.norm(uv1 - p1f, axis=1)
-                    e2 = np.linalg.norm(uv2 - p2f, axis=1)
-                    e = 0.5 * (e1 + e2)
-                    e = e[np.isfinite(e) & (e < 1000.0)]
-                    if e.size:
-                        reproj_all.append(float(np.median(e)))
-
-        r_est = _estimate_pair_rotation(p1, p2, k)
-        pair_cache[key] = None if r_est is None else {"R_est": r_est}
-        return pair_cache[key]
-
-    for i in range(len(images) - 1):
-        _ = get_pair(i, i + 1)
-
-    for i in range(len(images) - 2):
-        ij = get_pair(i, i + 1)
-        jk = get_pair(i + 1, i + 2)
-        if ij is None or jk is None:
+        finite_epi_mask = np.isfinite(epi_raw)
+        if np.count_nonzero(finite_epi_mask) < 8:
+            pair_cache[(a, a + 1)] = None
             continue
-        rik_gt, _tik_gt = _relative_pose_from_images(images[i], images[i + 2])
-        comp_all.append(_rotation_angle_deg(rik_gt.T @ (jk["R_est"] @ ij["R_est"])))
+        epi_raw = epi_raw[finite_epi_mask]
+        p1 = p1[finite_epi_mask]
+        p2 = p2[finite_epi_mask]
+        epi_violation_all.append(float(np.mean(epi_raw > EPI_INLIER_THRESHOLD_PX)))
+        pair_cache[(a, a + 1)] = (p1, p2, k)
+        reproj_violation, _reproj_median = _robust_pair_reproj_px(p1, p2, k, r_gt, t_gt, epi_raw)
+        if np.isfinite(reproj_violation):
+            reproj_violation_all.append(float(reproj_violation))
+        r_est_adj = _estimate_relative_rotation_from_matches(p1, p2, k)
+        if r_est_adj is not None:
+            rot_adj_cache[(a, a + 1)] = r_est_adj
 
-    epi_metric = float(np.median(np.array(epi_all, dtype=float))) if epi_all else 1e6
-    reproj_metric = float(np.median(np.array(reproj_all, dtype=float))) if reproj_all else 1e6
-    comp_metric = float(np.median(np.array(comp_all, dtype=float))) if comp_all else 180.0
-    return epi_metric, reproj_metric, comp_metric
+    # Triplet composition consistency against GT two-step relative rotation:
+    # R_gt(i,i+2) vs R_est(i+1,i+2) * R_est(i,i+1)
+    for i in triplet_indices:
+        r12 = rot_adj_cache.get((i, i + 1))
+        r23 = rot_adj_cache.get((i + 1, i + 2))
+        if r12 is None or r23 is None:
+            continue
+        r13_gt, _ = _relative_pose_from_images(images[i], images[i + 2])
+        r_err = (r23 @ r12) @ r13_gt.T
+        compose_violation_all.append(float(_rotation_angle_deg(r_err) > COMPOSE_ROT_THRESHOLD_DEG))
+
+    epi_metric = float(np.median(np.array(epi_violation_all, dtype=float))) if epi_violation_all else 1.0
+    reproj_metric = float(np.median(np.array(reproj_violation_all, dtype=float))) if reproj_violation_all else 1.0
+    compose_metric = float(np.mean(np.array(compose_violation_all, dtype=float))) if compose_violation_all else 1.0
+    return epi_metric, reproj_metric, compose_metric
 
 
 def _skew(v: np.ndarray) -> np.ndarray:
@@ -318,11 +460,11 @@ def _skew(v: np.ndarray) -> np.ndarray:
 
 
 def _compute_quality_score(metrics: dict[str, float]) -> tuple[float, float]:
-    smooth_term = metrics["smooth_jump_ratio"] * 6.0
-    epi_term = math.log1p(metrics["epi_dist_px"] / 1.5)
-    reproj_term = math.log1p(metrics["reproj_err_px"] / 1.5)
-    comp_term = math.log1p(metrics["compose_rot_err_deg"] / 2.0)
-    penalty = 0.25 * smooth_term + 0.25 * epi_term + 0.25 * reproj_term + 0.25 * comp_term
+    smooth_term = math.log1p(4.0 * metrics["smooth_jump_ratio"])
+    epi_term = math.log1p(4.0 * metrics["epi_dist_px"])
+    reproj_term = math.log1p(4.0 * metrics["reproj_err_px"])
+    compose_term = math.log1p(4.0 * metrics["compose_rot_err_deg"])
+    penalty = 0.30 * smooth_term + 0.25 * epi_term + 0.25 * reproj_term + 0.20 * compose_term
     score = 100.0 * math.exp(-penalty)
     return score, penalty
 
@@ -445,7 +587,7 @@ def run_task4(cfg: Task4Config) -> int:
         print(f"\n=== Task4 / {case_name} ===")
         with timed_block(case_name, timings):
             k_map = _parse_camera_intrinsics(cameras_txt)
-            images = _sample_images(_parse_images(images_txt))
+            images = _parse_images(images_txt)
             points3d_count = sum(1 for _ in points3d_txt.open("r", encoding="utf-8") if _.strip() and not _.startswith("#"))
             epi_dist_px, reproj_err_px, compose_rot_err_deg = _compute_geometry_metrics(images, k_map, video_path)
             metrics = {
@@ -453,7 +595,7 @@ def run_task4(cfg: Task4Config) -> int:
                 "label": _case_label(case_name),
                 "num_poses": len(images),
                 "points3d": points3d_count,
-                "smooth_jump_ratio": _compute_smoothness_metric(images),
+                "smooth_jump_ratio": _compute_accel_jump_ratio(images),
                 "epi_dist_px": epi_dist_px,
                 "reproj_err_px": reproj_err_px,
                 "compose_rot_err_deg": compose_rot_err_deg,

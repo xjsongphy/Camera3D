@@ -168,7 +168,7 @@ def run_task4_entry(args: argparse.Namespace) -> int:
 
 
 def _add_task3_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--fps", type=float, default=5.0, help="frame sampling rate for task3 dynamic videos")
+    parser.add_argument("--fps", type=float, default=30.0, help="frame sampling rate for task3 dynamic videos")
     parser.add_argument("--colmap-bin", default="colmap", help="colmap executable name/path for task3")
     parser.add_argument("--ffmpeg-bin", default="ffmpeg", help="ffmpeg executable name/path for task3")
     parser.add_argument("--force", action="store_true", help="overwrite previous task3 outputs")
@@ -210,7 +210,7 @@ def _add_task3_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_task3_mask_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--fps", type=float, default=5.0, help="frame sampling rate shared with task3")
+    parser.add_argument("--fps", type=float, default=30.0, help="frame sampling rate shared with task3")
     parser.add_argument("--ffmpeg-bin", default="ffmpeg", help="ffmpeg executable name/path")
     parser.add_argument("--force", action="store_true", help="overwrite previous extracted frames and generated masks")
     parser.add_argument("--dry-run", action="store_true", help="print steps without executing")
@@ -284,7 +284,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["run", "merge", "plot", "cloud"],
         help="task1 mode: run (default), merge trajectories, redraw trajectories, or generate sparse point-cloud plot from existing outputs",
     )
-    task1_parser.add_argument("--fps", type=float, default=-1.0, help="frame sampling rate for task1 (default: -1 for all available fps)")
+    task1_parser.add_argument("--fps", type=float, default=30.0, help="frame sampling rate for task1")
     task1_parser.add_argument("--colmap-bin", default="colmap", help="colmap executable name/path for task1")
     task1_parser.add_argument("--ffmpeg-bin", default="ffmpeg", help="ffmpeg executable name/path for task1")
     task1_parser.add_argument("--force", action="store_true", help="overwrite previous task1 outputs")
@@ -315,7 +315,7 @@ def build_parser() -> argparse.ArgumentParser:
     task1_parser.set_defaults(handler=run_task1_entry)
 
     task2_parser = subparsers.add_parser("task2", help=TASK_HELP["task2"])
-    task2_parser.add_argument("--source-fps", type=float, default=4.0, help="use task1 S1-2 results from this fps tag")
+    task2_parser.add_argument("--source-fps", type=float, default=30.0, help="use task1 S1-2 results from this fps tag")
     task2_parser.add_argument("--colmap-bin", default="colmap", help="colmap executable name/path for task2")
     task2_parser.add_argument("--force", action="store_true", help="overwrite previous task2 outputs")
     task2_parser.add_argument("--dry-run", action="store_true", help="print commands without executing for task2")
@@ -355,7 +355,7 @@ def build_parser() -> argparse.ArgumentParser:
                     choices=["run", "merge", "plot", "cloud"],
                     help="task1 mode: run (default), merge trajectories, redraw trajectories, or generate sparse point-cloud plot from existing outputs",
                 )
-                sub.add_argument("--fps", type=float, default=2.0, help="frame sampling rate for task1")
+                sub.add_argument("--fps", type=float, default=30.0, help="frame sampling rate for task1")
                 sub.add_argument("--colmap-bin", default="colmap", help="colmap executable name/path for task1")
                 sub.add_argument("--ffmpeg-bin", default="ffmpeg", help="ffmpeg executable name/path for task1")
                 sub.add_argument("--force", action="store_true", help="overwrite previous task1 outputs")
@@ -385,7 +385,7 @@ def build_parser() -> argparse.ArgumentParser:
                 )
                 sub.set_defaults(handler=run_task1_entry)
             elif target == "task2":
-                sub.add_argument("--source-fps", type=float, default=4.0, help="use task1 S1-2 results from this fps tag")
+                sub.add_argument("--source-fps", type=float, default=30.0, help="use task1 S1-2 results from this fps tag")
                 sub.add_argument("--colmap-bin", default="colmap", help="colmap executable name/path for task2")
                 sub.add_argument("--force", action="store_true", help="overwrite previous task2 outputs")
                 sub.add_argument("--dry-run", action="store_true", help="print commands without executing for task2")

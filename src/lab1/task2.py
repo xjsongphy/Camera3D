@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,7 +17,7 @@ from lab1.colmap_utils import (
 )
 from lab1.geometry_utils import apply_sim3, parse_colmap_pose_map, umeyama_sim3
 from lab1.logging_utils import print_timing_summary, timed_block, write_timing_csv
-from lab1.task1 import Task1Error, _format_float_tag, _has_any_frames
+from lab1.task1 import FRAME_MAP_FILENAME, Task1Error, _format_float_tag, _has_any_frames
 
 TIMING_FILENAME = "timing.csv"
 
@@ -176,26 +177,22 @@ def _plot_overlay(ref: np.ndarray, est_aligned: np.ndarray, out_path: Path, titl
     plt.close(fig)
 
 
-def _default_subseq_ranges(n: int) -> list[tuple[int, int, str]]:
-    # 0-based half-open ranges.
-    # Default segments for S1-2 (2070 frames at fps=30):
-    # 1) return_mid: 211-930 (720 frames, endpoint_ratio=0.39) - strong return pattern
-    # 2) scan_stable: 271-510 (240 frames, endpoint_ratio=0.87) - clean single-direction scan
-    # 3) return_long: 31-930 (900 frames, endpoint_ratio=0.41) - long return with good coverage
+def _default_subseq_ranges() -> list[tuple[int, int, str]]:
+    # Default subsequence ranges using ORIGINAL VIDEO frame numbers (1-based inclusive).
+    # These refer to the original S1-2 video frames, independent of sampling fps.
+    # Original S1-2 has ~2070 frames at 30fps.
     specs = [
-        (210, 930, "return_mid"),
-        (270, 510, "scan_stable"),
-        (30, 930, "return_long"),
+        (211, 930, "return_mid"),    # Frames 211-930 in original video
+        (271, 510, "scan_stable"),   # Frames 271-510 in original video
+        (31, 930, "return_long"),    # Frames 31-930 in original video
     ]
-    fixed: list[tuple[int, int, str]] = []
-    for s, e, name in specs:
-        s = max(0, min(s, n - 1))
-        e = max(s + 1, min(e, n))
-        fixed.append((s, e, name))
-    return fixed
+    return specs
 
 
-def _parse_subseq_specs(specs: tuple[str, ...], n: int) -> list[tuple[int, int, str]]:
+def _parse_subseq_specs(specs: tuple[str, ...]) -> list[tuple[int, int, str]]:
+    """Parse subsequence specs as ORIGINAL VIDEO frame numbers (1-based inclusive).
+    Format: START:END:NAME where START and END are original video frame numbers.
+    """
     parsed: list[tuple[int, int, str]] = []
     seen_names: set[str] = set()
     for raw in specs:
@@ -203,7 +200,7 @@ def _parse_subseq_specs(specs: tuple[str, ...], n: int) -> list[tuple[int, int, 
         if len(parts) != 3:
             raise Task1Error(
                 f"Invalid --subseq value: {raw}. Expected format START:END:NAME "
-                "(1-based inclusive frame indices)."
+                "(1-based inclusive ORIGINAL VIDEO frame numbers)."
             )
         start_s, end_s, name = parts
         if not start_s.isdigit() or not end_s.isdigit():
@@ -212,16 +209,71 @@ def _parse_subseq_specs(specs: tuple[str, ...], n: int) -> list[tuple[int, int, 
         end = int(end_s)
         if start < 1 or end < 1 or start > end:
             raise Task1Error(f"Invalid --subseq range: {raw}. Require 1 <= START <= END.")
-        if end > n:
-            raise Task1Error(f"Invalid --subseq range: {raw}. END exceeds available frames ({n}).")
         clean_name = name.strip()
         if not clean_name:
             raise Task1Error(f"Invalid --subseq value: {raw}. NAME must be non-empty.")
         if clean_name in seen_names:
             raise Task1Error(f"Duplicate --subseq name: {clean_name}")
-        seen_names.add(clean_name)
-        parsed.append((start - 1, end, clean_name))
+        parsed.append((start, end, clean_name))
     return parsed
+
+
+def _load_source_frame_index_map(frame_map_path: Path) -> dict[str, int]:
+    if not frame_map_path.exists():
+        raise Task1Error(f"Frame map not found: {frame_map_path}")
+    mapping: dict[str, int] = {}
+    with frame_map_path.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        required_cols = {"image_name", "source_frame_index"}
+        if not reader.fieldnames or not required_cols.issubset(set(reader.fieldnames)):
+            raise Task1Error(
+                f"Malformed frame map {frame_map_path}: expected columns {sorted(required_cols)}"
+            )
+        for row in reader:
+            image_name = row["image_name"].strip()
+            if not image_name:
+                continue
+            try:
+                source_frame_index = int(row["source_frame_index"])
+            except ValueError as exc:
+                raise Task1Error(
+                    f"Invalid source_frame_index in {frame_map_path}: {row['source_frame_index']!r}"
+                ) from exc
+            # source_frame_index is 0-based in task1; convert to 1-based here.
+            mapping[image_name] = source_frame_index + 1
+    if not mapping:
+        raise Task1Error(f"Frame map is empty: {frame_map_path}")
+    return mapping
+
+
+def _filter_frames_by_original_range(
+    all_frames: list[str],
+    source_frame_map: dict[str, int],
+    start_frame: int,
+    end_frame: int,
+) -> list[str]:
+    """Filter sampled images by mapped ORIGINAL VIDEO frame numbers (1-based inclusive)."""
+    filtered = []
+    for fname in all_frames:
+        frame_num = source_frame_map.get(fname)
+        if frame_num is None:
+            continue
+        if start_frame <= frame_num <= end_frame:
+            filtered.append(fname)
+    return filtered
+
+
+def _pose_map_to_source_index_map(
+    pose_map: dict[str, tuple[np.ndarray, np.ndarray]],
+    source_frame_map: dict[str, int],
+) -> dict[int, np.ndarray]:
+    mapped: dict[int, np.ndarray] = {}
+    for image_name, (center, _raw) in pose_map.items():
+        source_idx = source_frame_map.get(image_name)
+        if source_idx is None:
+            continue
+        mapped[source_idx] = center
+    return mapped
 
 
 def run_task2(cfg: Task2Config) -> int:
@@ -233,11 +285,17 @@ def run_task2(cfg: Task2Config) -> int:
     param_tag = f"fps{_format_float_tag(cfg.source_fps)}"
     task1_case_root = cfg.task1_output_root / f"S1-2_{param_tag}"
     full_images_dir = task1_case_root / "images"
+    full_frame_map = task1_case_root / FRAME_MAP_FILENAME
     full_sparse0 = task1_case_root / "sparse" / "0"
     full_images_txt = full_sparse0 / "images.txt"
     full_cameras_txt = full_sparse0 / "cameras.txt"
 
-    if not full_images_dir.exists() or not full_images_txt.exists() or not full_cameras_txt.exists():
+    if (
+        not full_images_dir.exists()
+        or not full_frame_map.exists()
+        or not full_images_txt.exists()
+        or not full_cameras_txt.exists()
+    ):
         raise Task1Error(
             f"Task2 requires task1 S1-2 outputs first: {task1_case_root}\n"
             f"Run: uv run lab1 task1 --videos S1-2 --fps {cfg.source_fps:g} --stage all"
@@ -248,19 +306,35 @@ def run_task2(cfg: Task2Config) -> int:
     all_frames = sorted([p.name for p in full_images_dir.glob("*.jpg")])
     if len(all_frames) < 10:
         raise Task1Error(f"Not enough frames in {full_images_dir} (found {len(all_frames)})")
+    source_frame_map = _load_source_frame_index_map(full_frame_map)
 
     all_poses = _parse_colmap_poses(full_images_txt)
+    ref_param_tag = f"fps{_format_float_tag(30)}"
+    ref_task1_case_root = cfg.task1_output_root / f"S1-2_{ref_param_tag}"
+    ref_full_frame_map = ref_task1_case_root / FRAME_MAP_FILENAME
+    ref_full_images_txt = ref_task1_case_root / "sparse" / "0" / "images.txt"
+    if not ref_full_frame_map.exists() or not ref_full_images_txt.exists():
+        raise Task1Error(
+            f"Task2 analyze requires 30fps task1 reference outputs: {ref_task1_case_root}\n"
+            "Run: uv run lab1 task1 --videos S1-2 --fps 30 --stage all"
+        )
+    ref_source_frame_map = _load_source_frame_index_map(ref_full_frame_map)
+    ref_all_poses = _parse_colmap_poses(ref_full_images_txt)
+    ref_pose_by_source_idx = _pose_map_to_source_index_map(ref_all_poses, ref_source_frame_map)
     task2_root = cfg.output_root / f"S1-2_{param_tag}"
     if not cfg.dry_run:
         task2_root.mkdir(parents=True, exist_ok=True)
 
     summary_rows = []
-    subseq_ranges = _parse_subseq_specs(cfg.subseq_specs, len(all_frames)) if cfg.subseq_specs else _default_subseq_ranges(len(all_frames))
-    for idx, (start, end, seq_name) in enumerate(subseq_ranges, start=1):
+    subseq_ranges = _parse_subseq_specs(cfg.subseq_specs) if cfg.subseq_specs else _default_subseq_ranges()
+    for idx, (start_frame, end_frame, seq_name) in enumerate(subseq_ranges, start=1):
         timings: dict[str, float] = {}
-        subset_names = all_frames[start:end]
+        subset_names = _filter_frames_by_original_range(all_frames, source_frame_map, start_frame, end_frame)
+        if len(subset_names) < 3:
+            print(f"Warning: Subsequence {seq_name} (frames {start_frame}-{end_frame}) has only {len(subset_names)} sampled frames, skipping")
+            continue
         keep = set(subset_names)
-        sub_tag = f"seq{idx:02d}_{seq_name}_{start+1:06d}-{end:06d}"
+        sub_tag = f"seq{idx:02d}_{seq_name}_{start_frame:06d}-{end_frame:06d}"
         sub_root = task2_root / sub_tag
         method_a_sparse = sub_root / "method_a" / "sparse" / "0"
         method_b_root = sub_root / "method_b"
@@ -327,10 +401,25 @@ def run_task2(cfg: Task2Config) -> int:
                 if len(common) < 3:
                     raise Task1Error(f"Too few common registered frames for alignment in {sub_tag}: {len(common)}")
 
-                a_xyz = np.stack([all_poses[n][0] for n in common], axis=0)
-                b_xyz = np.stack([poses_b[n][0] for n in common], axis=0)
-                scale, rot, trans = _umeyama_sim3(b_xyz, a_xyz)
-                b_aligned = _apply_sim3(b_xyz, scale, rot, trans)
+                a_xyz_local = np.stack([all_poses[n][0] for n in common], axis=0)
+                b_xyz_local = np.stack([poses_b[n][0] for n in common], axis=0)
+
+                source_indices = [source_frame_map[n] for n in common]
+                ref_common_indices = [idx for idx in source_indices if idx in ref_pose_by_source_idx]
+                if len(ref_common_indices) < 3:
+                    raise Task1Error(
+                        f"Too few common source-frame matches to 30fps reference in {sub_tag}: {len(ref_common_indices)}"
+                    )
+                ref_lookup = {source_frame_map[n]: i for i, n in enumerate(common)}
+                local_ref_pts = np.stack([a_xyz_local[ref_lookup[idx]] for idx in ref_common_indices], axis=0)
+                global_ref_pts = np.stack([ref_pose_by_source_idx[idx] for idx in ref_common_indices], axis=0)
+                a_to_ref_scale, a_to_ref_rot, a_to_ref_trans = _umeyama_sim3(local_ref_pts, global_ref_pts)
+                a_xyz = _apply_sim3(a_xyz_local, a_to_ref_scale, a_to_ref_rot, a_to_ref_trans)
+
+                scale, rot, trans = _umeyama_sim3(b_xyz_local, a_xyz_local)
+                b_aligned_local = _apply_sim3(b_xyz_local, scale, rot, trans)
+                b_aligned = _apply_sim3(b_aligned_local, a_to_ref_scale, a_to_ref_rot, a_to_ref_trans)
+
                 ate_val = _ate(a_xyz, b_aligned)
                 endpoint_distance = float(np.linalg.norm(a_xyz[-1] - a_xyz[0]))
                 path_length = float(np.linalg.norm(np.diff(a_xyz, axis=0), axis=1).sum()) if len(a_xyz) >= 2 else 0.0
@@ -356,6 +445,7 @@ def run_task2(cfg: Task2Config) -> int:
                             f"subset_frames={len(subset_names)}",
                             f"common_registered={len(common)}",
                             f"sim3_scale={scale:.8f}",
+                            f"a_to_ref_scale={a_to_ref_scale:.8f}",
                             f"endpoint_distance={endpoint_distance:.8f}",
                             f"path_length={path_length:.8f}",
                             f"endpoint_path_ratio={endpoint_ratio:.8f}",

@@ -1177,6 +1177,7 @@ def run_task3_masks(cfg: Task3MaskConfig) -> int:
                         camera_mask_path=None,
                         ffmpeg_bin=cfg.ffmpeg_bin,
                         out_video_path=preview_video_path,
+                        output_fps=cfg.fps,
                         force=cfg.force,
                         dry_run=cfg.dry_run,
                     )
@@ -1205,6 +1206,7 @@ def run_task3_masks(cfg: Task3MaskConfig) -> int:
                         camera_mask_path=None,
                         ffmpeg_bin=cfg.ffmpeg_bin,
                         out_video_path=preview_video_path,
+                        output_fps=cfg.fps,
                         force=cfg.force,
                         dry_run=cfg.dry_run,
                     )
