@@ -159,6 +159,9 @@ def run_task4_entry(args: argparse.Namespace) -> int:
         force=args.force,
         dry_run=args.dry_run,
         cases=args.cases,
+        mode=args.mode,
+        direction_arrows=args.direction_arrows,
+        heavy_geometry=args.heavy_geometry,
     )
     try:
         return run_task4(cfg)
@@ -263,12 +266,30 @@ def _add_task3_mask_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_task4_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "mode",
+        nargs="?",
+        default="run",
+        choices=["run", "plot"],
+        help="task4 mode: run full quality evaluation (default), or redraw trajectory plots only",
+    )
     parser.add_argument("--force", action="store_true", help="overwrite previous task4 outputs")
     parser.add_argument("--dry-run", action="store_true", help="print steps without executing for task4")
     parser.add_argument(
         "--cases",
         nargs="+",
         help="optional subset of annotation cases, e.g. --cases 01 02 06",
+    )
+    parser.add_argument(
+        "--direction-arrows",
+        type=int,
+        default=12,
+        help="number of camera-direction arrows to draw on task4 per-case trajectory plots",
+    )
+    parser.add_argument(
+        "--heavy-geometry",
+        action="store_true",
+        help="also compute SIFT/video-based epipolar, reprojection, and composition metrics",
     )
 
 

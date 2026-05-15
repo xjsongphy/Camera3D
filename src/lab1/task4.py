@@ -12,17 +12,19 @@ import numpy as np
 
 from lab1.geometry_utils import quat_to_rot
 from lab1.logging_utils import print_timing_summary, timed_block, write_timing_csv
-from lab1.task1 import TIMING_FILENAME, Task1Error
+from lab1.task1 import TIMING_FILENAME, Task1Error, _parse_image_poses, _plot_trajectory
 
 
 ANNOTATION_CASES = tuple(f"{idx:02d}" for idx in range(1, 11))
 ACCEL_JUMP_RATIO = 4.0
-EPI_INLIER_THRESHOLD_PX = 0.3
+EPI_INLIER_THRESHOLD_PX = 1.5
 EPI_TRIANG_GATE_PX = 3.0
-REPROJ_INLIER_THRESHOLD_PX = 0.2
+REPROJ_INLIER_THRESHOLD_PX = 2.0
 MIN_PARALLAX_DEG_FOR_TRIANG = 0.2
 COMPOSE_MIN_MATCHES = 30
-COMPOSE_ROT_THRESHOLD_DEG = 0.05
+COMPOSE_ROT_THRESHOLD_DEG = 2.0
+ZIGZAG_WINDOW = 7
+ZIGZAG_RESIDUAL_THRESHOLD = 2.0
 
 
 @dataclass
@@ -32,6 +34,9 @@ class Task4Config:
     force: bool
     dry_run: bool
     cases: list[str] | None = None
+    mode: str = "run"
+    direction_arrows: int = 12
+    heavy_geometry: bool = False
 
 
 def _normalize_case_name(name: str) -> str:
@@ -122,7 +127,7 @@ def _geometry_eval_indices(num_images: int, max_triplets: int = 140) -> list[int
         return []
     if num_images - 2 <= max_triplets:
         return list(range(num_images - 2))
-    stride = max(1, (num_images - 2) // max_triplets)
+    stride = max(1, math.ceil((num_images - 2) / max_triplets))
     return list(range(0, num_images - 2, stride))
 
 
@@ -142,10 +147,28 @@ def _read_frame(video_path: Path, frame_idx: int, cache: dict[int, np.ndarray]) 
     return gray
 
 
-def _match_pair(gray1: np.ndarray, gray2: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    sift = cv2.SIFT_create(nfeatures=2000)
-    k1, d1 = sift.detectAndCompute(gray1, None)
-    k2, d2 = sift.detectAndCompute(gray2, None)
+def _detect_sift(
+    frame_idx: int,
+    gray: np.ndarray,
+    sift: cv2.SIFT,
+    feature_cache: dict[int, tuple[tuple[cv2.KeyPoint, ...], np.ndarray | None]],
+) -> tuple[tuple[cv2.KeyPoint, ...], np.ndarray | None]:
+    if frame_idx not in feature_cache:
+        keypoints, descriptors = sift.detectAndCompute(gray, None)
+        feature_cache[frame_idx] = (tuple(keypoints), descriptors)
+    return feature_cache[frame_idx]
+
+
+def _match_pair(
+    frame_idx1: int,
+    gray1: np.ndarray,
+    frame_idx2: int,
+    gray2: np.ndarray,
+    sift: cv2.SIFT,
+    feature_cache: dict[int, tuple[tuple[cv2.KeyPoint, ...], np.ndarray | None]],
+) -> tuple[np.ndarray, np.ndarray]:
+    k1, d1 = _detect_sift(frame_idx1, gray1, sift, feature_cache)
+    k2, d2 = _detect_sift(frame_idx2, gray2, sift, feature_cache)
     if d1 is None or d2 is None or len(k1) < 20 or len(k2) < 20:
         return np.zeros((0, 2), dtype=float), np.zeros((0, 2), dtype=float)
     bf = cv2.BFMatcher(cv2.NORM_L2)
@@ -206,6 +229,64 @@ def _relative_pose_from_images(im1: dict[str, object], im2: dict[str, object]) -
     return r_rel, t_rel
 
 
+def _compute_trajectory_smoothness(images: list[dict[str, object]], window: int = 5) -> float:
+    centers = np.array([np.asarray(im["C"], dtype=float) for im in images], dtype=float)
+    if len(centers) < 2 * window + 1:
+        return 0.0
+    smoothed = np.zeros_like(centers)
+    kernel = np.ones(window) / window
+    for axis in range(3):
+        smoothed[:, axis] = np.convolve(centers[:, axis], kernel, mode="same")
+    deviation = np.linalg.norm(centers - smoothed, axis=1)
+    step_dists = np.linalg.norm(np.diff(centers, axis=0), axis=1)
+    med_step = float(np.median(step_dists))
+    if med_step <= 1e-12:
+        return 0.0
+    return float(np.percentile(deviation, 95) / med_step)
+
+
+def _compute_zigzag_metrics(
+    images: list[dict[str, object]],
+    window: int = ZIGZAG_WINDOW,
+    residual_threshold: float = ZIGZAG_RESIDUAL_THRESHOLD,
+) -> tuple[float, float, float]:
+    centers = np.array([np.asarray(im["C"], dtype=float) for im in images], dtype=float)
+    if len(centers) < window:
+        return 0.0, 0.0, 0.0
+
+    steps = np.linalg.norm(np.diff(centers, axis=0), axis=1)
+    valid_steps = steps[np.isfinite(steps) & (steps > 1e-12)]
+    if valid_steps.size == 0:
+        return 0.0, 0.0, 0.0
+    med_step = float(np.median(valid_steps))
+
+    half = window // 2
+    residuals: list[float] = []
+    for idx in range(half, len(centers) - half):
+        local = centers[idx - half : idx + half + 1]
+        local_center = local.mean(axis=0)
+        try:
+            _u, _s, vt = np.linalg.svd(local - local_center, full_matrices=False)
+        except np.linalg.LinAlgError:
+            continue
+        direction = vt[0]
+        offset = centers[idx] - local_center
+        residual = offset - direction * float(np.dot(offset, direction))
+        residuals.append(float(np.linalg.norm(residual) / med_step))
+
+    if not residuals:
+        return 0.0, 0.0, 0.0
+
+    values = np.array(residuals, dtype=float)
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return 0.0, 0.0, 0.0
+    violation_ratio = float(np.mean(finite > residual_threshold))
+    p95 = float(np.percentile(finite, 95))
+    score = 0.8 * violation_ratio + 0.2 * min(1.0, p95 / 4.0)
+    return score, violation_ratio, p95
+
+
 def _compute_accel_jump_ratio(images: list[dict[str, object]], ratio: float = ACCEL_JUMP_RATIO) -> float:
     centers = np.array([np.asarray(im["C"], dtype=float) for im in images], dtype=float)
     frame_idx = np.array([int(im["frame_idx"]) for im in images], dtype=float)
@@ -249,7 +330,8 @@ def _project_points_px(k: np.ndarray, x_cam: np.ndarray) -> np.ndarray:
 def _robust_pair_reproj_px(
     p1: np.ndarray,
     p2: np.ndarray,
-    k: np.ndarray,
+    k1: np.ndarray,
+    k2: np.ndarray,
     r_gt: np.ndarray,
     t_gt: np.ndarray,
     epi_raw: np.ndarray,
@@ -265,8 +347,8 @@ def _robust_pair_reproj_px(
 
     p1s = p1[best_idx]
     p2s = p2[best_idx]
-    p1n = cv2.undistortPoints(p1s.reshape(-1, 1, 2).astype(np.float64), cameraMatrix=k, distCoeffs=None).reshape(-1, 2)
-    p2n = cv2.undistortPoints(p2s.reshape(-1, 1, 2).astype(np.float64), cameraMatrix=k, distCoeffs=None).reshape(-1, 2)
+    p1n = cv2.undistortPoints(p1s.reshape(-1, 1, 2).astype(np.float64), cameraMatrix=k1, distCoeffs=None).reshape(-1, 2)
+    p2n = cv2.undistortPoints(p2s.reshape(-1, 1, 2).astype(np.float64), cameraMatrix=k2, distCoeffs=None).reshape(-1, 2)
     rays1 = np.column_stack([p1n, np.ones(len(p1n), dtype=float)])
     rays1 /= np.linalg.norm(rays1, axis=1, keepdims=True)
     rays2_local = np.column_stack([p2n, np.ones(len(p2n), dtype=float)])
@@ -312,8 +394,8 @@ def _robust_pair_reproj_px(
 
     if len(x) < 8:
         return float("nan"), float("nan")
-    p1_rep = _project_points_px(k, x)
-    p2_rep = _project_points_px(k, x2)
+    p1_rep = _project_points_px(k1, x)
+    p2_rep = _project_points_px(k2, x2)
     e1 = np.linalg.norm(p1_rep - p1_obs, axis=1)
     e2 = np.linalg.norm(p2_rep - p2_obs, axis=1)
     errs = 0.5 * (e1 + e2)
@@ -331,17 +413,21 @@ def _robust_pair_reproj_px(
 def _estimate_relative_rotation_from_matches(
     p1: np.ndarray,
     p2: np.ndarray,
-    k: np.ndarray,
+    k1: np.ndarray,
+    k2: np.ndarray,
 ) -> np.ndarray | None:
     if len(p1) < COMPOSE_MIN_MATCHES:
         return None
+    p1n = cv2.undistortPoints(p1.reshape(-1, 1, 2).astype(np.float64), cameraMatrix=k1, distCoeffs=None).reshape(-1, 2)
+    p2n = cv2.undistortPoints(p2.reshape(-1, 1, 2).astype(np.float64), cameraMatrix=k2, distCoeffs=None).reshape(-1, 2)
+    focal_ref = max(1e-9, 0.25 * (k1[0, 0] + k1[1, 1] + k2[0, 0] + k2[1, 1]))
     e, mask = cv2.findEssentialMat(
-        p1.astype(np.float64),
-        p2.astype(np.float64),
-        cameraMatrix=k.astype(np.float64),
+        p1n.astype(np.float64),
+        p2n.astype(np.float64),
+        cameraMatrix=np.eye(3, dtype=np.float64),
         method=cv2.RANSAC,
         prob=0.999,
-        threshold=1.5,
+        threshold=1.5 / focal_ref,
     )
     if e is None:
         return None
@@ -354,9 +440,9 @@ def _estimate_relative_rotation_from_matches(
     for e_i in e_candidates:
         ok, r_est, _t_est, pose_mask = cv2.recoverPose(
             e_i.astype(np.float64),
-            p1.astype(np.float64),
-            p2.astype(np.float64),
-            cameraMatrix=k.astype(np.float64),
+            p1n.astype(np.float64),
+            p2n.astype(np.float64),
+            cameraMatrix=np.eye(3, dtype=np.float64),
             mask=mask,
         )
         if ok <= 0:
@@ -395,6 +481,8 @@ def _compute_geometry_metrics(
     video_path: Path,
 ) -> tuple[float, float, float]:
     frame_cache: dict[int, np.ndarray] = {}
+    feature_cache: dict[int, tuple[tuple[cv2.KeyPoint, ...], np.ndarray | None]] = {}
+    sift = cv2.SIFT_create(nfeatures=1200)
     epi_violation_all: list[float] = []
     reproj_violation_all: list[float] = []
     compose_violation_all: list[float] = []
@@ -406,21 +494,24 @@ def _compute_geometry_metrics(
     for a in pair_indices:
         im1 = images[a]
         im2 = images[a + 1]
-        g1 = _read_frame(video_path, int(im1["frame_idx"]), frame_cache)
-        g2 = _read_frame(video_path, int(im2["frame_idx"]), frame_cache)
+        frame_idx1 = int(im1["frame_idx"])
+        frame_idx2 = int(im2["frame_idx"])
+        g1 = _read_frame(video_path, frame_idx1, frame_cache)
+        g2 = _read_frame(video_path, frame_idx2, frame_cache)
         if g1 is None or g2 is None:
             continue
-        p1, p2 = _match_pair(g1, g2)
+        p1, p2 = _match_pair(frame_idx1, g1, frame_idx2, g2, sift, feature_cache)
         if len(p1) < 20:
             continue
         p1, p2 = _ransac_filter_matches(p1, p2)
         if len(p1) < 12:
             pair_cache[(a, a + 1)] = None
             continue
-        k = k_map[int(im1["camera_id"])]
+        k1 = k_map[int(im1["camera_id"])]
+        k2 = k_map[int(im2["camera_id"])]
         r_gt, t_gt = _relative_pose_from_images(im1, im2)
 
-        fmat_gt = np.linalg.inv(k).T @ (_skew(t_gt) @ r_gt) @ np.linalg.inv(k)
+        fmat_gt = np.linalg.inv(k2).T @ (_skew(t_gt) @ r_gt) @ np.linalg.inv(k1)
         epi_raw = _symmetric_epipolar_distance(p1, p2, fmat_gt)
         finite_epi_mask = np.isfinite(epi_raw)
         if np.count_nonzero(finite_epi_mask) < 8:
@@ -430,11 +521,11 @@ def _compute_geometry_metrics(
         p1 = p1[finite_epi_mask]
         p2 = p2[finite_epi_mask]
         epi_violation_all.append(float(np.mean(epi_raw > EPI_INLIER_THRESHOLD_PX)))
-        pair_cache[(a, a + 1)] = (p1, p2, k)
-        reproj_violation, _reproj_median = _robust_pair_reproj_px(p1, p2, k, r_gt, t_gt, epi_raw)
+        pair_cache[(a, a + 1)] = (p1, p2, k1)
+        reproj_violation, _reproj_median = _robust_pair_reproj_px(p1, p2, k1, k2, r_gt, t_gt, epi_raw)
         if np.isfinite(reproj_violation):
             reproj_violation_all.append(float(reproj_violation))
-        r_est_adj = _estimate_relative_rotation_from_matches(p1, p2, k)
+        r_est_adj = _estimate_relative_rotation_from_matches(p1, p2, k1, k2)
         if r_est_adj is not None:
             rot_adj_cache[(a, a + 1)] = r_est_adj
 
@@ -460,11 +551,10 @@ def _skew(v: np.ndarray) -> np.ndarray:
 
 
 def _compute_quality_score(metrics: dict[str, float]) -> tuple[float, float]:
-    smooth_term = math.log1p(4.0 * metrics["smooth_jump_ratio"])
-    epi_term = math.log1p(4.0 * metrics["epi_dist_px"])
-    reproj_term = math.log1p(4.0 * metrics["reproj_err_px"])
-    compose_term = math.log1p(4.0 * metrics["compose_rot_err_deg"])
-    penalty = 0.30 * smooth_term + 0.25 * epi_term + 0.25 * reproj_term + 0.20 * compose_term
+    zigzag_term = math.log1p(50.0 * metrics["zigzag_score"])
+    accel_term = math.log1p(4.0 * metrics["smooth_jump_ratio"])
+    traj_term = math.log1p(0.5 * metrics["traj_smoothness"])
+    penalty = 0.90 * zigzag_term + 0.05 * accel_term + 0.05 * traj_term
     score = 100.0 * math.exp(-penalty)
     return score, penalty
 
@@ -527,6 +617,64 @@ def _compute_pairwise_auc(scores: list[float], labels: list[int]) -> float:
     return wins / total
 
 
+def _plot_trajectories(
+    rows: list[dict[str, object]],
+    annotations_root: Path,
+    out_dir: Path,
+    direction_arrows: int,
+) -> None:
+    cases = [str(row["case"]) for row in rows]
+    labels = [str(row["label"]) for row in rows]
+    n = len(cases)
+    ncols = 5
+    nrows = (n + ncols - 1) // ncols
+
+    fig, axes = plt.subplots(nrows, ncols, figsize=(20, 4 * nrows), subplot_kw={"projection": "3d"})
+    axes_flat = axes.flatten() if hasattr(axes, "flatten") else [axes]
+
+    for idx, (case, label) in enumerate(zip(cases, labels)):
+        ax = axes_flat[idx]
+        images_txt = annotations_root / case / "sparse" / "0" / "images.txt"
+        centers, _forward_dirs, _names = _parse_image_poses(images_txt)
+
+        color = "tab:red" if label == "bad" else "tab:green"
+        ax.plot(centers[:, 0], centers[:, 1], centers[:, 2], color=color, linewidth=0.5, alpha=0.8)
+        ax.scatter([centers[0, 0]], [centers[0, 1]], [centers[0, 2]], c="blue", s=20, marker="o", zorder=5)
+        ax.scatter([centers[-1, 0]], [centers[-1, 1]], [centers[-1, 2]], c="black", s=20, marker="s", zorder=5)
+        ax.set_title(f"{case} ({label})", fontsize=11)
+        ax.tick_params(labelsize=6)
+
+        x_range = np.ptp(centers[:, 0])
+        y_range = np.ptp(centers[:, 1])
+        z_range = np.ptp(centers[:, 2])
+        max_range = max(x_range, y_range, z_range, 1e-6)
+        mid_x = np.mean([centers[:, 0].min(), centers[:, 0].max()])
+        mid_y = np.mean([centers[:, 1].min(), centers[:, 1].max()])
+        mid_z = np.mean([centers[:, 2].min(), centers[:, 2].max()])
+        ax.set_xlim(mid_x - max_range / 2, mid_x + max_range / 2)
+        ax.set_ylim(mid_y - max_range / 2, mid_y + max_range / 2)
+        ax.set_zlim(mid_z - max_range / 2, mid_z + max_range / 2)
+
+    for idx in range(n, len(axes_flat)):
+        axes_flat[idx].set_visible(False)
+
+    fig.suptitle("Camera Trajectories (blue=start, black=end)", fontsize=14)
+    fig.tight_layout()
+    fig.savefig(out_dir / "trajectories.png", dpi=170)
+    plt.close(fig)
+
+    for idx, (case, label) in enumerate(zip(cases, labels)):
+        images_txt = annotations_root / case / "sparse" / "0" / "images.txt"
+        centers, forward_dirs, _names = _parse_image_poses(images_txt)
+        _plot_trajectory(
+            centers,
+            out_dir / f"trajectory_{case}.png",
+            f"Task4 Case {case} ({label}) Trajectory",
+            forward_dirs=forward_dirs,
+            direction_arrows=direction_arrows,
+        )
+
+
 def _plot_quality_scores(rows: list[dict[str, object]], out_path: Path) -> None:
     case_names = [str(row["case"]) for row in rows]
     scores = [float(row["quality_score"]) for row in rows]
@@ -564,13 +712,50 @@ def _write_summary(
     out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _case_rows(selected_cases: tuple[str, ...]) -> list[dict[str, object]]:
+    return [{"case": case_name, "label": _case_label(case_name)} for case_name in selected_cases]
+
+
+def _run_task4_plot(
+    *,
+    annotations_root: Path,
+    selected_cases: tuple[str, ...],
+    out_root: Path,
+    direction_arrows: int,
+    dry_run: bool,
+) -> int:
+    traj_dir = out_root / "trajectories"
+    rows = _case_rows(selected_cases)
+    if dry_run:
+        print(f"Would save task4 trajectory grid: {traj_dir / 'trajectories.png'}")
+        for case_name in selected_cases:
+            print(f"Would save task4 trajectory: {traj_dir / f'trajectory_{case_name}.png'}")
+        return 0
+
+    traj_dir.mkdir(parents=True, exist_ok=True)
+    _plot_trajectories(rows, annotations_root, traj_dir, direction_arrows=direction_arrows)
+    print(f"Saved trajectories: {traj_dir}/")
+    return 0
+
+
 def run_task4(cfg: Task4Config) -> int:
     annotations_root = cfg.lab1_root / "assets" / "annotations"
     selected_cases = ANNOTATION_CASES if not cfg.cases else tuple(_normalize_case_name(c) for c in cfg.cases)
     out_root = cfg.output_root
+    if cfg.mode not in {"run", "plot"}:
+        raise Task1Error(f"Unsupported task4 mode: {cfg.mode}. Choose from run|plot")
 
     if not cfg.dry_run:
         out_root.mkdir(parents=True, exist_ok=True)
+
+    if cfg.mode == "plot":
+        return _run_task4_plot(
+            annotations_root=annotations_root,
+            selected_cases=selected_cases,
+            out_root=out_root,
+            direction_arrows=cfg.direction_arrows,
+            dry_run=cfg.dry_run,
+        )
 
     rows: list[dict[str, object]] = []
     timings: dict[str, float] = {}
@@ -589,13 +774,21 @@ def run_task4(cfg: Task4Config) -> int:
             k_map = _parse_camera_intrinsics(cameras_txt)
             images = _parse_images(images_txt)
             points3d_count = sum(1 for _ in points3d_txt.open("r", encoding="utf-8") if _.strip() and not _.startswith("#"))
-            epi_dist_px, reproj_err_px, compose_rot_err_deg = _compute_geometry_metrics(images, k_map, video_path)
+            zigzag_score, zigzag_violation_ratio, zigzag_residual_p95 = _compute_zigzag_metrics(images)
+            if cfg.heavy_geometry:
+                epi_dist_px, reproj_err_px, compose_rot_err_deg = _compute_geometry_metrics(images, k_map, video_path)
+            else:
+                epi_dist_px, reproj_err_px, compose_rot_err_deg = float("nan"), float("nan"), float("nan")
             metrics = {
                 "case": case_name,
                 "label": _case_label(case_name),
                 "num_poses": len(images),
                 "points3d": points3d_count,
+                "zigzag_score": zigzag_score,
+                "zigzag_violation_ratio": zigzag_violation_ratio,
+                "zigzag_residual_p95": zigzag_residual_p95,
                 "smooth_jump_ratio": _compute_accel_jump_ratio(images),
+                "traj_smoothness": _compute_trajectory_smoothness(images),
                 "epi_dist_px": epi_dist_px,
                 "reproj_err_px": reproj_err_px,
                 "compose_rot_err_deg": compose_rot_err_deg,
@@ -625,9 +818,14 @@ def run_task4(cfg: Task4Config) -> int:
     plot_path = out_root / "quality_scores.png"
     _plot_quality_scores(rows, plot_path)
 
+    traj_dir = out_root / "trajectories"
+    traj_dir.mkdir(exist_ok=True)
+    _plot_trajectories(rows, annotations_root, traj_dir, direction_arrows=cfg.direction_arrows)
+
     write_timing_csv(out_root / TIMING_FILENAME, timings)
     print(f"Saved metrics: {csv_path}")
     print(f"Saved summary: {summary_path}")
     print(f"Saved plot: {plot_path}")
+    print(f"Saved trajectories: {traj_dir}/")
     print_timing_summary("Timing / task4", timings)
     return 0
