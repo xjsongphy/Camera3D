@@ -96,6 +96,9 @@ uv run lab1 task1 cloud --videos S1-2 --fps 30
 
 # 对多个 fps 结果做 Sim(3) 对齐叠加
 uv run lab1 task1 merge --videos S1-2
+
+# 合并模式下指定要合并的 fps 列表（默认 4/8/16/30）
+uv run lab1 task1 merge --videos S1-2 --fps 4 8 16
 ```
 
 输出目录：
@@ -189,6 +192,9 @@ uv run lab1 task4 plot
 
 # 调整方向箭头数量
 uv run lab1 task4 plot --direction-arrows 20
+
+# 指标阈值参数
+uv run lab1 task4 --compose-threshold-deg 1.0 --zigzag-residual-threshold 2.0 --accel-jump-ratio 4.0
 
 # 视频三角化几何指标：fps16 抽帧、10 个 case 并行
 uv run python scripts/task4_video_geometry_fps16.py --workers 10 --target-fps 16 --max-pairs 160
