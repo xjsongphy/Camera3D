@@ -1033,14 +1033,16 @@ def run_task3(cfg: Task3Config) -> int:
                             )
                         )
                         _cleanup_legacy_point_cloud_plots(method_root)
+                        # For task3 comparison we need to preserve visible outliers.
+                        # Keep all sparse points and only apply display-time downsampling.
                         _plot_sparse_point_cloud(
-                            points_xyz[reliable_mask],
-                            points_rgb[reliable_mask],
+                            points_xyz,
+                            points_rgb,
                             centers,
                             method_root / "sparse_points.png",
                             f"{case_name} {method} Sparse Point Cloud",
                             max_points=cfg.max_points_plot,
-                            crop_percentile=1.0,
+                            crop_percentile=None,
                         )
                     print(f"Saved analysis: {method_root / 'analysis.txt'}")
                     print(f"Saved point cloud plot: {method_root / 'sparse_points.png'}")
