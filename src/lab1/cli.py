@@ -162,6 +162,12 @@ def run_task4_entry(args: argparse.Namespace) -> int:
         mode=args.mode,
         direction_arrows=args.direction_arrows,
         heavy_geometry=args.heavy_geometry,
+        epi_threshold_px=args.epi_threshold_px,
+        reproj_threshold_px=args.reproj_threshold_px,
+        compose_threshold_deg=args.compose_threshold_deg,
+        geometry_max_triplets=args.geometry_max_triplets,
+        zigzag_residual_threshold=args.zigzag_residual_threshold,
+        accel_jump_ratio=args.accel_jump_ratio,
     )
     try:
         return run_task4(cfg)
@@ -289,7 +295,43 @@ def _add_task4_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--heavy-geometry",
         action="store_true",
-        help="also compute SIFT/video-based epipolar, reprojection, and composition metrics",
+        help="disabled for task4 annotations; kept only to fail loudly instead of reprocessing video",
+    )
+    parser.add_argument(
+        "--epi-threshold-px",
+        type=float,
+        default=1.5,
+        help="epipolar distance violation threshold in pixels for --heavy-geometry",
+    )
+    parser.add_argument(
+        "--reproj-threshold-px",
+        type=float,
+        default=2.0,
+        help="triangulation reprojection violation threshold in pixels for --heavy-geometry",
+    )
+    parser.add_argument(
+        "--compose-threshold-deg",
+        type=float,
+        default=1.0,
+        help="pose-only rotation composition closure threshold in degrees",
+    )
+    parser.add_argument(
+        "--geometry-max-triplets",
+        type=int,
+        default=80,
+        help="maximum sampled adjacent triplets for --heavy-geometry",
+    )
+    parser.add_argument(
+        "--zigzag-residual-threshold",
+        type=float,
+        default=2.0,
+        help="normalized local-line residual threshold used inside zigzag_score",
+    )
+    parser.add_argument(
+        "--accel-jump-ratio",
+        type=float,
+        default=4.0,
+        help="acceleration spike threshold as a multiple of median acceleration",
     )
 
 
