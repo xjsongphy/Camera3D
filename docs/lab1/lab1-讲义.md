@@ -2,6 +2,20 @@
 
 **作者**: Course Staff | **日期**: 2026年05月 | **状态**: 定稿
 
+## 符号表
+
+| 符号                           | 含义             |
+| ---------------------------- | -------------- |
+| $\mathbf{X}_w$               | 世界坐标系三维点       |
+| $\mathbf{X}_c$               | 相机坐标系三维点       |
+| $\hat{\mathbf{x}}$           | 归一化像平面坐标       |
+| $\mathbf{x}$ 或 $(u,v,1)^T$   | 像素齐次坐标         |
+| $\mathbf{K}$                 | 相机内参           |
+| $[\mathbf{R}\mid\mathbf{t}]$ | 世界到相机的外参       |
+| $\mathbf{C}$                 | 相机中心在世界坐标系中的位置 |
+| $\mathbf{E}$                 | 本质矩阵，作用于归一化坐标  |
+| $\mathbf{F}$                 | 基础矩阵，作用于像素坐标   |
+
 ## 概述
 
 三维计算成像的核心问题之一是：如何从多张二维图像中恢复出三维场景结构和拍摄这些图像时相机的位置与朝向？**Structure from Motion（SfM）** 正是解决这一问题的关键技术。本讲义涵盖 SfM 所需的全部前置知识和核心理论，从相机模型的数学基础开始，逐步深入到对极几何、特征匹配、三角化、光束法平差等关键算法，最后介绍坐标系对齐、轨迹评估、动态场景处理和位姿质量分析等进阶话题。
@@ -28,17 +42,23 @@ flowchart LR
     I --> q["像点 q(x,y)"]
 ```
 
-在实际计算中，为方便起见，通常将成像平面放在相机中心前方（虚拟成像平面），从而得到一个正立的像。针孔相机的成像过程可以用**相似三角形**来描述。设三维点 $\mathbf{X} = (X, Y, Z)^T$ 在相机坐标系中，其投影到图像平面上的坐标为：
+在实际计算中，为方便起见，通常将成像平面放在相机中心前方（虚拟成像平面），从而得到一个正立的像。针孔相机的成像过程可以用**相似三角形**来描述。设三维点 $\mathbf{X}_c = (X, Y, Z)^T$ 在相机坐标系中，其投影到归一化像平面上的坐标为：
 
 $$
-\mathbf{x} = \left(\frac{f \cdot X}{Z}, \frac{f \cdot Y}{Z}\right)^T
+\hat{\mathbf{x}} = \begin{bmatrix} X/Z \\ Y/Z \\ 1 \end{bmatrix}
 $$
 
-其中 $f$ 为**焦距（focal length）**。这一投影过程具有一个关键的特性：存在对 $Z$ 的除法运算，因此从 3D 到 2D 的映射并非线性变换。这一非线性性是后续引入齐次坐标的直接动机。
+其中 $\hat{\mathbf{x}}$ 为归一化像平面坐标（不含内参影响）。若考虑焦距 $f$，则成像平面上的物理坐标为：
+
+$$
+\mathbf{x}_{\text{phys}} = \left(\frac{f \cdot X}{Z}, \frac{f \cdot Y}{Z}\right)^T
+$$
+
+这一投影过程具有一个关键的特性：存在对 $Z$ 的除法运算，因此从 3D 到 2D 的映射并非线性变换。这一非线性性是后续引入齐次坐标的直接动机。
 
 ### 1.2 齐次坐标
 
-为将上述非线性投影转化为线性形式，引入**齐次坐标（homogeneous coordinates）**。在齐次坐标中，二维点 $(x, y)$ 表示为 $(x, y, 1)$，三维点 $(X, Y, Z)$ 表示为 $(X, Y, Z, 1)$。齐次坐标的一个重要性质是**尺度等价性**：
+为将上述非线性投影转化为线性形式，引入**齐次坐标（homogeneous coordinates）**。在齐次坐标中，三维点 $(X, Y, Z)$ 表示为 $(X, Y, Z, 1)$，二维点 $(x, y)$ 表示为 $(x, y, 1)$。齐次坐标的一个重要性质是**尺度等价性**：
 
 $$
 (x, y, 1) \sim (w x, w y, w)
@@ -61,20 +81,26 @@ $$
 
 ### 1.3 相机内参矩阵
 
-相机的**内参矩阵（intrinsic matrix）** $\mathbf{K}$ 描述了相机内部几何属性对投影的影响：
+相机的**内参矩阵（intrinsic matrix）** $\mathbf{K}$ 描述了相机内部几何属性对投影的影响。最一般的形式为：
+
+$$
+\mathbf{K} = \begin{bmatrix} f_x & s & c_x \\ 0 & f_y & c_y \\ 0 & 0 & 1 \end{bmatrix}
+$$
+
+其中 $f_x, f_y$ 为横纵焦距（以像素为单位），$(c_x, c_y)$ 为**主点（principal point）**，$s$ 为 skew 参数（通常取 0）。在简化的针孔模型中，假设像素为正方形且无 skew，可取 $f_x = f_y = f$，$s = 0$：
 
 $$
 \mathbf{K} = \begin{bmatrix} f & 0 & c_x \\ 0 & f & c_y \\ 0 & 0 & 1 \end{bmatrix}
 $$
 
-其中 $f$ 为焦距。$(c_x, c_y)$ 为**主点（principal point）**，即**光轴（optical axis）与成像平面的交点**在像素坐标系中的坐标。光轴是通过光心且垂直于成像平面的直线，它是相机坐标系的 $Z$ 轴。理想情况下，主点位于图像中心（例如对于 $W \times H$ 的图像，中心为 $(W/2, H/2)$），但由于传感器组装的制造公差，实际主点可能略有偏离。
+**主点**是**光轴（optical axis）与成像平面的交点**在像素坐标系中的坐标。光轴是通过光心且垂直于成像平面的直线，它是相机坐标系的 $Z$ 轴。理想情况下，主点位于图像中心（例如对于 $W \times H$ 的图像，中心为 $(W/2, H/2)$），但由于传感器组装的制造公差，实际主点可能略有偏离。
 
-内参矩阵的作用是将相机坐标系中的三维点映射到像素坐标系。焦距决定了视场角的大小——焦距越短，视场角越大（广角镜头）；焦距越长，视场角越小（长焦镜头）。
+内参矩阵的作用是将归一化像平面坐标映射到像素坐标系。焦距决定了视场角的大小——焦距越短，视场角越大（广角镜头）；焦距越长，视场角越小（长焦镜头）。
 
-利用内参矩阵，投影方程可以写为简洁的矩阵形式（注意此处 $(X, Y, Z)^T$ 为**相机坐标系**下的坐标）：
+利用内参矩阵，像素坐标 $\mathbf{x} = (u, v, 1)^T$ 与归一化像平面坐标 $\hat{\mathbf{x}} = (X/Z, Y/Z, 1)^T$ 的关系为：
 
 $$
-\begin{bmatrix} w x \\ w y \\ w \end{bmatrix} = \mathbf{K} \begin{bmatrix} X \\ Y \\ Z \end{bmatrix}
+\mathbf{x} = \mathbf{K} \hat{\mathbf{x}} = \begin{bmatrix} f_x X/Z + c_x \\ f_y Y/Z + c_y \\ 1 \end{bmatrix}
 $$
 
 ### 1.4 相机外参矩阵
@@ -109,13 +135,13 @@ $$
 \mathbf{P} = \mathbf{K} \begin{bmatrix} \mathbf{R} & \mathbf{t} \end{bmatrix}
 $$
 
-这是一个 $3 \times 4$ 的矩阵。给定一个三维点 $\mathbf{X} = (X, Y, Z, 1)^T$ 的齐次坐标，其投影到图像上的像素坐标通过 $\mathbf{P} \mathbf{X}$ 计算，然后除以第三个分量得到归一化的像素坐标：
+这是一个 $3 \times 4$ 的矩阵。给定一个世界坐标系中的三维点 $\mathbf{X}_w = (X, Y, Z, 1)^T$ 的齐次坐标，其投影到图像上的像素坐标通过 $\mathbf{P} \mathbf{X}_w$ 计算，然后除以第三个分量得到归一化的像素坐标：
 
 $$
 \begin{bmatrix} u \\ v \\ 1 \end{bmatrix} \sim \mathbf{P} \begin{bmatrix} X \\ Y \\ Z \\ 1 \end{bmatrix}
 $$
 
-投影矩阵 $\mathbf{P}$ 将相机位姿（外参）和相机内部属性（内参）统一在一个矩阵中，是连接三维世界和二维图像的核心纽带。在 SfM 中，我们需要从多张图像中同时估计每帧的投影矩阵 $\mathbf{P}_i$（即相机位姿）和三维点 $\mathbf{X}_j$（即场景结构）。
+投影矩阵 $\mathbf{P}$ 将相机位姿（外参）和相机内部属性（内参）统一在一个矩阵中，是连接三维世界和二维图像的核心纽带。在 SfM 中，我们需要从多张图像中同时估计每帧的相机位姿 $\{\mathbf{R}_i, \mathbf{t}_i\}$ 和场景结构 $\{\mathbf{X}_j\}$。
 
 ### 1.6 投影性质
 
@@ -162,7 +188,7 @@ $$
 [\mathbf{a}]_\times = \begin{bmatrix} 0 & -a_3 & a_2 \\ a_3 & 0 & -a_1 \\ -a_2 & a_1 & 0 \end{bmatrix}
 $$
 
-利用这一性质，共面约束改写为 $(\mathbf{X} - \mathbf{t})^T [\mathbf{t}]_\times \mathbf{X} = 0$。再由坐标变换 $\mathbf{x}' = \mathbf{R}(\mathbf{X} - \mathbf{t})$，可得 $\mathbf{X} - \mathbf{t} = \mathbf{R}^T \mathbf{x}'$。代入并利用 $(\mathbf{R}^T \mathbf{x}')^T = \mathbf{x}'^T \mathbf{R}$，最终得到：
+利用这一性质，共面约束改写为 $(\mathbf{X} - \mathbf{t})^T [\mathbf{t}]_\times \mathbf{X} = 0$。再由坐标变换 $\lambda' \mathbf{x}' = \mathbf{R}(\mathbf{X} - \mathbf{t})$，其中 $\lambda'$ 为非零尺度因子，$\mathbf{x}'$ 是归一化像平面的齐次方向向量。由于对极约束是齐次双线性方程，非零尺度因子不影响结果，因此可得 $\mathbf{X} - \mathbf{t} \propto \mathbf{R}^T \mathbf{x}'$。代入并利用 $(\mathbf{R}^T \mathbf{x}')^T = \mathbf{x}'^T \mathbf{R}$，最终得到：
 
 $$
 \mathbf{x}'^T \mathbf{R} [\mathbf{t}]_\times \mathbf{x} = 0
@@ -186,7 +212,7 @@ $$
 
 基础矩阵满足 $\mathbf{x}'^T \mathbf{F} \mathbf{x} = 0$，直接作用于像素坐标。$\mathbf{F}$ 与 $\mathbf{E}$ 的区别仅在于参考坐标系不同：$\mathbf{E}$ 要求归一化坐标，$\mathbf{F}$ 直接处理像素坐标。
 
-需要注意的是，奇异值条件 $[\sigma, \sigma, 0]$ 是本质矩阵的**必要条件**而非充分条件。在 5-point 算法等求解过程中，需要将候选解通过 SVD 投影到本质矩阵流形上（强制奇异值为 $[\sigma, \sigma, 0]$），以确保解满足全部约束。
+需要注意的是，本质矩阵必须满足秩为 2，且两个非零奇异值相等，即奇异值形式为 $[\sigma, \sigma, 0]$。实际估计中，由于噪声影响，线性求解得到的矩阵通常不严格满足该条件，因此需要通过 SVD 将其投影回本质矩阵约束集合。
 
 ### 2.3 八点算法
 
@@ -196,11 +222,11 @@ $$
 \mathbf{a} = (x'_1 x_1, x'_1 x_2, x'_1, x'_2 x_1, x'_2 x_2, x'_2, x_1, x_2, 1)^T
 $$
 
-由于 $\mathbf{E}$ 乘以任意非零常数后对极约束仍成立（**尺度等价性**），$\mathbf{E}$ 的自由度为 $9 - 1 = 8$，至少需要 8 对匹配点。从几何角度看，相机的相对位姿有 5 个自由度（3 个旋转 + 2 个平移方向，平移只能确定方向而不能确定长度），代数上的 8 个独立参数减去 3 个内部约束（两个非零奇异值相等、一个奇异值为零）恰好等于 5 个几何自由度。
+由于 $\mathbf{E}$ 乘以任意非零常数后对极约束仍成立（**尺度等价性**），$\mathbf{E}$ 的自由度为 $9 - 1 = 8$，至少需要 8 对匹配点。从几何角度看，相机的相对位姿有 5 个自由度（3 个旋转 + 2 个平移方向，平移只能确定方向而不能确定长度）。八点算法是线性算法，它先把 $\mathbf{E}$ 当作一个一般的 $3 \times 3$ 齐次矩阵来估计，因此需要至少 8 个线性约束，随后再强制秩和奇异值约束（两个非零奇异值相等、一个奇异值为零），恰好等于 5 个几何自由度。若直接利用本质矩阵的 5 自由度结构，则可以使用五点算法。
 
 $n$ 对匹配点构成 $\mathbf{A} \mathbf{e} = \mathbf{0}$，其中 $\mathbf{A}$ 是 $n \times 9$ 的系数矩阵。解为 $\mathbf{A}$ 的 SVD 分解中最小奇异值对应的右奇异向量。得到 $\mathbf{E}$ 后，还需通过 SVD 投影到本质矩阵流形：$\mathbf{E} = \mathbf{U} \operatorname{diag}(\sigma, \sigma, 0) \mathbf{V}^T$（其中 $\sigma = (\sigma_1 + \sigma_2)/2$），确保其满足全部约束。
 
-八点算法对数据的数值尺度敏感。**归一化八点算法**（Hartley, 1997）在求解前将图像坐标平移并缩放到 $[-1, 1]$ 范围内，显著提升数值稳定性。具体方法是对每幅图像计算变换矩阵 $\mathbf{T}$，在归一化坐标 $\tilde{\mathbf{x}} = \mathbf{T} \mathbf{x}$ 下估计 $\tilde{\mathbf{E}}$，再通过 $\mathbf{E} = \mathbf{T}'^T \tilde{\mathbf{E}} \mathbf{T}$ 转换回原始坐标系。
+八点算法对数据的数值尺度敏感。**归一化八点算法**（Hartley, 1997）在求解前将点集平移到质心为原点，并缩放使得点到原点的平均距离为 $\sqrt{2}$，显著提升数值稳定性。具体方法是对每幅图像计算变换矩阵 $\mathbf{T}$，在归一化坐标 $\tilde{\mathbf{x}} = \mathbf{T} \mathbf{x}$ 下估计 $\tilde{\mathbf{E}}$，再通过 $\mathbf{E} = \mathbf{T}'^T \tilde{\mathbf{E}} \mathbf{T}$ 转换回原始坐标系。
 
 ### 2.4 极线与极点
 
@@ -379,10 +405,10 @@ PnP 与 RANSAC 的结合是实现鲁棒位姿估计的标准做法：随机采�
 **光束法平差（Bundle Adjustment, BA）** 是 SfM 流水线中的核心优化步骤。BA 是一个非线性优化过程，同时精化所有相机位姿和三维点，以最小化**重投影误差（reprojection error）**：
 
 $$
-\min_{\mathbf{P}_i, \mathbf{X}_j} \sum_{i=1}^{m} \sum_{j=1}^{n} w_{ij} \, d\big(\mathbf{x}_{ij}, \text{proj}(\mathbf{P}_i, \mathbf{X}_j)\big)^2
+\min_{\{\mathbf{R}_i, \mathbf{t}_i, \mathbf{K}_i\}, \{\mathbf{X}_j\}} \sum_{i=1}^{m} \sum_{j=1}^{n} w_{ij} \, d\big(\mathbf{x}_{ij}, \pi(\mathbf{K}_i, \mathbf{R}_i, \mathbf{t}_i, \mathbf{X}_j)\big)^2
 $$
 
-其中 $w_{ij}$ 是可见性标志（点 $j$ 是否在图像 $i$ 中可见），$d(\cdot)$ 是图像平面上的欧氏距离。
+其中 $w_{ij}$ 是可见性标志（点 $j$ 是否在图像 $i$ 中可见），$d(\cdot)$ 是图像平面上的欧氏距离，$\pi(\cdot)$ 表示相机投影函数。优化变量包括相机的旋转 $\mathbf{R}_i$、平移 $\mathbf{t}_i$、可能包含的内参 $\mathbf{K}_i$，以及所有三维点 $\mathbf{X}_j$。由于 $\mathbf{R}_i$ 必须保持在 $SO(3)$ 李群上，不能当作普通矩阵优化。
 
 ```mermaid
 flowchart TB
@@ -401,7 +427,7 @@ flowchart TB
 
 BA 的优化通常使用 **Levenberg-Marquardt 算法**，一种结合了高斯-牛顿法和梯度下降法的非线性最小二乘优化方法。由于 $\mathbf{P}_i$ 和 $\mathbf{X}_j$ 共同构成了海量参数（现代 SfM 系统处理成千上万幅图像和百万级的三维点），BA 必须利用问题的稀疏结构进行高效求解。典型的方法是利用 **Schur complement** 先消去三维点参数（结构），只优化相机参数（运动），再将更新后的位姿用于更新三维点。
 
-BA 还有一个重要的概念：**闭环（loop closure）**。当相机运动形成一个闭环（如环绕场景一周回到起点），首尾图像之间的匹配为 BA 提供了额外的约束，使得重建的整体一致性显著提升。
+需要注意的是**闭环（loop closure）**问题。如果图像序列存在回环，即后期图像重新观察到早期区域，那么这些跨时间匹配会为全局 BA 提供额外约束，有助于减少累计漂移。这在 SLAM（同步定位与地图构建）系统中尤为重要，但在纯 SfM 中也会提升重建质量。
 
 ---
 
@@ -511,7 +537,7 @@ $$
 
 $$\tilde{\mathbf{p}}_i = \mathbf{p}_i - \bar{\mathbf{p}}, \quad \tilde{\mathbf{q}}_i = \mathbf{q}_i - \bar{\mathbf{q}}$$
 
-先将两点集平移到各自的**质心（centroid）**。然后计算协方差矩阵 $\mathbf{H} = \sum_i \tilde{\mathbf{q}}_i \tilde{\mathbf{p}}_i^T$，通过 SVD 分解 $\mathbf{H} = \mathbf{U} \boldsymbol{\Sigma} \mathbf{V}^T$ 得到旋转矩阵 $\mathbf{R} = \mathbf{V} \mathbf{U}^T$（需确保 $\det(\mathbf{R}) = 1$，否则取 $\mathbf{R} = \mathbf{V} \operatorname{diag}(1, 1, -1) \mathbf{U}^T$）。尺度 $s$ 为：
+先将两点集平移到各自的**质心（centroid）**。然后计算协方差矩阵 $\mathbf{H} = \sum_i \tilde{\mathbf{q}}_i \tilde{\mathbf{p}}_i^T$，通过 SVD 分解 $\mathbf{H} = \mathbf{U} \boldsymbol{\Sigma} \mathbf{V}^T$ 得到旋转矩阵 $\mathbf{R} = \mathbf{U} \mathbf{V}^T$（需确保 $\det(\mathbf{R}) = 1$，若 $\det(\mathbf{R}) < 0$，则需要对最后一个奇异向量取反，取 $\mathbf{R} = \mathbf{U} \operatorname{diag}(1, 1, -1) \mathbf{V}^T$，以避免得到反射变换）。尺度 $s$ 为：
 
 $$
 s = \frac{\operatorname{tr}(\boldsymbol{\Sigma})}{\sum_i \|\tilde{\mathbf{p}}_i\|^2}
@@ -531,13 +557,29 @@ $$
 
 其中 $\mathbf{C}_i^{\text{est}}$ 是对齐后的估计相机中心，$\mathbf{C}_i^{\text{ref}}$ 是参考相机中心。ATE 直接反映了轨迹在三维空间中的整体偏离程度，单位与场景尺度一致。
 
-ATE 也常与 **RPE（Relative Pose Error）** 配合使用。RPE 评估相邻帧间相对运动的误差，不受全局对齐的影响，更关注局部一致性：
+ATE 也常与 **RPE（Relative Pose Error）** 配合使用。RPE 评估相邻帧间相对运动的误差，不受全局对齐的影响，更关注局部一致性。
+
+首先构造相对运动误差：
 
 $$
-\text{RPE} = \sqrt{\frac{1}{n-1} \sum_{i=1}^{n-1} \|\Delta \mathbf{T}_i^{\text{est}} - \Delta \mathbf{T}_i^{\text{ref}}\|^2}
+\mathbf{E}_i = (\Delta \mathbf{T}_i^{\text{ref}})^{-1} \Delta \mathbf{T}_i^{\text{est}}
 $$
 
-其中 $\Delta \mathbf{T}_i = \mathbf{T}_i^{-1} \mathbf{T}_{i+1}$ 是相邻帧之间的相对变换（$\mathbf{T}_i$ 为第 $i$ 帧的 $4 \times 4$ 齐次位姿矩阵）。ATE 检测全局漂移，RPE 检测局部跳变，两者互补。
+其中相邻帧之间的相对变换定义为：
+
+$$
+\Delta \mathbf{T}_i^{\text{est}} = (\mathbf{T}_i^{\text{est}})^{-1} \mathbf{T}_{i+1}^{\text{est}}, \qquad
+\Delta \mathbf{T}_i^{\text{ref}} = (\mathbf{T}_i^{\text{ref}})^{-1} \mathbf{T}_{i+1}^{\text{ref}}
+$$
+
+然后分别评估平移误差和旋转误差：
+
+$$
+e_i^{\text{trans}} = |\operatorname{trans}(\mathbf{E}_i)|, \qquad
+e_i^{\text{rot}} = |\log(\operatorname{Rot}(\mathbf{E}_i))|
+$$
+
+其中 $\operatorname{trans}(\cdot)$ 提取平移分量，$\operatorname{Rot}(\cdot)$ 提取旋转分量，$\log(\cdot)$ 为旋转矩阵的李代数映射（将旋转矩阵转换为旋转向量）。ATE 检测全局漂移，RPE 检测局部跳变，两者互补。
 
 ---
 
