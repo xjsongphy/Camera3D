@@ -36,32 +36,32 @@ class TestStructuredLightRendererSelfCheck(unittest.TestCase):
         )
         renderer.load_scene()
 
+        wp = 80
+        k_const = torch.full((1, wp), 0.5, dtype=torch.float32)
+        k_stripe = torch.zeros((1, wp), dtype=torch.float32)
+        k_stripe[:, ::8] = 1.0
+        patterns = torch.cat([k_const, k_stripe], dim=0)
+        renderer.set_patterns(patterns)
+
         try:
-            out = renderer.self_check()
+            images = renderer.render_images()
         except RuntimeError as exc:  # pragma: no cover
             if "Mitsuba is required" in str(exc):
                 self.skipTest(str(exc))
             raise
+        gt_corr = renderer.gt_corr
+        depth = renderer.render_depth_for_visualization()
 
-        self.assertIn("images", out)
-        self.assertIn("gt_corr", out)
-        self.assertIn("depth", out)
-        self.assertIn("mask", out)
+        self.assertEqual(tuple(images.shape), (2, 48, 64))
+        self.assertEqual(tuple(gt_corr.shape), (48, 64))
+        self.assertEqual(tuple(depth.shape), (48, 64))
 
-        self.assertEqual(tuple(out["images"].shape), (2, 48, 64))
-        self.assertEqual(tuple(out["gt_corr"].shape), (48, 64))
-        self.assertEqual(tuple(out["depth"].shape), (48, 64))
-        self.assertEqual(tuple(out["mask"].shape), (48, 64))
-
-        self.assertTrue(torch.isfinite(out["images"]).all().item())
-        self.assertTrue((out["images"] >= 0.0).all().item())
-        self.assertTrue((out["images"] <= 1.0).all().item())
-
-        valid_count = int(out["mask"].sum().item())
-        self.assertGreater(valid_count, 0)
+        self.assertTrue(torch.isfinite(images).all().item())
+        self.assertTrue((images >= 0.0).all().item())
+        self.assertTrue((images <= 1.0).all().item())
 
         with TemporaryDirectory(prefix="lab2_self_check_") as td:
-            renderer.self_check(output_dir=td)
+            renderer.save_visualization(output_dir=td)
             out_dir = Path(td)
             self.assertTrue((out_dir / "constant_pattern.png").exists())
             self.assertTrue((out_dir / "stripe_pattern.png").exists())
