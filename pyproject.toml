@@ -5,21 +5,25 @@ description = "Camera3D labs managed by uv"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-  "matplotlib>=3.8.0",
   "numpy>=1.26.0",
-  "opencv-python-headless>=4.10.0",
-  "pillow>=10.4.0",
-  "torch==2.5.1",
-  "torchvision==0.20.1",
 ]
 
-[[tool.uv.index]]
-name = "pytorch-cu124"
-url = "https://download.pytorch.org/whl/cu124"
-
-[project.optional-dependencies]
-task3-yolo = [
+[dependency-groups]
+lab1 = [
+  "opencv-python-headless>=4.10.0",
+  "matplotlib>=3.8.0",
+  "pillow>=10.4.0",
+]
+lab1-yolo = [
   "ultralytics>=8.3.0",
+]
+lab2 = [
+  "matplotlib>=3.8.0",
+  "pillow>=10.4.0",
+  "torch>=2.5,<2.8; python_version < '3.13'",
+  "torchvision>=0.20,<0.23; python_version < '3.13'",
+  "mitsuba>=3.6.0; python_version < '3.13'",
+  "drjit>=1.0.5; python_version < '3.13'",
 ]
 
 [project.scripts]
