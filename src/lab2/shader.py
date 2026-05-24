@@ -9,6 +9,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
+from .scene_genertor import build_runtime_scene_dict
+
 
 @dataclass
 class CameraConfig:
@@ -64,10 +66,10 @@ class StructuredLightRenderer:
         self._scene_loaded = False
         self._mesh_path: Path | None = None
         self._mi_scene_file: Path | None = None
+        self._scene_name: str = "sl_plane_diffuse"
 
         self._depth: torch.Tensor | None = None
         self._gt_corr: torch.Tensor | None = None
-        self._mask: torch.Tensor | None = None
 
     def _require_mitsuba(self):
         try:
@@ -119,6 +121,9 @@ class StructuredLightRenderer:
     def set_lights(self, light_config: dict[str, Any]) -> None:
         self.lights = LightConfig(ambient=float(light_config.get("ambient", 0.05)))
 
+    def set_scene_name(self, scene_name: str) -> None:
+        self._scene_name = scene_name
+
     def set_patterns(self, patterns: torch.Tensor) -> None:
         if patterns.ndim != 2:
             raise ValueError("patterns must be [K, Wp]")
@@ -132,7 +137,7 @@ class StructuredLightRenderer:
         Load Mitsuba scene for rendering.
 
         - `scene_path` .xml: use as Mitsuba scene file.
-        - `scene_path` .npz: optional depth/mask cache for gt_corr/depth.
+        - `scene_path` .npz: optional depth cache for gt_corr/depth.
         - `None`: use internal default scene.
         """
         if self.camera is None:
@@ -150,8 +155,6 @@ class StructuredLightRenderer:
                 H, W = self.camera.height, self.camera.width
                 if "depth" in arr:
                     self._depth = self._to_tensor(arr["depth"], (H, W))
-                if "mask" in arr:
-                    self._mask = self._to_tensor(arr["mask"], (H, W)).bool()
             else:
                 raise ValueError("scene_path must be .xml or .npz or None")
 
@@ -165,9 +168,6 @@ class StructuredLightRenderer:
             uu = uu.T
             vv = vv.T
             self._depth = 1.0 + 0.2 * (uu - 0.5) + 0.1 * torch.sin(2 * np.pi * vv)
-
-        if self._mask is None:
-            self._mask = torch.ones((self.camera.height, self.camera.width), dtype=torch.bool, device=self.device)
 
         self._gt_corr = None
         self._scene_loaded = True
@@ -200,7 +200,7 @@ class StructuredLightRenderer:
     def compute_gt_corr(self) -> torch.Tensor:
         if self.camera is None or self.projector is None:
             raise RuntimeError("Camera and projector must be configured.")
-        if self._depth is None or self._mask is None:
+        if self._depth is None:
             raise RuntimeError("Scene not loaded.")
 
         if self._gt_corr is not None:
@@ -213,33 +213,16 @@ class StructuredLightRenderer:
         pts_proj = pts_world @ proj.R.T + proj.t.view(1, 1, 3)
         z = pts_proj[..., 2]
 
-        valid = self._mask & (z > 1e-6)
+        valid = z > 1e-6
         x = proj.fx * (pts_proj[..., 0] / z) + proj.cx
         valid = valid & (x >= 0) & (x <= (proj.width - 1))
 
-        self._gt_corr = x.clamp(0, proj.width - 1)
-        self._mask = valid
+        self._gt_corr = torch.where(valid, x, torch.zeros_like(x)).clamp(0, proj.width - 1)
         return self._gt_corr
 
     @property
     def gt_corr(self) -> torch.Tensor:
         return self.compute_gt_corr()
-
-    @property
-    def mask(self) -> torch.Tensor:
-        if self._mask is None:
-            raise RuntimeError("Scene not loaded.")
-        _ = self.compute_gt_corr()
-        return self._mask
-
-    def _look_at_from_rt(self, mi, R: torch.Tensor, t: torch.Tensor):
-        R_np = R.detach().cpu().numpy().astype(np.float32)
-        t_np = t.detach().cpu().numpy().astype(np.float32)
-        c = (-R_np.T @ t_np).reshape(3)
-        forward = R_np.T @ np.array([0.0, 0.0, 1.0], dtype=np.float32)
-        target = c + forward
-        up = R_np.T @ np.array([0.0, 1.0, 0.0], dtype=np.float32)
-        return mi.ScalarTransform4f.look_at(origin=tuple(c.tolist()), target=tuple(target.tolist()), up=tuple(up.tolist()))
 
     def _pattern_to_image(self, pattern_1d: torch.Tensor, hp: int) -> np.ndarray:
         p = pattern_1d.detach().to("cpu", torch.float32).numpy()
@@ -248,63 +231,23 @@ class StructuredLightRenderer:
         rgb = np.stack([img, img, img], axis=-1)
         return rgb
 
-    def _make_default_scene_dict(self, mi, pattern_path: str) -> dict[str, Any]:
-        if self.camera is None or self.projector is None:
-            raise RuntimeError("Camera and projector must be configured.")
-
-        cam = self.camera
-        proj = self.projector
-
-        camera_fov = float(2.0 * np.degrees(np.arctan(cam.width / (2.0 * cam.fx))))
-        proj_fov = float(2.0 * np.degrees(np.arctan(proj.width / (2.0 * proj.fx))))
-
-        return {
-            "type": "scene",
-            "integrator": {"type": "path", "max_depth": 6},
-            "sensor": {
-                "type": "perspective",
-                "fov": camera_fov,
-                "to_world": self._look_at_from_rt(mi, cam.R, cam.t),
-                "sampler": {"type": "independent", "sample_count": self.spp},
-                "film": {
-                    "type": "hdrfilm",
-                    "width": cam.width,
-                    "height": cam.height,
-                    "pixel_format": "rgb",
-                    "component_format": "float32",
-                    "rfilter": {"type": "gaussian"},
-                },
-            },
-            "ambient": {
-                "type": "constant",
-                "radiance": {"type": "rgb", "value": [self.lights.ambient] * 3},
-            },
-            "projector": {
-                "type": "projector",
-                "fov": proj_fov,
-                "to_world": self._look_at_from_rt(mi, proj.R, proj.t),
-                "irradiance": {
-                    "type": "bitmap",
-                    "filename": pattern_path,
-                    "raw": True,
-                },
-            },
-            "target": {
-                "type": "rectangle",
-                "to_world": mi.ScalarTransform4f.scale((1.8, 1.2, 1.0)),
-                "bsdf": {
-                    "type": "diffuse",
-                    "reflectance": {"type": "rgb", "value": [0.7, 0.7, 0.7]},
-                },
-            },
-        }
-
     def _make_scene_with_pattern(self, pattern_path: str):
         mi = self._require_mitsuba()
         if self._mi_scene_file is not None:
             scene = mi.load_file(str(self._mi_scene_file))
         else:
-            scene = mi.load_dict(self._make_default_scene_dict(mi, pattern_path))
+            if self.camera is None or self.projector is None:
+                raise RuntimeError("Camera and projector must be configured.")
+            scene_dict = build_runtime_scene_dict(
+                mi=mi,
+                camera=self.camera,
+                projector=self.projector,
+                ambient=self.lights.ambient,
+                pattern_path=pattern_path,
+                scene_name=self._scene_name,
+            )
+            scene_dict["sensor"]["sampler"]["sample_count"] = self.spp
+            scene = mi.load_dict(scene_dict)
         return mi, scene
 
     def _render_single_pattern(self, pattern_1d: torch.Tensor) -> torch.Tensor:
@@ -333,22 +276,33 @@ class StructuredLightRenderer:
             out = out.clamp(0.0, 1.0)
             return out
 
-    def render_images(self, patterns: torch.Tensor | None = None) -> torch.Tensor:
+    def _prepare_patterns(self, patterns: torch.Tensor | None = None) -> torch.Tensor:
         if not self._scene_loaded:
             raise RuntimeError("Scene not loaded. Call load_scene() first.")
         if patterns is None:
             if self.patterns is None:
                 raise RuntimeError("Patterns are not set.")
             patterns = self.patterns
-
         patterns = patterns.to(device=self.device, dtype=self.dtype)
         if patterns.ndim != 2:
             raise ValueError("patterns must be [K, Wp]")
+        return patterns
 
+    def render_images_and_gt(self, patterns: torch.Tensor | None = None) -> dict[str, torch.Tensor]:
+        """
+        Unified observation API that computes both rendered images and gt correspondence
+        with shared preparation logic.
+        """
+        patterns = self._prepare_patterns(patterns)
         imgs = [self._render_single_pattern(patterns[k]) for k in range(patterns.shape[0])]
         images = torch.stack(imgs, dim=0)
-        images = images * self.mask.unsqueeze(0).to(images.dtype)
-        return images
+        return {
+            "images": images,
+            "gt_corr": self.gt_corr,
+        }
+
+    def render_images(self, patterns: torch.Tensor | None = None) -> torch.Tensor:
+        return self.render_images_and_gt(patterns)["images"]
 
     def render_images_batch(self, patterns_batch: torch.Tensor) -> torch.Tensor:
         if patterns_batch.ndim != 3:
@@ -359,12 +313,7 @@ class StructuredLightRenderer:
         return torch.stack(out, dim=0)
 
     def render_train_batch(self) -> dict[str, torch.Tensor]:
-        images = self.render_images()
-        return {
-            "images": images,
-            "gt_corr": self.gt_corr,
-            "mask": self.mask,
-        }
+        return self.render_images_and_gt()
 
     def finite_difference(self, patterns: torch.Tensor, direction: torch.Tensor, eps: float) -> torch.Tensor:
         patterns = patterns.to(device=self.device, dtype=self.dtype)
@@ -412,8 +361,9 @@ class StructuredLightRenderer:
         out = Path(output_dir)
         out.mkdir(parents=True, exist_ok=True)
 
-        images = self.render_images().detach().cpu().numpy()
-        corr = self.gt_corr.detach().cpu().numpy()
+        obs = self.render_images_and_gt()
+        images = obs["images"].detach().cpu().numpy()
+        corr = obs["gt_corr"].detach().cpu().numpy()
         if images.shape[0] < 2:
             raise RuntimeError("self-check visualization expects at least two patterns (constant + stripe).")
         if self.patterns is None or self.patterns.shape[0] < 2:
@@ -460,26 +410,3 @@ class StructuredLightRenderer:
         plt.tight_layout()
         plt.savefig(out / "gt_corr_vis.png", dpi=150)
         plt.close()
-
-    def self_check(self, output_dir: str | Path | None = None) -> dict[str, torch.Tensor]:
-        if self.projector is None:
-            raise RuntimeError("Projector is not configured.")
-
-        Wp = self.projector.width
-        k_const = torch.full((1, Wp), 0.5, dtype=self.dtype, device=self.device)
-        k_stripe = torch.zeros((1, Wp), dtype=self.dtype, device=self.device)
-        k_stripe[:, ::8] = 1.0
-        patterns = torch.cat([k_const, k_stripe], dim=0)
-        self.set_patterns(patterns)
-
-        out = {
-            "images": self.render_images(),
-            "gt_corr": self.gt_corr,
-            "depth": self.render_depth_for_visualization(),
-            "mask": self.mask,
-        }
-
-        if output_dir is not None:
-            self.save_visualization(output_dir)
-
-        return out
