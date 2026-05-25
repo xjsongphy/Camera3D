@@ -48,11 +48,11 @@
 #### `update_patterns(patterns)`
 - 作用: pattern 更新别名接口。
 
-#### `load_scene(scene_path=None)`
+#### `load_scene(scene_path=None, cache_path=None)`
 - 作用: 加载/初始化场景。
 - 支持:
-  - `.xml` 作为 Mitsuba scene。
-  - `.npz` 读取 `depth` 缓存。
+  - `.xml` 作为 Mitsuba scene（必须配套 `.npz` cache，保证图像与监督几何一致）。
+  - `.npz` 读取 `depth/gt_corr` 缓存。
   - `None` 使用默认深度。
 
 #### `_pixel_rays_world()`
@@ -61,7 +61,7 @@
 
 #### `compute_gt_corr()`
 - 作用: 计算相机像素到投影仪列坐标的真值图。
-- 输出: `gt_corr: [H, W]`。
+- 输出: `gt_corr: [H, W]`（无效像素为 `NaN`，避免误监督到第 0 列）。
 
 #### `gt_corr`（property）
 - 作用: 对外暴露懒计算的真值对应图。
