@@ -1,0 +1,46 @@
+<!-- Template for marble statue scene with material -->
+<!-- Download models from: https://sketchfab.com/search?features=downloadable&type=models&q=marble%20statue -->
+<scene version="3.0.0">
+    <integrator type="path"/>
+
+    <sensor type="perspective">
+        <float name="fov" value="50"/>
+        <transform name="to_world">
+            <lookat origin="0, 0.5, 1.5" target="0, 0, 0" up="0, 1, 0"/>
+        </transform>
+        <film type="hdrfilm">
+            <integer name="width" value="1920"/>
+            <integer name="height" value="1080"/>
+        </film>
+        <sampler type="independent">
+            <integer name="sample_count" value="128"/>
+        </sampler>
+    </sensor>
+
+    <!-- Environment lighting -->
+    <emitter type="constant">
+        <rgb name="radiance" value="0.6 0.6 0.6"/>
+    </emitter>
+
+    <!-- Directional light for structured light simulation -->
+    <emitter type="directional">
+        <vector3 name="direction" value="0 -1 -1"/>
+        <rgb name="irradiance" value="2 2 2"/>
+    </emitter>
+
+    <!-- Marble statue model -->
+    <shape type="obj">
+        <string name="filename" value="resources/geometry/obj/marble_statue.obj"/>
+        <transform name="to_world">
+            <scale value="0.005"/>
+            <rotate y="1" angle="30"/>
+        </transform>
+        <!-- Marble material -->
+        <bsdf type="roughdielectric">
+            <string name="distribution" value="ggx"/>
+            <float name="alpha" value="0.05"/>
+            <float name="intIOR" value="1.5"/>
+            <float name="extIOR" value="1.0"/>
+        </bsdf>
+    </shape>
+</scene>

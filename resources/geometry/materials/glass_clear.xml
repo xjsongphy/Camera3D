@@ -1,0 +1,5 @@
+<!-- Clear glass material for structured light experiments -->
+<bsdf type="dielectric">
+    <float name="intIOR" value="1.5"/>
+    <float name="extIOR" value="1.0"/>
+</bsdf>

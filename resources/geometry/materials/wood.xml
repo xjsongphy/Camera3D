@@ -1,0 +1,5 @@
+<!-- Wood material using diffuse model -->
+<!-- For better results, use with texture maps -->
+<bsdf type="diffuse">
+    <rgb name="reflectance" value="0.4 0.3 0.2"/>
+</bsdf>
