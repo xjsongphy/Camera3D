@@ -7,7 +7,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$RootDir = Split-Path -Parent $PSScriptRoot
+$RootDir = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 Set-Location $RootDir
 $PowerShellExe = if (Get-Command pwsh -ErrorAction SilentlyContinue) { "pwsh" } else { "powershell" }
 

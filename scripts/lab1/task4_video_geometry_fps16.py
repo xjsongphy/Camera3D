@@ -25,7 +25,7 @@ from lab1.task4 import (
 )
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 ANNOTATIONS_ROOT = ROOT / "docs" / "lab1" / "assets" / "annotations"
 OUT_ROOT = ROOT / "outputs" / "lab1" / "task4_geometry_fps16"
 PLOT_ROOT = ROOT / "docs" / "lab1" / "report_assets" / "task4_geometry_fps16"

@@ -6,7 +6,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 CSV_PATH = ROOT / "outputs" / "lab1" / "task4" / "case_metrics.csv"
 GEOMETRY_CSV_PATH = ROOT / "outputs" / "lab1" / "task4_geometry_fps16" / "case_metrics.csv"
 OUT = ROOT / "docs" / "lab1" / "report_assets" / "task4"
