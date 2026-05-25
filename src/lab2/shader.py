@@ -64,12 +64,12 @@ class StructuredLightRenderer:
         self.patterns: torch.Tensor | None = None
 
         self._scene_loaded = False
-        self._mesh_path: Path | None = None
         self._mi_scene_file: Path | None = None
         self._scene_name: str = "sl_plane_diffuse"
 
         self._depth: torch.Tensor | None = None
         self._gt_corr: torch.Tensor | None = None
+        self._autodiff_gain: torch.Tensor | None = None
 
     def _require_mitsuba(self):
         try:
@@ -132,44 +132,60 @@ class StructuredLightRenderer:
     def update_patterns(self, patterns: torch.Tensor) -> None:
         self.set_patterns(patterns)
 
-    def load_scene(self, scene_path: str | Path | None = None) -> None:
+    def load_scene(self, scene_path: str | Path | None = None, cache_path: str | Path | None = None) -> None:
         """
         Load Mitsuba scene for rendering.
 
-        - `scene_path` .xml: use as Mitsuba scene file.
-        - `scene_path` .npz: optional depth cache for gt_corr/depth.
+        - `scene_path` .xml: use as Mitsuba scene file. Must pair with cache_path.
+        - `scene_path` .npz: load depth/gt_corr cache only.
         - `None`: use internal default scene.
         """
         if self.camera is None:
             raise RuntimeError("set_camera() must be called before load_scene().")
 
         self._mi_scene_file = None
-        self._mesh_path = None
+        self._depth = None
+        self._gt_corr = None
 
         if scene_path is not None:
             p = Path(scene_path)
             if p.suffix.lower() == ".xml":
                 self._mi_scene_file = p
+                if cache_path is None:
+                    raise ValueError(
+                        "When loading an XML render scene, cache_path (.npz with depth/gt_corr) is required "
+                        "to keep images and supervision geometry aligned."
+                    )
             elif p.suffix.lower() == ".npz":
-                arr = np.load(p, allow_pickle=True).item()
-                H, W = self.camera.height, self.camera.width
-                if "depth" in arr:
-                    self._depth = self._to_tensor(arr["depth"], (H, W))
+                cache_path = p
             else:
                 raise ValueError("scene_path must be .xml or .npz or None")
 
-        if self._depth is None:
+        if cache_path is not None:
+            c = Path(cache_path)
+            if c.suffix.lower() != ".npz":
+                raise ValueError("cache_path must be a .npz file")
+            data = np.load(c, allow_pickle=False)
             H, W = self.camera.height, self.camera.width
-            uu, vv = torch.meshgrid(
-                torch.linspace(0.0, 1.0, W, device=self.device, dtype=self.dtype),
-                torch.linspace(0.0, 1.0, H, device=self.device, dtype=self.dtype),
-                indexing="xy",
-            )
-            uu = uu.T
-            vv = vv.T
-            self._depth = 1.0 + 0.2 * (uu - 0.5) + 0.1 * torch.sin(2 * np.pi * vv)
+            if "depth" in data.files:
+                self._depth = self._to_tensor(data["depth"], (H, W))
+            if "gt_corr" in data.files:
+                self._gt_corr = self._to_tensor(data["gt_corr"], (H, W))
 
-        self._gt_corr = None
+        if self._depth is None and self._gt_corr is None:
+            if self._mi_scene_file is not None:
+                raise ValueError(
+                    "XML scene provided but no usable depth/gt_corr cache found. "
+                    "Pass cache_path with depth or gt_corr from the same geometry."
+                )
+            H, W = self.camera.height, self.camera.width
+            v, u = torch.meshgrid(
+                torch.linspace(0.0, 1.0, H, device=self.device, dtype=self.dtype),
+                torch.linspace(0.0, 1.0, W, device=self.device, dtype=self.dtype),
+                indexing="ij",
+            )
+            self._depth = 1.0 + 0.2 * (u - 0.5) + 0.1 * torch.sin(2 * np.pi * v)
+
         self._scene_loaded = True
 
     def _pixel_rays_world(self) -> tuple[torch.Tensor, torch.Tensor]:
@@ -177,13 +193,11 @@ class StructuredLightRenderer:
             raise RuntimeError("Camera is not configured.")
         cam = self.camera
 
-        u, v = torch.meshgrid(
-            torch.arange(cam.width, device=self.device, dtype=self.dtype),
+        v, u = torch.meshgrid(
             torch.arange(cam.height, device=self.device, dtype=self.dtype),
-            indexing="xy",
+            torch.arange(cam.width, device=self.device, dtype=self.dtype),
+            indexing="ij",
         )
-        u = u.T
-        v = v.T
 
         x = (u - cam.cx) / cam.fx
         y = (v - cam.cy) / cam.fy
@@ -200,11 +214,14 @@ class StructuredLightRenderer:
     def compute_gt_corr(self) -> torch.Tensor:
         if self.camera is None or self.projector is None:
             raise RuntimeError("Camera and projector must be configured.")
-        if self._depth is None:
+        if self._depth is None and self._gt_corr is None:
             raise RuntimeError("Scene not loaded.")
 
         if self._gt_corr is not None:
             return self._gt_corr
+
+        if self._depth is None:
+            raise RuntimeError("Depth cache is required to compute gt_corr.")
 
         rays_o, rays_d = self._pixel_rays_world()
         pts_world = rays_o + rays_d * self._depth[..., None]
@@ -217,12 +234,92 @@ class StructuredLightRenderer:
         x = proj.fx * (pts_proj[..., 0] / z) + proj.cx
         valid = valid & (x >= 0) & (x <= (proj.width - 1))
 
-        self._gt_corr = torch.where(valid, x, torch.zeros_like(x)).clamp(0, proj.width - 1)
+        clamped = x.clamp(0, proj.width - 1)
+        self._gt_corr = torch.where(valid, clamped, torch.full_like(clamped, float("nan")))
         return self._gt_corr
 
     @property
     def gt_corr(self) -> torch.Tensor:
         return self.compute_gt_corr()
+
+    def _prepare_autodiff_sampling(self, gt_corr: torch.Tensor, wp: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Prepare linear sampling indices/weights for differentiable pattern lookup.
+        Returns (x0, x1, w1) with shape [H, W], and invalid pixels get zeroed.
+        """
+        valid = torch.isfinite(gt_corr)
+        x = torch.where(valid, gt_corr, torch.zeros_like(gt_corr))
+        x0 = torch.floor(x).long().clamp(0, wp - 1)
+        x1 = (x0 + 1).clamp(0, wp - 1)
+        w1 = (x - x0.to(x.dtype)).clamp(0.0, 1.0)
+        w1 = torch.where(valid, w1, torch.zeros_like(w1))
+        return x0, x1, w1
+
+    def calibrate_autodiff_gain(self, pattern_value: float = 1.0) -> torch.Tensor:
+        """
+        Estimate a per-pixel gain map from Mitsuba by rendering a constant pattern.
+        This aligns the differentiable torch path with current scene brightness.
+        """
+        if self.projector is None:
+            raise RuntimeError("Projector is not configured.")
+        wp = self.projector.width
+        p = torch.full((1, wp), float(pattern_value), device=self.device, dtype=self.dtype)
+        img = self.render_images(p)[0]
+        gain = (img - self.lights.ambient).clamp(min=0.0)
+        self._autodiff_gain = gain.detach()
+        return self._autodiff_gain
+
+    def render_images_autodiff(
+        self,
+        patterns: torch.Tensor | None = None,
+        gain: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """
+        Differentiable torch renderer for patterns -> captured images.
+        Uses gt_corr sampling + optional gain map, enabling autograd on patterns.
+        """
+        patterns = self._prepare_patterns(patterns)
+        gt = self.gt_corr
+        k, wp = patterns.shape
+        x0, x1, w1 = self._prepare_autodiff_sampling(gt, wp)
+
+        # [K, H, W] linear sample from 1D projector patterns
+        p0 = patterns[:, x0]
+        p1 = patterns[:, x1]
+        sampled = (1.0 - w1).unsqueeze(0) * p0 + w1.unsqueeze(0) * p1
+
+        if gain is None:
+            if self._autodiff_gain is None:
+                gain_t = torch.ones_like(gt, dtype=self.dtype, device=self.device)
+            else:
+                gain_t = self._autodiff_gain.to(device=self.device, dtype=self.dtype)
+        else:
+            gain_t = gain.to(device=self.device, dtype=self.dtype)
+        if gain_t.shape != gt.shape:
+            raise ValueError(f"gain must be shape {tuple(gt.shape)}, got {tuple(gain_t.shape)}")
+
+        images = sampled * gain_t.unsqueeze(0) + self.lights.ambient
+        return images.clamp(0.0, 1.0)
+
+    def patterns_image_autodiff_grad(
+        self,
+        patterns: torch.Tensor,
+        grad_images: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """
+        Compute autograd gradient d(<images, grad_images>)/d(patterns) using torch path.
+        """
+        p = patterns.to(device=self.device, dtype=self.dtype).detach().requires_grad_(True)
+        imgs = self.render_images_autodiff(p)
+        if grad_images is None:
+            loss = imgs.sum()
+        else:
+            g = grad_images.to(device=self.device, dtype=self.dtype)
+            if g.shape != imgs.shape:
+                raise ValueError(f"grad_images must be shape {tuple(imgs.shape)}, got {tuple(g.shape)}")
+            loss = (imgs * g).sum()
+        (grad_p,) = torch.autograd.grad(loss, p, retain_graph=False, create_graph=False)
+        return grad_p
 
     def _pattern_to_image(self, pattern_1d: torch.Tensor, hp: int) -> np.ndarray:
         p = pattern_1d.detach().to("cpu", torch.float32).numpy()
@@ -312,8 +409,15 @@ class StructuredLightRenderer:
         out = [self.render_images(patterns_batch[b]) for b in range(patterns_batch.shape[0])]
         return torch.stack(out, dim=0)
 
-    def render_train_batch(self) -> dict[str, torch.Tensor]:
-        return self.render_images_and_gt()
+    def render_train_batch(self, mode: str = "mitsuba") -> dict[str, torch.Tensor]:
+        if mode == "mitsuba":
+            return self.render_images_and_gt()
+        if mode == "autodiff":
+            return {
+                "images": self.render_images_autodiff(),
+                "gt_corr": self.gt_corr,
+            }
+        raise ValueError("mode must be 'mitsuba' or 'autodiff'")
 
     def finite_difference(self, patterns: torch.Tensor, direction: torch.Tensor, eps: float) -> torch.Tensor:
         patterns = patterns.to(device=self.device, dtype=self.dtype)
