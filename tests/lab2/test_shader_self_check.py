@@ -19,9 +19,10 @@ import unittest
 from pathlib import Path
 
 # Import lab2 to trigger automatic environment setup
+# Note: Must use 'lab2.shader' not 'src.lab2.shader' to trigger __init__.py
 try:
     import torch
-    from src.lab2.shader import StructuredLightRenderer
+    from lab2.shader import StructuredLightRenderer
 except ImportError:
     torch = None  # type: ignore
 
