@@ -1,268 +1,142 @@
 # Camera3D
 
-`Camera3D` 是一个基于 `uv` 管理的课程实验仓库，当前已实现 Lab1 的四个任务：
+基于 `uv` 管理的三维计算成像课程实验仓库，包含 Lab1（视频3D重建）和 Lab2（结构光优化）两个独立实验。
 
-- `task1`：静态场景 SfM 与轨迹可视化
-- `task2`：子序列重建、Sim(3) 对齐与 ATE 分析
-- `task3`：动态场景 SfM 与掩膜改进实验
-- `task4`：无 GT 位姿质量评估
+## 整体设计
 
-核心实现位于 `src/lab1/`，实验文档与报告位于 `docs/lab1/`，运行结果输出到 `outputs/lab1/`。
+- **依赖管理**：使用 `uv` 统一管理Python依赖
+- **模块化**：每个lab有独立的源码、文档和输出目录
+- **类型安全**：Python 3.12+ with type hints
+- **测试驱动**：每个lab包含自检测试
+
+## 实验模块
+
+### [Lab 1: 基于视频的3D重建](docs/lab1/README.md)
+
+基于单目视频的静态与动态场景3D重建与位姿评估。
+
+- 静态场景 SfM 与轨迹可视化
+- 子序列重建与 Sim(3) 对齐
+- 动态场景掩膜改进
+- 无 GT 位姿质量评估
+
+### [Lab 2: 结构光Pattern自动优化](docs/lab2/README.md)
+
+复现Optical SGD论文，实现合成环境下的结构光图案优化闭环。
+
+- Mitsuba合成渲染器
+- 有限差分 vs 自动微分梯度计算
+- ZNCC vs ZNCC-NN Decoder对比
+- 多材质鲁棒性测试
 
 ## 快速开始
 
 ```bash
-uv sync
+# 克隆仓库
+git clone <repo-url>
+cd Camera3D
+
+# 安装 uv（如果尚未安装）
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Lab1: 视频重建
+uv sync --group lab1
 uv run lab1 --help
-```
 
-常用命令：
-
-```bash
-# task1: 静态场景 SfM
-uv run lab1 task1 --videos S1-2 --fps 30 --stage all
-
-# task2: 子序列分析
-uv run lab1 task2 --source-fps 30 --stage all
-
-# task3: 动态场景掩膜 + 重建
-uv sync --extra task3-yolo
-uv run lab1 task3-mask --source motion --videos S2-1 S2-2 --fps 30
-uv run lab1 task3 --videos S2-1 S2-2 --fps 30 --methods raw
-uv run lab1 task3 --videos S2-1 S2-2 --fps 30 --methods mask --mask-source motion
-
-# task4: 位姿质量评估
-uv run lab1 task4
-uv run lab1 task4 plot
-```
-
-别名：
-
-| Full command | Alias |
-|---|---|
-| `task1` | `q1` |
-| `task2` | `q2` |
-| `task3` | `q3` |
-| `task4` | `q4` |
-
-## 环境依赖
-
-Python 依赖由 `uv` 管理：
-
-```bash
-uv sync
-```
-
-外部工具需要已在 PATH 中可用：
-
-| Tool | Check | Purpose |
-|---|---|---|
-| `colmap` | `colmap -h` | 稀疏重建 / SfM |
-| `ffmpeg` | `ffmpeg -version` | 视频抽帧 |
-
-`task3` 的 YOLO 掩膜依赖可选安装：
-
-```bash
-uv sync --extra task3-yolo
+# Lab2: 结构光优化（需要Python 3.12 + LLVM）
+uv sync --group lab2
+uv run python scripts/lab2/generate_lab2_scenes.py
 ```
 
 ## 项目结构
 
-```text
+```
 Camera3D/
-├─ src/lab1/                  # Lab1 CLI 与任务实现
-├─ docs/lab1/                 # 题目、报告、报告配图
-├─ docs/lab1/assets/videos/   # 实验视频
-├─ docs/lab1/assets/annotations/ # task4 标注数据
-├─ scripts/                   # 批处理脚本与辅助脚本
-└─ outputs/lab1/              # 运行输出
+├─ pyproject.toml           # uv配置与依赖分组
+├─ README.md                # 本文件
+├─ src/                     # 源码
+│  ├─ lab1/                 # Lab1实现
+│  └─ lab2/                 # Lab2实现
+├─ docs/                    # 文档
+│  ├─ lab1/                 # Lab1文档
+│  └─ lab2/                 # Lab2文档
+├─ scripts/                 # 脚本
+│  ├─ lab1/                 # Lab1脚本
+│  └─ lab2/                 # Lab2脚本
+├─ tests/                   # 测试
+│  ├─ lab1/                 # Lab1测试
+│  └─ lab2/                 # Lab2测试
+├─ outputs/                 # 运行输出
+│  ├─ lab1/                 # Lab1输出
+│  └─ lab2/                 # Lab2输出
+└─ assets/                  # 资源文件
+   ├─ scenes/               # Lab2场景文件
+   └─ videos/               # Lab1视频
 ```
 
-## 命令说明
+## 依赖管理
 
-### Task1
+项目使用 `uv` 进行依赖管理，依赖按lab分组：
 
 ```bash
-# 完整流程
-uv run lab1 task1 --videos S1-1 S1-2 S1-3 --fps 30 --stage all
+# 查看所有依赖组
+uv sync --help
 
-# 分阶段运行
-uv run lab1 task1 --videos S1-2 --fps 30 --stage extract
-uv run lab1 task1 --videos S1-2 --fps 30 --stage sfm
-
-# 基于已有结果生成附加可视化
-uv run lab1 task1 plot --videos S1-2 --fps 30
-uv run lab1 task1 cloud --videos S1-2 --fps 30
-
-# 对多个 fps 结果做 Sim(3) 对齐叠加
-uv run lab1 task1 merge --videos S1-2
-
-# 合并模式下指定要合并的 fps 列表（默认 4/8/16/30）
-uv run lab1 task1 merge --videos S1-2 --fps 4 8 16
+# 同步特定lab的依赖
+uv sync --group lab1       # OpenCV, Matplotlib, Pillow
+uv sync --group lab2       # PyTorch, Mitsuba, Drjit
+uv sync --group lab1-yolo  # Lab1的YOLO依赖
+uv sync --all-groups       # 所有依赖
 ```
 
-输出目录：
+### 依赖分组
 
-- `outputs/lab1/task1/<video>_fps<fps>/`
-- `outputs/lab1/task1/merged/<video>/`
+| 分组 | 内容 |
+|------|------|
+| `lab1` | OpenCV, Matplotlib, Pillow |
+| `lab1-yolo` | Ultralytics YOLO (可选) |
+| `lab2` | PyTorch, Mitsuba, Drjit, OpenCV, Matplotlib |
 
-主要文件：
+## Python版本要求
 
-- `trajectory.png`
-- `trajectory_with_directions.png`
-- `sparse_points.png`
-- `frame_map.csv`
-- `timing.csv`
+- **Lab1**: Python >= 3.10
+- **Lab2**: Python 3.12（PyTorch和Mitsuba的限制）
 
-### Task2
+## 开发指南
+
+### 添加新依赖
 
 ```bash
-# 完整流程
-uv run lab1 task2 --source-fps 30 --stage all
+# 添加到lab1组
+uv add --group lab1 <package>
 
-# 分阶段运行
-uv run lab1 task2 --source-fps 30 --stage prepare
-uv run lab1 task2 --source-fps 30 --stage sfm
-uv run lab1 task2 --source-fps 30 --stage analyze
-
-# 自定义子序列，格式 START:END:NAME（1-based, inclusive）
-uv run lab1 task2 --source-fps 30 --subseq 211:930:return_mid
+# 添加开发依赖
+uv add --dev pytest
 ```
 
-输出目录：
-
-- `outputs/lab1/task2/S1-2_fps<fps>/`
-- 子目录形如 `seq01_return_mid_000211-000930/`
-
-主要文件：
-
-- `summary.csv`
-- `trajectory_overlay.png`
-- `metrics.txt`
-- `timing.csv`
-
-### Task3
+### 运行测试
 
 ```bash
-# 先生成掩膜
-uv run lab1 task3-mask --source default --videos S2-1 S2-2 --fps 30
-uv run lab1 task3-mask --source motion --videos S2-1 S2-2 --fps 30
-uv run lab1 task3-mask --source yolo --videos S2-1 S2-2 --fps 30
+# Lab1测试
+uv run pytest tests/lab1/
 
-# 原始重建
-uv run lab1 task3 --videos S2-1 S2-2 --fps 30 --methods raw
-
-# 使用不同掩膜重建
-uv run lab1 task3 --videos S2-1 S2-2 --fps 30 --methods mask --mask-source default
-uv run lab1 task3 --videos S2-1 S2-2 --fps 30 --methods mask --mask-source motion
-uv run lab1 task3 --videos S2-1 S2-2 --fps 30 --methods mask --mask-source yolo
+# Lab2测试（需要Mitsuba）
+uv sync --group lab2
+uv run pytest tests/lab2/
 ```
 
-输出目录：
+### 代码风格
 
-- `outputs/lab1/task3/masks/<source>/<video>_fps<fps>/`
-- `outputs/lab1/task3/<video>_fps<fps>/raw/`
-- `outputs/lab1/task3/<video>_fps<fps>/mask_default/`
-- `outputs/lab1/task3/<video>_fps<fps>/mask_motion/`
-- `outputs/lab1/task3/<video>_fps<fps>/mask_yolo/`
+项目使用类型注解和docstring：
 
-主要文件：
+```python
+from __future__ import annotations
 
-- `method_summary.csv`
-- `trajectory_overlay.png`
-- `trajectory_overlay_summary.csv`
-- 每种方法目录下的 `analysis.txt`、`analysis.csv`、`trajectory_raw.png`、`trajectory_with_directions.png`、`sparse_points.png`
-
-说明：
-
-- `task3-mask` 只负责生成掩膜与叠加预览。
-- `task3` 只消费现有掩膜；若掩膜缺失，会直接报错并给出建议命令。
-
-### Task4
-
-```bash
-# 跑全部 10 个标注 case（含质量评估 + 轨迹绘制）
-uv run lab1 task4
-
-# 只跑部分 case
-uv run lab1 task4 --cases 01 02 06
-
-# 仅重新绘制轨迹图（无需重新计算指标）
-uv run lab1 task4 plot
-
-# 调整方向箭头数量
-uv run lab1 task4 plot --direction-arrows 20
-
-# 指标阈值参数
-uv run lab1 task4 --compose-threshold-deg 1.0 --zigzag-residual-threshold 2.0 --accel-jump-ratio 4.0
-
-# 视频三角化几何指标：fps16 抽帧、10 个 case 并行
-uv run python scripts/task4_video_geometry_fps16.py --workers 10 --target-fps 16 --max-pairs 160
+def example_function(param: str) -> str:
+    """Example function with type hints."""
+    return param.upper()
 ```
 
-输出目录：
+## License
 
-- `outputs/lab1/task4/`
-
-主要文件：
-
-- `case_metrics.csv`
-- `summary.txt`
-- `quality_scores.png`
-- `timing.csv`
-- `trajectories/trajectories.png` — 10 条轨迹总览
-- `trajectories/trajectory_*.png` — 逐 case 轨迹图
-
-当前实现的质量指标：
-
-- `smooth_jump_ratio`
-- `traj_smoothness`
-- `zigzag_score`
-- `epi_dist_px`
-- `reproj_err_px`
-- `reproj_median_px`
-- `compose_rot_err_deg`
-
-视频三角化几何指标输出到 `outputs/lab1/task4_geometry_fps16/`，报告图输出到 `docs/lab1/report_assets/task4_geometry_fps16/`。
-
-## 批处理脚本
-
-Windows:
-
-```powershell
-./scripts/task1_fps_sweep_full.ps1
-./scripts/task2_full_pipeline.ps1
-./scripts/task3_full_pipeline.ps1
-./scripts/run_lab1_pipeline.ps1
-```
-
-Linux / macOS:
-
-```bash
-bash ./scripts/task1_fps_sweep_full.sh
-bash ./scripts/task2_full_pipeline.sh
-bash ./scripts/task3_full_pipeline.sh
-bash ./scripts/run_lab1_pipeline.sh
-```
-
-说明：
-
-- `task1_fps_sweep_full` 会批量跑 `4 / 8 / 16 / 30 fps`，并生成 benchmark CSV。
-- `task2_full_pipeline` 会先确保 `S1-2` 全量结果存在，再运行默认三段子序列分析。
-- `task3_full_pipeline` 会依次生成 `default / motion / yolo` 掩膜，并运行 `raw + mask_*` 重建。
-- `run_lab1_pipeline` 用于串联执行 `task1~task3` 的完整实验流程。
-
-报告配图位于 `docs/lab1/report_assets/`，例如：
-
-- `docs/lab1/report_assets/task1/task1_fps_sweep.png`
-- `docs/lab1/report_assets/task2/seq01_global_fps_grid.png`
-- `docs/lab1/report_assets/task3/S2-1_sparse_raw_vs_mask_motion.png`
-- `docs/lab1/report_assets/task4/task4_quality_score.png`
-
-## 日志与输出约定
-
-日志默认写入：
-
-- `outputs/lab1/<task>/logs/<task>_YYYYMMDD_HHMMSS.log`
-
-所有任务的阶段耗时都会写入各自输出目录下的 `timing.csv`。
+本仓库仅用于课程教学，请勿用于商业用途。
