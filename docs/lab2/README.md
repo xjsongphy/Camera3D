@@ -69,7 +69,8 @@ Mitsuba在macOS上需要LLVM：
 brew install llvm
 
 # 设置环境变量（添加到~/.zshrc）
-export DRJIT_LIBLLVM_PATH=$(brew --prefix llvm)/lib
+# 注意：DRJIT_LIBLLVM_PATH需要指向libLLVM.dylib文件的完整路径
+export DRJIT_LIBLLVM_PATH=$(brew --prefix llvm)/lib/libLLVM.dylib
 export OPENCV_IO_ENABLE_OPENEXR=1
 
 # 重新加载配置

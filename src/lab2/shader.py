@@ -41,6 +41,11 @@ class LightConfig:
     ambient: float = 0.05
 
 
+# Type aliases for convenience
+Camera = CameraConfig
+Projector = ProjectorConfig
+
+
 class StructuredLightRenderer:
     """Single shader: Mitsuba rendering backend + torch tensor data API."""
 

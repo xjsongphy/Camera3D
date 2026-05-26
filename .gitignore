@@ -30,3 +30,6 @@ outputs/
 TODO.md
 superpowers
 pack/
+
+# pytest
+.pytest_cache
