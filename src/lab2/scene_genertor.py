@@ -68,7 +68,7 @@ def build_runtime_scene_dict(
         },
         "ambient": {
             "type": "constant",
-            "radiance": {"type": "rgb", "value": [ambient, ambient, ambient]},
+            "radiance": {"type": "rgb", "value": [ambient * 10, ambient * 10, ambient * 10]},  # Much stronger ambient
         },
         "projector": {
             "type": "projector",
