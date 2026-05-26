@@ -15,7 +15,7 @@
 # 同步依赖（需要Python 3.12）
 uv sync --group lab2
 
-# 生成场景
+# 生成场景（环境自动设置）
 uv run python scripts/lab2/generate_lab2_scenes.py
 
 # 运行训练
@@ -27,26 +27,6 @@ uv run python scripts/lab2/compare_gradients.py --scene sl_plane_diffuse
 # 渲染器自检
 uv run pytest tests/lab2/test_shader_self_check.py -v
 ```
-
-## 项目结构
-
-```
-docs/lab2/
-├─ images/                  # 论文图片
-├─ design/                  # 设计文档
-├─ lab2.md                  # 作业要求
-├─ paper.md                 # 论文笔记
-├─ lab2-讲义.md             # 讲义
-└─ README.md                # 本文件
-```
-
-## 核心脚本
-
-| 脚本 | 功能 |
-|------|------|
-| `generate_lab2_scenes.py` | 生成不同材质场景 |
-| `run_training.py` | 运行Optical SGD训练 |
-| `compare_gradients.py` | 梯度方式对比 |
 
 ## 环境依赖
 
@@ -62,28 +42,23 @@ uv sync --group lab2
 
 ### macOS额外依赖
 
-Mitsuba在macOS上需要LLVM：
+**重要**：Lab2使用统一的环境设置模块，环境变量会自动配置！
 
+运行任何lab2脚本时会自动：
+- 检测并设置 `DRJIT_LIBLLVM_PATH`
+- 启用 `OPENCV_IO_ENABLE_OPENEXR=1`
+
+**仅需手动安装LLVM**：
 ```bash
-# 安装LLVM
 brew install llvm
-
-# 设置环境变量（添加到~/.zshrc）
-# 注意：DRJIT_LIBLLVM_PATH需要指向libLLVM.dylib文件的完整路径
-export DRJIT_LIBLLVM_PATH=$(brew --prefix llvm)/lib/libLLVM.dylib
-export OPENCV_IO_ENABLE_OPENEXR=1
-
-# 重新加载配置
-source ~/.zshrc
 ```
+
+然后直接运行脚本即可，无需手动设置环境变量。
 
 ### 验证安装
 ```bash
-# 检查Mitsuba
-uv run python -c "import mitsuba; print(mitsuba.__version__)"
-
-# 检查PyTorch
-uv run python -c "import torch; print(torch.__version__)"
+# 检查依赖状态
+uv run python -c "from lab2 import env; env.print_dependency_status()"
 
 # 运行自检测试
 uv run pytest tests/lab2/test_shader_self_check.py -v
