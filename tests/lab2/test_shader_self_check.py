@@ -10,40 +10,15 @@ Run with:
     pytest tests/lab2/test_shader_self_check.py -v
     python -m unittest tests.lab2.test_shader_self_check -v
 
-Requirements:
-    - PyTorch
-    - Mitsuba 3.x with LLVM backend
-    - OpenCV with OpenEXR support
-
-macOS setup:
-    brew install llvm
-    export DRJIT_LIBLLVM_PATH=$(brew --prefix llvm)/lib
-    export OPENCV_IO_ENABLE_OPENEXR=1
+Environment setup is automatic when importing lab2 modules.
 """
 
 from __future__ import annotations
 
-import os
-import subprocess
 import unittest
 from pathlib import Path
 
-# Enable OpenEXR support in OpenCV
-os.environ['OPENCV_IO_ENABLE_OPENEXR'] = '1'
-
-# Auto-detect and set DRJIT_LIBLLVM_PATH for macOS
-# Note: DRJIT requires the FULL PATH to libLLVM.dylib, not just the directory
-if os.environ.get('DRJIT_LIBLLVM_PATH') is None:
-    try:
-        llvm_path = subprocess.check_output(['brew', '--prefix', 'llvm'],
-                                            stderr=subprocess.DEVNULL).decode().strip()
-        # Point directly to libLLVM.dylib (not libLLVM-C.dylib)
-        lib_path = os.path.join(llvm_path, 'lib', 'libLLVM.dylib')
-        if os.path.exists(lib_path):
-            os.environ['DRJIT_LIBLLVM_PATH'] = lib_path
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        pass  # brew not found
-
+# Import lab2 to trigger automatic environment setup
 try:
     import torch
     from src.lab2.shader import StructuredLightRenderer
