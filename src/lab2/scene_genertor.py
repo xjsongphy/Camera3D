@@ -68,7 +68,7 @@ def build_runtime_scene_dict(
         },
         "ambient": {
             "type": "constant",
-            "radiance": {"type": "rgb", "value": [ambient * 10, ambient * 10, ambient * 10]},  # Much stronger ambient
+            "radiance": {"type": "rgb", "value": [ambient, ambient, ambient]},
         },
         "projector": {
             "type": "projector",
@@ -78,16 +78,21 @@ def build_runtime_scene_dict(
         },
     }
 
+    # Mitsuba rectangle is in XY plane with normal facing +Z.
+    # Camera looks along +Z, so we need to rotate rectangles by -90 deg around X
+    # to make the normal face -Z (toward the camera).
+    _ground_rot = mi.ScalarTransform4f.rotate(axis=(1, 0, 0), angle=-90)
+
     if scene_name == "sl_plane_diffuse":
         base["target"] = {
             "type": "rectangle",
-            "to_world": mi.ScalarTransform4f.scale((1.8, 1.2, 1.0)),
+            "to_world": mi.ScalarTransform4f.translate((0.0, 0.0, 2.0)) @ _ground_rot @ mi.ScalarTransform4f.scale((1.8, 1.2, 1.0)),
             "bsdf": {"type": "diffuse", "reflectance": {"type": "rgb", "value": [0.7, 0.7, 0.7]}},
         }
     elif scene_name == "sl_marble_objects":
         base["ground"] = {
             "type": "rectangle",
-            "to_world": mi.ScalarTransform4f.translate((0.0, -0.45, 1.6)) @ mi.ScalarTransform4f.scale((2.2, 1.2, 1.0)),
+            "to_world": mi.ScalarTransform4f.translate((0.0, -0.45, 1.6)) @ _ground_rot @ mi.ScalarTransform4f.scale((2.2, 1.2, 1.0)),
             "bsdf": {"type": "diffuse", "reflectance": {"type": "rgb", "value": [0.76, 0.76, 0.76]}},
         }
         base["sphere"] = {
@@ -111,7 +116,7 @@ def build_runtime_scene_dict(
     elif scene_name == "sl_wood_glass":
         base["ground"] = {
             "type": "rectangle",
-            "to_world": mi.ScalarTransform4f.translate((0.0, -0.48, 1.75)) @ mi.ScalarTransform4f.scale((2.3, 1.2, 1.0)),
+            "to_world": mi.ScalarTransform4f.translate((0.0, -0.48, 1.75)) @ _ground_rot @ mi.ScalarTransform4f.scale((2.3, 1.2, 1.0)),
             "bsdf": {
                 "type": "roughdiffuse",
                 "alpha": 0.33,
