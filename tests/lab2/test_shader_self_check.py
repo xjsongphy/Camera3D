@@ -75,14 +75,15 @@ class TestStructuredLightRendererSelfCheck(unittest.TestCase):
             "t": [0.1, 0.0, 0.0],  # 10cm baseline
         })
 
-        # Use virtual scene (no XML loading) for self-check
-        # This avoids XML format issues and ensures correct dimensions
+        # Use scene with objects to show geometry
+        renderer.set_scene_name("sl_marble_objects")  # Has sphere + cube
         renderer.load_scene()  # Uses internal virtual geometry
 
-        # Create test pattern - single gradient pattern for self-check
+        # Create stripe pattern to better visualize scene geometry
         wp = 640
-        # Simple gradient pattern: left to right gradient
-        pattern = torch.linspace(0.0, 1.0, wp).unsqueeze(0)
+        # Stripe pattern: vertical stripes to show object shapes
+        pattern = torch.zeros((1, wp), dtype=torch.float32)
+        pattern[:, ::16] = 1.0  # Every 16th pixel is white
         patterns = pattern  # Single pattern
 
         renderer.set_patterns(patterns)
@@ -112,7 +113,7 @@ class TestStructuredLightRendererSelfCheck(unittest.TestCase):
         self._save_visualization_simple(renderer, output_dir=self.output_dir)
 
         # Verify files were created
-        self.assertTrue((self.output_dir / "gradient_pattern.png").exists())
+        self.assertTrue((self.output_dir / "stripe_pattern.png").exists())
         self.assertTrue((self.output_dir / "pattern_render.png").exists())
         self.assertTrue((self.output_dir / "gt_corr_vis.png").exists())
 
@@ -129,20 +130,20 @@ class TestStructuredLightRendererSelfCheck(unittest.TestCase):
         plt.figure(figsize=(8, 2.5))
         plt.plot(pattern_np[0], linewidth=1.5, color='blue')
         plt.ylim(0.0, 1.0)
-        plt.title("Gradient Pattern (Left to Right)")
+        plt.title("Stripe Pattern (Every 16th pixel white)")
         plt.xlabel("Projector Column")
         plt.ylabel("Intensity")
         plt.tight_layout()
-        plt.savefig(output_dir / "gradient_pattern.png", dpi=150)
+        plt.savefig(output_dir / "stripe_pattern.png", dpi=150)
         plt.close()
 
         # Save rendered image (with gamma correction for visibility)
         img_np = images[0].detach().cpu().numpy()
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+        _, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
 
         # Original render
         im1 = ax1.imshow(img_np, cmap="gray", vmin=0.0, vmax=1.0)
-        ax1.set_title("Pattern Render (Original)")
+        ax1.set_title("Pattern Render (Original) - Scene: sl_marble_objects")
         plt.colorbar(im1, ax=ax1)
 
         # Gamma corrected for better visibility
