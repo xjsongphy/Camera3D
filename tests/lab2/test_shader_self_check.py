@@ -37,7 +37,7 @@ class TestStructuredLightRendererSelfCheck(unittest.TestCase):
             self.skipTest("PyTorch not available")
 
         try:
-            renderer = StructuredLightRenderer(device="cpu")
+            renderer = StructuredLightRenderer(device="cpu", spp=256)  # Higher SPP for cleaner renders
         except RuntimeError as exc:  # pragma: no cover
             if "Mitsuba is required" in str(exc):
                 self.skipTest("Mitsuba not available")
@@ -94,11 +94,12 @@ class TestStructuredLightRendererSelfCheck(unittest.TestCase):
             scene_dir = self.output_dir / scene_name
             scene_dir.mkdir(parents=True, exist_ok=True)
             self._save_visualizations(renderer, scene_dir)
+            self._save_normal_render(renderer, scene_dir)  # Normal lighting without projector pattern
 
         # Verify all scenes were rendered
         for scene_name in SCENE_PRESETS.keys():
             scene_dir = self.output_dir / scene_name
-            for fname in ("pattern.png", "render.png", "depth_map.png", "gt_corr.png"):
+            for fname in ("pattern.png", "render.png", "normal_render.png", "depth_map.png", "gt_corr.png"):
                 self.assertTrue((scene_dir / fname).exists(), f"{scene_name}/{fname} should exist")
 
     def _save_visualizations(self, renderer: StructuredLightRenderer, d: Path) -> None:
@@ -153,6 +154,42 @@ class TestStructuredLightRendererSelfCheck(unittest.TestCase):
         plt.colorbar()
         plt.tight_layout()
         plt.savefig(d / "gt_corr.png", dpi=150)
+        plt.close()
+
+    def _save_normal_render(self, renderer: StructuredLightRenderer, d: Path) -> None:
+        """Render scene with normal lighting (no projector pattern) to show materials clearly."""
+        import matplotlib.pyplot as plt
+
+        # Create a temporary white pattern (uniform illumination from projector)
+        wp = 640
+        white_pattern = torch.ones((1, wp), dtype=torch.float32)
+        renderer.set_patterns(white_pattern)
+
+        # Render with white projector pattern (acts like a uniform light source)
+        # Combined with ambient, this gives a good view of materials
+        img = renderer.render_images()[0].detach().cpu().numpy()
+        depth = renderer.render_depth_for_visualization().cpu().numpy()
+
+        _, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+
+        # Normal render with uniform lighting
+        im1 = ax1.imshow(img, cmap="gray")
+        ax1.set_title("Normal Render (Uniform Lighting)")
+        ax1.set_xlabel("Camera X")
+        ax1.set_ylabel("Camera Y")
+        plt.colorbar(im1, ax=ax1)
+
+        # Normal render with depth overlay to show geometry
+        im2 = ax2.imshow(img, cmap="gray")
+        # Overlay depth contours to show 3D structure
+        ax2.contour(depth, levels=10, colors="yellow", linewidths=0.5, alpha=0.5)
+        ax2.set_title("Normal Render + Depth Contours")
+        ax2.set_xlabel("Camera X")
+        ax2.set_ylabel("Camera Y")
+        plt.colorbar(im2, ax=ax2)
+
+        plt.tight_layout()
+        plt.savefig(d / "normal_render.png", dpi=150)
         plt.close()
 
 
