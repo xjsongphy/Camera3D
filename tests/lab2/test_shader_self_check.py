@@ -54,44 +54,52 @@ class TestStructuredLightRendererSelfCheck(unittest.TestCase):
             "R": torch.eye(3).tolist(), "t": [0.1, 0.0, 0.0],
         })
 
-        renderer.set_scene_name("sl_marble_objects")
-        renderer.load_scene()
+        # Test all scene presets
+        from lab2.scene_genertor import SCENE_PRESETS
+        for scene_name in SCENE_PRESETS.keys():
+            renderer.set_scene_name(scene_name)
+            renderer.load_scene()
 
-        # Sine stripe pattern: clear spatial structure to reveal object shapes
-        wp = 640
-        x = torch.linspace(0.0, 1.0, wp)
-        pattern = (0.5 + 0.5 * torch.sin(2 * np.pi * 8 * x)).unsqueeze(0)
-        renderer.set_patterns(pattern)
+            # Sine stripe pattern: clear spatial structure to reveal object shapes
+            wp = 640
+            x = torch.linspace(0.0, 1.0, wp)
+            pattern = (0.5 + 0.5 * torch.sin(2 * np.pi * 8 * x)).unsqueeze(0)
+            renderer.set_patterns(pattern)
 
-        try:
-            images = renderer.render_images()
-        except RuntimeError as exc:  # pragma: no cover
-            if "Mitsuba is required" in str(exc):
-                self.skipTest(str(exc))
-            raise
+            try:
+                images = renderer.render_images()
+            except RuntimeError as exc:  # pragma: no cover
+                if "Mitsuba is required" in str(exc):
+                    self.skipTest(str(exc))
+                raise
 
-        gt_corr = renderer.gt_corr
-        depth = renderer.render_depth_for_visualization()
+            gt_corr = renderer.gt_corr
+            depth = renderer.render_depth_for_visualization()
 
-        # Validate shapes
-        self.assertEqual(tuple(images.shape), (1, 480, 640))
-        self.assertEqual(tuple(gt_corr.shape), (480, 640))
-        self.assertEqual(tuple(depth.shape), (480, 640))
-        self.assertTrue(torch.isfinite(images).all().item())
-        self.assertTrue((images >= 0.0).all().item())
-        self.assertTrue((images <= 1.0).all().item())
+            # Validate shapes
+            self.assertEqual(tuple(images.shape), (1, 480, 640))
+            self.assertEqual(tuple(gt_corr.shape), (480, 640))
+            self.assertEqual(tuple(depth.shape), (480, 640))
+            self.assertTrue(torch.isfinite(images).all().item())
+            self.assertTrue((images >= 0.0).all().item())
+            self.assertTrue((images <= 1.0).all().item())
 
-        # Verify projector is contributing (not just ambient)
-        img = images[0]
-        ambient_only = renderer.lights.ambient
-        projector_contribution = (img - ambient_only).clamp(min=0.0)
-        self.assertGreater(projector_contribution.mean().item(), 0.0,
-                           "Projector should contribute illumination beyond ambient")
+            # Verify projector is contributing
+            img = images[0]
+            projector_contribution = (img - renderer.lights.ambient).clamp(min=0.0)
+            self.assertGreater(projector_contribution.mean().item(), 0.0,
+                               f"Projector should contribute in scene {scene_name}")
 
-        self._save_visualizations(renderer, self.output_dir)
+            # Save visualizations for this scene
+            scene_dir = self.output_dir / scene_name
+            scene_dir.mkdir(parents=True, exist_ok=True)
+            self._save_visualizations(renderer, scene_dir)
 
-        for fname in ("pattern.png", "render.png", "depth_map.png", "gt_corr.png"):
-            self.assertTrue((self.output_dir / fname).exists())
+        # Verify all scenes were rendered
+        for scene_name in SCENE_PRESETS.keys():
+            scene_dir = self.output_dir / scene_name
+            for fname in ("pattern.png", "render.png", "depth_map.png", "gt_corr.png"):
+                self.assertTrue((scene_dir / fname).exists(), f"{scene_name}/{fname} should exist")
 
     def _save_visualizations(self, renderer: StructuredLightRenderer, d: Path) -> None:
         import matplotlib.pyplot as plt

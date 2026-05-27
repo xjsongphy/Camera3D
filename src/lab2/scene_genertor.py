@@ -118,8 +118,7 @@ def build_runtime_scene_dict(
             "type": "rectangle",
             "to_world": mi.ScalarTransform4f.translate((0.0, -0.48, 1.75)) @ _ground_rot @ mi.ScalarTransform4f.scale((2.3, 1.2, 1.0)),
             "bsdf": {
-                "type": "roughdiffuse",
-                "alpha": 0.33,
+                "type": "diffuse",
                 "reflectance": {"type": "rgb", "value": [0.56, 0.42, 0.30]},
             },
         }
@@ -132,8 +131,7 @@ def build_runtime_scene_dict(
             "type": "cube",
             "to_world": mi.ScalarTransform4f.translate((0.35, -0.22, 2.03)) @ mi.ScalarTransform4f.scale((0.22, 0.22, 0.22)),
             "bsdf": {
-                "type": "roughdiffuse",
-                "alpha": 0.28,
+                "type": "diffuse",
                 "reflectance": {"type": "rgb", "value": [0.58, 0.40, 0.25]},
             },
         }
