@@ -142,14 +142,14 @@ class TestStructuredLightRendererSelfCheck(unittest.TestCase):
         img_np = images[0].detach().cpu().numpy()
         _, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
 
-        # Original render - use viridis colormap to see gradient better
-        im1 = ax1.imshow(img_np, cmap="viridis", vmin=0.0, vmax=1.0)
+        # Original render - use gray colormap to see actual values
+        im1 = ax1.imshow(img_np, cmap="gray", vmin=0.0, vmax=1.0)
         ax1.set_title("Pattern Render (Original) - Scene: sl_marble_objects")
         plt.colorbar(im1, ax=ax1)
 
         # Gamma corrected for better visibility
         gamma_corrected = np.power(img_np.clip(0, 1), 0.5)
-        im2 = ax2.imshow(gamma_corrected, cmap="viridis", vmin=0.0, vmax=1.0)
+        im2 = ax2.imshow(gamma_corrected, cmap="gray", vmin=0.0, vmax=1.0)
         ax2.set_title("Pattern Render (Gamma Corrected)")
         plt.colorbar(im2, ax=ax2)
 
@@ -173,21 +173,28 @@ class TestStructuredLightRendererSelfCheck(unittest.TestCase):
         depth = renderer.render_depth_for_visualization()
         depth_np = depth.cpu().numpy()
 
-        _, axes = plt.subplots(1, 2, figsize=(12, 4))
+        _, axes = plt.subplots(1, 3, figsize=(15, 4))
 
-        # Depth map
-        im1 = axes[0].imshow(depth_np, cmap="plasma")
-        axes[0].set_title("Depth Map (3D Geometry)")
+        # Depth map with grayscale
+        im1 = axes[0].imshow(depth_np, cmap="gray")
+        axes[0].set_title(f"Depth Map (Range: {depth_np.min():.2f}-{depth_np.max():.2f}m)")
         axes[0].set_xlabel("Camera X")
         axes[0].set_ylabel("Camera Y")
         plt.colorbar(im1, ax=axes[0])
 
+        # Depth map with plasma colormap for better contrast
+        im2 = axes[1].imshow(depth_np, cmap="plasma")
+        axes[1].set_title("Depth Map (Plasma Colormap)")
+        axes[1].set_xlabel("Camera X")
+        axes[1].set_ylabel("Camera Y")
+        plt.colorbar(im2, ax=axes[1])
+
         # Depth histogram
-        axes[1].hist(depth_np.flatten(), bins=50, edgecolor='black')
-        axes[1].set_title("Depth Distribution")
-        axes[1].set_xlabel("Depth (m)")
-        axes[1].set_ylabel("Pixel Count")
-        axes[1].grid(True, alpha=0.3)
+        axes[2].hist(depth_np.flatten(), bins=50, edgecolor='black')
+        axes[2].set_title("Depth Distribution")
+        axes[2].set_xlabel("Depth (m)")
+        axes[2].set_ylabel("Pixel Count")
+        axes[2].grid(True, alpha=0.3)
 
         plt.tight_layout()
         plt.savefig(output_dir / "depth_map.png", dpi=150)
