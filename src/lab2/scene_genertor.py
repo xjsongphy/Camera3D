@@ -17,6 +17,7 @@ SCENE_PRESETS = {
     "sl_plane_diffuse": ScenePreset("sl_plane_diffuse", "Diffuse plane baseline scene"),
     "sl_marble_objects": ScenePreset("sl_marble_objects", "Marble-like mixed objects scene"),
     "sl_wood_glass": ScenePreset("sl_wood_glass", "Wood-like + glass mixed material scene"),
+    "sl_statue": ScenePreset("sl_statue", "Abstract statue scene for complex geometry"),
 }
 
 
@@ -135,6 +136,39 @@ def build_runtime_scene_dict(
                 "reflectance": {"type": "rgb", "value": [0.58, 0.40, 0.25]},
             },
         }
+    elif scene_name == "sl_statue":
+        base["ground"] = {
+            "type": "rectangle",
+            "to_world": mi.ScalarTransform4f.translate((0.0, -0.5, 1.6)) @ _ground_rot @ mi.ScalarTransform4f.scale((2.5, 1.5, 1.0)),
+            "bsdf": {"type": "diffuse", "reflectance": {"type": "rgb", "value": [0.7, 0.7, 0.7]}},
+        }
+        # Load statue OBJ file
+        from pathlib import Path
+        statue_path = Path("assets/models/statue.obj")
+        if statue_path.exists():
+            base["statue"] = {
+                "type": "obj",
+                "filename": str(statue_path),
+                "to_world": mi.ScalarTransform4f.translate((0.0, -0.2, 1.8)) @ mi.ScalarTransform4f.scale((0.3, 0.3, 0.3)),
+                "bsdf": {"type": "roughplastic", "alpha": 0.15, "diffuse_reflectance": {"type": "rgb", "value": [0.85, 0.83, 0.80]}},
+            }
+        else:
+            # Fallback: create a statue-like form from multiple spheres
+            base["statue_head"] = {
+                "type": "sphere",
+                "to_world": mi.ScalarTransform4f.translate((0.0, 0.1, 1.9)) @ mi.ScalarTransform4f.scale((0.15, 0.18, 0.15)),
+                "bsdf": {"type": "roughplastic", "alpha": 0.15, "diffuse_reflectance": {"type": "rgb", "value": [0.85, 0.83, 0.80]}},
+            }
+            base["statue_torso"] = {
+                "type": "sphere",
+                "to_world": mi.ScalarTransform4f.translate((0.0, -0.3, 1.85)) @ mi.ScalarTransform4f.scale((0.12, 0.2, 0.1)),
+                "bsdf": {"type": "roughplastic", "alpha": 0.15, "diffuse_reflectance": {"type": "rgb", "value": [0.85, 0.83, 0.80]}},
+            }
+            base["statue_base"] = {
+                "type": "cylinder",
+                "to_world": mi.ScalarTransform4f.translate((0.0, -0.6, 1.75)) @ mi.ScalarTransform4f.scale((0.2, 0.15, 0.2)),
+                "bsdf": {"type": "roughplastic", "alpha": 0.2, "diffuse_reflectance": {"type": "rgb", "value": [0.7, 0.68, 0.65]}},
+            }
 
     return base
 

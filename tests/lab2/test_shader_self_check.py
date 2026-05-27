@@ -37,7 +37,7 @@ class TestStructuredLightRendererSelfCheck(unittest.TestCase):
             self.skipTest("PyTorch not available")
 
         try:
-            renderer = StructuredLightRenderer(device="cpu", spp=256)  # Higher SPP for cleaner renders
+            renderer = StructuredLightRenderer(device="cpu", spp=256)
         except RuntimeError as exc:  # pragma: no cover
             if "Mitsuba is required" in str(exc):
                 self.skipTest("Mitsuba not available")
@@ -94,7 +94,7 @@ class TestStructuredLightRendererSelfCheck(unittest.TestCase):
             scene_dir = self.output_dir / scene_name
             scene_dir.mkdir(parents=True, exist_ok=True)
             self._save_visualizations(renderer, scene_dir)
-            self._save_normal_render(renderer, scene_dir)  # Normal lighting without projector pattern
+            self._save_normal_render(renderer, scene_dir)
 
         # Verify all scenes were rendered
         for scene_name in SCENE_PRESETS.keys():
