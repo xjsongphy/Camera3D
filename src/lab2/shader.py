@@ -462,9 +462,46 @@ class StructuredLightRenderer:
         return torch.cat(chunks, dim=0)
 
     def render_depth_for_visualization(self) -> torch.Tensor:
+        """Render depth from Mitsuba scene for visualization."""
+        mi = self._require_mitsuba()
+
+        if self._mi_scene_file is not None:
+            # Render depth from XML scene
+            scene = mi.load_file(str(self._mi_scene_file))
+        else:
+            # Create virtual scene with depth sensor
+            if self.camera is None or self.projector is None:
+                raise RuntimeError("Camera and projector must be configured.")
+
+            # Create a simple scene dict for depth rendering
+            scene_dict = build_runtime_scene_dict(
+                mi=mi,
+                camera=self.camera,
+                projector=self.projector,
+                ambient=self.lights.ambient,
+                pattern_path="",  # Not used for depth
+                scene_name=self._scene_name,
+            )
+            # Use a depth integrator
+            scene_dict["integrator"] = {"type": "depth"}
+            # Remove projector for depth-only render
+            scene_dict.pop("projector", None)
+            scene = mi.load_dict(scene_dict)
+
+        # Render depth
+        depth_img = mi.render(scene, spp=16)
+        depth_np = np.array(depth_img, dtype=np.float32)
+        if depth_np.ndim == 3:
+            depth_np = depth_np.mean(axis=-1)
+
+        # Convert to tensor
+        depth_tensor = torch.from_numpy(depth_np).to(device=self.device, dtype=self.dtype)
+
+        # Store as internal depth for gt_corr computation
         if self._depth is None:
-            raise RuntimeError("Scene not loaded.")
-        return self._depth
+            self._depth = depth_tensor
+
+        return depth_tensor
 
     def save_visualization(self, output_dir: str | Path) -> None:
         out = Path(output_dir)

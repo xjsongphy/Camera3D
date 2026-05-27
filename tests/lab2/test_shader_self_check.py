@@ -63,7 +63,7 @@ class TestStructuredLightRendererSelfCheck(unittest.TestCase):
             "t": [0.0, 0.0, 0.0],
         })
 
-        # Setup projector
+        # Setup projector with larger baseline for more depth variation
         renderer.set_projector({
             "width": 640,
             "height": 480,
@@ -72,18 +72,17 @@ class TestStructuredLightRendererSelfCheck(unittest.TestCase):
             "cx": 320.0,
             "cy": 240.0,
             "R": torch.eye(3).tolist(),
-            "t": [0.1, 0.0, 0.0],  # 10cm baseline
+            "t": [0.3, 0.0, 0.0],  # 30cm baseline for better depth visibility
         })
 
         # Use scene with objects to show geometry
         renderer.set_scene_name("sl_marble_objects")  # Has sphere + cube
         renderer.load_scene()  # Uses internal virtual geometry
 
-        # Create stripe pattern to better visualize scene geometry
+        # Create gradient pattern to visualize depth via projector correspondence
         wp = 640
-        # Stripe pattern: vertical stripes to show object shapes
-        pattern = torch.zeros((1, wp), dtype=torch.float32)
-        pattern[:, ::16] = 1.0  # Every 16th pixel is white
+        # Smooth horizontal gradient: different depths map to different pattern values
+        pattern = torch.linspace(0.0, 1.0, wp).unsqueeze(0)
         patterns = pattern  # Single pattern
 
         renderer.set_patterns(patterns)
@@ -111,11 +110,13 @@ class TestStructuredLightRendererSelfCheck(unittest.TestCase):
 
         # Save visualizations to persistent directory
         self._save_visualization_simple(renderer, output_dir=self.output_dir)
+        self._save_depth_visualization(renderer, output_dir=self.output_dir)
 
         # Verify files were created
-        self.assertTrue((self.output_dir / "stripe_pattern.png").exists())
+        self.assertTrue((self.output_dir / "gradient_pattern.png").exists())
         self.assertTrue((self.output_dir / "pattern_render.png").exists())
         self.assertTrue((self.output_dir / "gt_corr_vis.png").exists())
+        self.assertTrue((self.output_dir / "depth_map.png").exists())
 
     def _save_visualization_simple(self, renderer: StructuredLightRenderer, output_dir: Path) -> None:
         """Simple visualization for single pattern self-check."""
@@ -130,25 +131,25 @@ class TestStructuredLightRendererSelfCheck(unittest.TestCase):
         plt.figure(figsize=(8, 2.5))
         plt.plot(pattern_np[0], linewidth=1.5, color='blue')
         plt.ylim(0.0, 1.0)
-        plt.title("Stripe Pattern (Every 16th pixel white)")
+        plt.title("Gradient Pattern (shows depth via correspondence)")
         plt.xlabel("Projector Column")
         plt.ylabel("Intensity")
         plt.tight_layout()
-        plt.savefig(output_dir / "stripe_pattern.png", dpi=150)
+        plt.savefig(output_dir / "gradient_pattern.png", dpi=150)
         plt.close()
 
         # Save rendered image (with gamma correction for visibility)
         img_np = images[0].detach().cpu().numpy()
         _, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
 
-        # Original render
-        im1 = ax1.imshow(img_np, cmap="gray", vmin=0.0, vmax=1.0)
+        # Original render - use viridis colormap to see gradient better
+        im1 = ax1.imshow(img_np, cmap="viridis", vmin=0.0, vmax=1.0)
         ax1.set_title("Pattern Render (Original) - Scene: sl_marble_objects")
         plt.colorbar(im1, ax=ax1)
 
         # Gamma corrected for better visibility
         gamma_corrected = np.power(img_np.clip(0, 1), 0.5)
-        im2 = ax2.imshow(gamma_corrected, cmap="gray", vmin=0.0, vmax=1.0)
+        im2 = ax2.imshow(gamma_corrected, cmap="viridis", vmin=0.0, vmax=1.0)
         ax2.set_title("Pattern Render (Gamma Corrected)")
         plt.colorbar(im2, ax=ax2)
 
@@ -163,6 +164,33 @@ class TestStructuredLightRendererSelfCheck(unittest.TestCase):
         plt.colorbar()
         plt.tight_layout()
         plt.savefig(output_dir / "gt_corr_vis.png", dpi=150)
+        plt.close()
+
+    def _save_depth_visualization(self, renderer: StructuredLightRenderer, output_dir: Path) -> None:
+        """Visualize depth map to show 3D geometry clearly."""
+        import matplotlib.pyplot as plt
+
+        depth = renderer.render_depth_for_visualization()
+        depth_np = depth.cpu().numpy()
+
+        _, axes = plt.subplots(1, 2, figsize=(12, 4))
+
+        # Depth map
+        im1 = axes[0].imshow(depth_np, cmap="plasma")
+        axes[0].set_title("Depth Map (3D Geometry)")
+        axes[0].set_xlabel("Camera X")
+        axes[0].set_ylabel("Camera Y")
+        plt.colorbar(im1, ax=axes[0])
+
+        # Depth histogram
+        axes[1].hist(depth_np.flatten(), bins=50, edgecolor='black')
+        axes[1].set_title("Depth Distribution")
+        axes[1].set_xlabel("Depth (m)")
+        axes[1].set_ylabel("Pixel Count")
+        axes[1].grid(True, alpha=0.3)
+
+        plt.tight_layout()
+        plt.savefig(output_dir / "depth_map.png", dpi=150)
         plt.close()
 
 
