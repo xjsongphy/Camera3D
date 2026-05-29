@@ -37,35 +37,27 @@ class TestStructuredLightRendererSelfCheck(unittest.TestCase):
             self.skipTest("PyTorch not available")
 
         try:
-            renderer = StructuredLightRenderer(device="cpu", spp=256)
-        except RuntimeError as exc:  # pragma: no cover
-            if "Mitsuba is required" in str(exc):
-                self.skipTest("Mitsuba not available")
-            raise
-
-        renderer.set_camera({
-            "width": 640, "height": 480,
-            "fx": 600.0, "fy": 600.0, "cx": 320.0, "cy": 240.0,
-            "R": torch.eye(3).tolist(), "t": [0.0, 0.0, 0.0],
-        })
-        renderer.set_projector({
-            "width": 640, "height": 480,
-            "fx": 600.0, "fy": 600.0, "cx": 320.0, "cy": 240.0,
-            "R": torch.eye(3).tolist(), "t": [0.1, 0.0, 0.0],
-        })
+            from lab2.scene_genertor import create_standard_renderer, SCENE_PRESETS
+        except ImportError as exc:  # pragma: no cover
+            self.skipTest(f"Scene generator not available: {exc}")
 
         # Test all scene presets
-        from lab2.scene_genertor import SCENE_PRESETS
         for scene_name in SCENE_PRESETS.keys():
-            renderer.set_scene_name(scene_name)
-            renderer.load_scene()
+            # Create renderer with standard configuration
+            try:
+                renderer = create_standard_renderer(scene_name, device="cpu", spp=64)
+            except RuntimeError as exc:  # pragma: no cover
+                if "Mitsuba is required" in str(exc):
+                    self.skipTest("Mitsuba not available")
+                raise
 
-            # Sine stripe pattern: clear spatial structure to reveal object shapes
+            # Set stripe pattern
             wp = 640
             x = torch.linspace(0.0, 1.0, wp)
             pattern = (0.5 + 0.5 * torch.sin(2 * np.pi * 8 * x)).unsqueeze(0)
             renderer.set_patterns(pattern)
 
+            # Render
             try:
                 images = renderer.render_images()
             except RuntimeError as exc:  # pragma: no cover
@@ -77,7 +69,7 @@ class TestStructuredLightRendererSelfCheck(unittest.TestCase):
             depth = renderer.render_depth_for_visualization()
 
             # Validate shapes
-            self.assertEqual(tuple(images.shape), (1, 480, 640))
+            self.assertEqual(tuple(images.shape), (1, 480, 640, 3))
             self.assertEqual(tuple(gt_corr.shape), (480, 640))
             self.assertEqual(tuple(depth.shape), (480, 640))
             self.assertTrue(torch.isfinite(images).all().item())
@@ -90,7 +82,7 @@ class TestStructuredLightRendererSelfCheck(unittest.TestCase):
             self.assertGreater(projector_contribution.mean().item(), 0.0,
                                f"Projector should contribute in scene {scene_name}")
 
-            # Save visualizations for this scene
+            # Save visualizations
             scene_dir = self.output_dir / scene_name
             scene_dir.mkdir(parents=True, exist_ok=True)
             self._save_visualizations(renderer, scene_dir)
@@ -121,13 +113,13 @@ class TestStructuredLightRendererSelfCheck(unittest.TestCase):
         plt.savefig(d / "pattern.png", dpi=150)
         plt.close()
 
-        # Render — auto-scale so object brightness variation is visible
+        # Render
         _, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
-        im1 = ax1.imshow(img_np, cmap="gray")
+        im1 = ax1.imshow(img_np)
         ax1.set_title(f"Projected Pattern (range {img_np.min():.3f}-{img_np.max():.3f})")
         plt.colorbar(im1, ax=ax1)
 
-        im2 = ax2.imshow(img_np, cmap="gray", vmin=img_np.min(), vmax=img_np.max())
+        im2 = ax2.imshow(img_np, vmin=img_np.min(), vmax=img_np.max())
         ax2.set_title("Projected Pattern (stretched)")
         plt.colorbar(im2, ax=ax2)
         plt.tight_layout()
@@ -166,22 +158,20 @@ class TestStructuredLightRendererSelfCheck(unittest.TestCase):
         renderer.set_patterns(white_pattern)
 
         # Render with white projector pattern (acts like a uniform light source)
-        # Combined with ambient, this gives a good view of materials
         img = renderer.render_images()[0].detach().cpu().numpy()
         depth = renderer.render_depth_for_visualization().cpu().numpy()
 
         _, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
 
         # Normal render with uniform lighting
-        im1 = ax1.imshow(img, cmap="gray")
+        im1 = ax1.imshow(img)
         ax1.set_title("Normal Render (Uniform Lighting)")
         ax1.set_xlabel("Camera X")
         ax1.set_ylabel("Camera Y")
         plt.colorbar(im1, ax=ax1)
 
-        # Normal render with depth overlay to show geometry
-        im2 = ax2.imshow(img, cmap="gray")
-        # Overlay depth contours to show 3D structure
+        # Normal render with depth overlay
+        im2 = ax2.imshow(img)
         ax2.contour(depth, levels=10, colors="yellow", linewidths=0.5, alpha=0.5)
         ax2.set_title("Normal Render + Depth Contours")
         ax2.set_xlabel("Camera X")

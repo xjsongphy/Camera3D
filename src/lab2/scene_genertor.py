@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import torch
 
 
 @dataclass
@@ -14,7 +15,8 @@ class ScenePreset:
 
 
 SCENE_PRESETS = {
-    "sl_plane_diffuse": ScenePreset("sl_plane_diffuse", "Diffuse plane baseline scene"),
+    "sl_training_board": ScenePreset("sl_training_board", "Training board with random texture (from paper)"),
+    "sl_vases": ScenePreset("sl_vases", "Two vases scene for structured light"),
     "sl_marble_objects": ScenePreset("sl_marble_objects", "Marble-like mixed objects scene"),
     "sl_wood_glass": ScenePreset("sl_wood_glass", "Wood-like + glass mixed material scene"),
     "sl_statue": ScenePreset("sl_statue", "Abstract statue scene for complex geometry"),
@@ -25,6 +27,47 @@ def list_scene_presets() -> list[str]:
     return list(SCENE_PRESETS.keys())
 
 
+# =============================================================================
+# Standard camera and projector configurations for Lab 2
+# =============================================================================
+
+def get_standard_camera_config() -> dict[str, Any]:
+    """Get standard camera configuration for structured light rendering."""
+    return {
+        "width": 640,
+        "height": 480,
+        "fx": 600.0,
+        "fy": 600.0,
+        "cx": 320.0,
+        "cy": 240.0,
+        "R": torch.eye(3).tolist(),
+        "t": [0.0, 0.0, 0.0],
+    }
+
+
+def get_standard_projector_config() -> dict[str, Any]:
+    """Get standard projector configuration for structured light rendering."""
+    return {
+        "width": 640,
+        "height": 480,
+        "fx": 600.0,
+        "fy": 600.0,
+        "cx": 320.0,
+        "cy": 240.0,
+        "R": torch.eye(3).tolist(),
+        "t": [0.1, 0.0, 0.0],  # Slightly offset from camera
+    }
+
+
+def get_standard_render_config() -> dict[str, Any]:
+    """Get standard rendering configuration."""
+    return {
+        "device": "cpu",
+        "spp": 64,
+        "ambient": 0.12,
+    }
+
+
 def _look_at_from_rt(mi: Any, R: Any, t: Any):
     r_np = np.asarray(R, dtype=np.float32)
     t_np = np.asarray(t, dtype=np.float32).reshape(3)
@@ -33,6 +76,35 @@ def _look_at_from_rt(mi: Any, R: Any, t: Any):
     target = c + forward
     up = r_np.T @ np.array([0.0, 1.0, 0.0], dtype=np.float32)
     return mi.ScalarTransform4f.look_at(origin=tuple(c.tolist()), target=tuple(target.tolist()), up=tuple(up.tolist()))
+
+
+def _load_scene_definition(scene_name: str, mi: Any) -> dict[str, Any]:
+    """
+    Load scene definition from external file.
+
+    Args:
+        scene_name: Name of the scene preset
+        mi: Mitsuba module instance
+
+    Returns:
+        dict: Scene objects (geometry + materials)
+    """
+    import importlib
+
+    try:
+        # Import scene definition module from lab2.scenes
+        module = importlib.import_module(f"lab2.scenes.{scene_name}")
+        # Call define_scene function
+        return module.define_scene(mi)
+    except ImportError as e:
+        raise ValueError(
+            f"Scene definition file not found for '{scene_name}'. "
+            f"Expected file: src/lab2/scenes/{scene_name}.py"
+        ) from e
+    except AttributeError as e:
+        raise ValueError(
+            f"Scene definition file '{scene_name}' must define a 'define_scene(mi)' function."
+        ) from e
 
 
 def build_runtime_scene_dict(
@@ -77,98 +149,17 @@ def build_runtime_scene_dict(
             "to_world": _look_at_from_rt(mi, projector.R, projector.t),
             "irradiance": {"type": "bitmap", "filename": pattern_path, "raw": True},
         },
+        # Weak fill light to improve visibility without overwhelming projected patterns.
+        "fill_light": {
+            "type": "point",
+            "position": [0.0, 0.45, 1.05],
+            "intensity": {"type": "rgb", "value": [0.55, 0.55, 0.55]},
+        },
     }
 
-    # Mitsuba rectangle is in XY plane with normal facing +Z.
-    # Camera looks along +Z, so we need to rotate rectangles by -90 deg around X
-    # to make the normal face -Z (toward the camera).
-    _ground_rot = mi.ScalarTransform4f.rotate(axis=(1, 0, 0), angle=-90)
-
-    if scene_name == "sl_plane_diffuse":
-        base["target"] = {
-            "type": "rectangle",
-            "to_world": mi.ScalarTransform4f.translate((0.0, 0.0, 2.0)) @ _ground_rot @ mi.ScalarTransform4f.scale((1.8, 1.2, 1.0)),
-            "bsdf": {"type": "diffuse", "reflectance": {"type": "rgb", "value": [0.7, 0.7, 0.7]}},
-        }
-    elif scene_name == "sl_marble_objects":
-        base["ground"] = {
-            "type": "rectangle",
-            "to_world": mi.ScalarTransform4f.translate((0.0, -0.45, 1.6)) @ _ground_rot @ mi.ScalarTransform4f.scale((2.2, 1.2, 1.0)),
-            "bsdf": {"type": "diffuse", "reflectance": {"type": "rgb", "value": [0.76, 0.76, 0.76]}},
-        }
-        base["sphere"] = {
-            "type": "sphere",
-            "to_world": mi.ScalarTransform4f.translate((-0.35, -0.15, 1.9)) @ mi.ScalarTransform4f.scale((0.24, 0.24, 0.24)),
-            "bsdf": {
-                "type": "roughplastic",
-                "alpha": 0.14,
-                "diffuse_reflectance": {"type": "rgb", "value": [0.83, 0.83, 0.85]},
-            },
-        }
-        base["cube"] = {
-            "type": "cube",
-            "to_world": mi.ScalarTransform4f.translate((0.35, -0.2, 2.05)) @ mi.ScalarTransform4f.scale((0.24, 0.24, 0.24)),
-            "bsdf": {
-                "type": "roughplastic",
-                "alpha": 0.19,
-                "diffuse_reflectance": {"type": "rgb", "value": [0.84, 0.84, 0.87]},
-            },
-        }
-    elif scene_name == "sl_wood_glass":
-        base["ground"] = {
-            "type": "rectangle",
-            "to_world": mi.ScalarTransform4f.translate((0.0, -0.48, 1.75)) @ _ground_rot @ mi.ScalarTransform4f.scale((2.3, 1.2, 1.0)),
-            "bsdf": {
-                "type": "diffuse",
-                "reflectance": {"type": "rgb", "value": [0.56, 0.42, 0.30]},
-            },
-        }
-        base["glass_sphere"] = {
-            "type": "sphere",
-            "to_world": mi.ScalarTransform4f.translate((-0.28, -0.2, 1.9)) @ mi.ScalarTransform4f.scale((0.23, 0.23, 0.23)),
-            "bsdf": {"type": "dielectric", "int_ior": 1.5, "ext_ior": 1.0},
-        }
-        base["wood_cube"] = {
-            "type": "cube",
-            "to_world": mi.ScalarTransform4f.translate((0.35, -0.22, 2.03)) @ mi.ScalarTransform4f.scale((0.22, 0.22, 0.22)),
-            "bsdf": {
-                "type": "diffuse",
-                "reflectance": {"type": "rgb", "value": [0.58, 0.40, 0.25]},
-            },
-        }
-    elif scene_name == "sl_statue":
-        base["ground"] = {
-            "type": "rectangle",
-            "to_world": mi.ScalarTransform4f.translate((0.0, -0.5, 1.6)) @ _ground_rot @ mi.ScalarTransform4f.scale((2.5, 1.5, 1.0)),
-            "bsdf": {"type": "diffuse", "reflectance": {"type": "rgb", "value": [0.7, 0.7, 0.7]}},
-        }
-        # Load statue OBJ file
-        from pathlib import Path
-        statue_path = Path("assets/models/statue.obj")
-        if statue_path.exists():
-            base["statue"] = {
-                "type": "obj",
-                "filename": str(statue_path),
-                "to_world": mi.ScalarTransform4f.translate((0.0, -0.2, 1.8)) @ mi.ScalarTransform4f.scale((0.3, 0.3, 0.3)),
-                "bsdf": {"type": "roughplastic", "alpha": 0.15, "diffuse_reflectance": {"type": "rgb", "value": [0.85, 0.83, 0.80]}},
-            }
-        else:
-            # Fallback: create a statue-like form from multiple spheres
-            base["statue_head"] = {
-                "type": "sphere",
-                "to_world": mi.ScalarTransform4f.translate((0.0, 0.1, 1.9)) @ mi.ScalarTransform4f.scale((0.15, 0.18, 0.15)),
-                "bsdf": {"type": "roughplastic", "alpha": 0.15, "diffuse_reflectance": {"type": "rgb", "value": [0.85, 0.83, 0.80]}},
-            }
-            base["statue_torso"] = {
-                "type": "sphere",
-                "to_world": mi.ScalarTransform4f.translate((0.0, -0.3, 1.85)) @ mi.ScalarTransform4f.scale((0.12, 0.2, 0.1)),
-                "bsdf": {"type": "roughplastic", "alpha": 0.15, "diffuse_reflectance": {"type": "rgb", "value": [0.85, 0.83, 0.80]}},
-            }
-            base["statue_base"] = {
-                "type": "cylinder",
-                "to_world": mi.ScalarTransform4f.translate((0.0, -0.6, 1.75)) @ mi.ScalarTransform4f.scale((0.2, 0.15, 0.2)),
-                "bsdf": {"type": "roughplastic", "alpha": 0.2, "diffuse_reflectance": {"type": "rgb", "value": [0.7, 0.68, 0.65]}},
-            }
+    # Load scene definition from external file
+    scene_objects = _load_scene_definition(scene_name, mi)
+    base.update(scene_objects)
 
     return base
 
@@ -245,15 +236,15 @@ def generate_scene_bundle(scene_root: str | Path, scene_name: str) -> Path:
     else:
         geometry = """<shape type="sphere">
     <transform name="to_world">
-        <translate x="-0.28" y="-0.2" z="1.9"/>
-        <scale x="0.23" y="0.23" z="0.23"/>
+        <translate x="-0.35" y="-0.15" z="1.9"/>
+        <scale x="0.24" y="0.24" z="0.24"/>
     </transform>
     <ref id="mat_glass"/>
 </shape>
 <shape type="cube">
     <transform name="to_world">
-        <translate x="0.35" y="-0.22" z="2.03"/>
-        <scale x="0.22" y="0.22" z="0.22"/>
+        <translate x="0.35" y="-0.2" z="2.05"/>
+        <scale x="0.24" y="0.24" z="0.24"/>
     </transform>
     <ref id="mat_wood"/>
 </shape>
@@ -296,3 +287,69 @@ def generate_all_scene_bundles(scene_root: str | Path) -> list[Path]:
     for name in list_scene_presets():
         out.append(generate_scene_bundle(scene_root=scene_root, scene_name=name))
     return out
+
+
+# =============================================================================
+# Scene loading functions for training pipeline
+# =============================================================================
+
+def load_scene_with_standard_config(
+    renderer: Any,
+    scene_name: str,
+    camera_config: dict[str, Any] | None = None,
+    projector_config: dict[str, Any] | None = None,
+) -> None:
+    """
+    Load a scene with standard camera and projector configurations.
+
+    Args:
+        renderer: StructuredLightRenderer instance
+        scene_name: Name of the scene preset to load
+        camera_config: Optional camera config (uses standard if None)
+        projector_config: Optional projector config (uses standard if None)
+    """
+    if camera_config is None:
+        camera_config = get_standard_camera_config()
+    if projector_config is None:
+        projector_config = get_standard_projector_config()
+
+    renderer.set_scene_name(scene_name)
+    renderer.set_camera(camera_config)
+    renderer.set_projector(projector_config)
+    renderer.load_scene()
+
+
+def create_standard_renderer(
+    scene_name: str,
+    device: str = "cpu",
+    spp: int = 64,
+    camera_config: dict[str, Any] | None = None,
+    projector_config: dict[str, Any] | None = None,
+) -> Any:
+    """
+    Create a renderer with standard configurations for the given scene.
+
+    This is a convenience function for training scripts.
+
+    Args:
+        scene_name: Name of the scene preset to load
+        device: Device to use for rendering
+        spp: Samples per pixel
+        camera_config: Optional camera config (uses standard if None)
+        projector_config: Optional projector config (uses standard if None)
+
+    Returns:
+        Configured StructuredLightRenderer instance
+    """
+    from lab2.shader import StructuredLightRenderer
+
+    renderer = StructuredLightRenderer(device=device, spp=spp)
+
+    load_scene_with_standard_config(
+        renderer,
+        scene_name,
+        camera_config=camera_config,
+        projector_config=projector_config,
+    )
+
+    return renderer

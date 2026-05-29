@@ -38,7 +38,7 @@ class ProjectorConfig:
 
 @dataclass
 class LightConfig:
-    ambient: float = 0.05
+    ambient: float = 0.12
 
 
 # Type aliases for convenience
@@ -124,7 +124,7 @@ class StructuredLightRenderer:
         self._gt_corr = None
 
     def set_lights(self, light_config: dict[str, Any]) -> None:
-        self.lights = LightConfig(ambient=float(light_config.get("ambient", 0.05)))
+        self.lights = LightConfig(ambient=float(light_config.get("ambient", 0.12)))
 
     def set_scene_name(self, scene_name: str) -> None:
         self._scene_name = scene_name
@@ -371,8 +371,9 @@ class StructuredLightRenderer:
             mi, scene = self._make_scene_with_pattern(str(pattern_file))
             img = mi.render(scene, spp=self.spp)
             img_np = np.array(img, dtype=np.float32)
-            if img_np.ndim == 3 and img_np.shape[-1] == 3:
-                img_np = img_np.mean(axis=-1)
+            # Preserve RGB channels to show material differences
+            if img_np.ndim == 2:
+                img_np = img_np[..., None]
 
             out = torch.from_numpy(img_np).to(device=self.device, dtype=self.dtype)
             out = out.clamp(0.0, 1.0)

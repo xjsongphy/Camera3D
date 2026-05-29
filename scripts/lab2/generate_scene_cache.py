@@ -5,7 +5,7 @@ This script renders scenes with Mitsuba to create cache files containing
 depth and ground truth correspondence data required by the renderer.
 
 Usage:
-    python scripts/lab2/generate_scene_cache.py --scene sl_plane_diffuse
+    python scripts/lab2/generate_scene_cache.py --scene sl_marble_objects
 """
 
 from __future__ import annotations
@@ -19,64 +19,26 @@ import numpy as np
 import torch
 
 from lab2.env import setup_env
-from lab2.shader import Camera, Projector, StructuredLightRenderer
-from lab2.scene_genertor import SCENE_PRESETS
+from lab2.shader import StructuredLightRenderer
+from lab2.scene_genertor import SCENE_PRESETS, get_standard_camera_config, get_standard_projector_config
 
 
-def generate_cache_for_scene(scene_dir: Path) -> None:
+def generate_cache_for_scene(scene_name: str, scene_root: Path) -> None:
     """Generate depth and gt_corr cache for a scene."""
-    print(f"Generating cache for {scene_dir.name}...")
+    print(f"Generating cache for {scene_name}...")
 
     setup_env()
 
-    # Setup camera and projector
-    camera = Camera(
-        width=640,
-        height=480,
-        fx=600.0,
-        fy=600.0,
-        cx=320.0,
-        cy=240.0,
-        R=torch.eye(3),
-        t=torch.tensor([0.0, 0.0, 0.0]),
-    )
-
-    projector = Projector(
-        width=640,
-        height=480,
-        fx=600.0,
-        fy=600.0,
-        cx=320.0,
-        cy=240.0,
-        R=torch.eye(3),
-        t=torch.tensor([0.1, 0.0, 0.0]),
-    )
+    # Use standard camera and projector configurations
+    camera_config = get_standard_camera_config()
+    projector_config = get_standard_projector_config()
 
     # Create renderer
     renderer = StructuredLightRenderer(device="cpu")
-
-    # Set camera and projector
-    renderer.set_camera({
-        "width": camera.width,
-        "height": camera.height,
-        "fx": camera.fx,
-        "fy": camera.fy,
-        "cx": camera.cx,
-        "cy": camera.cy,
-        "R": camera.R.tolist(),
-        "t": camera.t.tolist(),
-    })
-
-    renderer.set_projector({
-        "width": projector.width,
-        "height": projector.height,
-        "fx": projector.fx,
-        "fy": projector.fy,
-        "cx": projector.cx,
-        "cy": projector.cy,
-        "R": projector.R.tolist(),
-        "t": projector.t.tolist(),
-    })
+    renderer.set_camera(camera_config)
+    renderer.set_projector(projector_config)
+    renderer.set_scene_name(scene_name)
+    renderer.load_scene()
 
     # Create synthetic depth (no Mitsuba rendering needed for self-check)
     print(f"  Creating synthetic depth for self-check...")
@@ -106,8 +68,6 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    root = Path("assets/scenes")
-
     if args.all:
         scenes = list(SCENE_PRESETS.keys())
     elif args.scene:
@@ -116,13 +76,8 @@ if __name__ == "__main__":
         parser.error("Specify --scene or --all")
 
     for scene_name in scenes:
-        scene_dir = root / scene_name
-        if not scene_dir.exists():
-            print(f"⚠️  Scene directory not found: {scene_dir}")
-            continue
-
         try:
-            generate_cache_for_scene(scene_dir)
+            generate_cache_for_scene(scene_name, Path("assets/scenes"))
         except Exception as e:
             print(f"✗ Failed to generate cache for {scene_name}: {e}")
             import traceback
