@@ -19,7 +19,7 @@ rendering:
   device: auto          # auto / cpu / cuda
 
 output:
-  base_dir: results/lab2
+  base_dir: output/lab2
   log_interval: 10
   save_interval: 50
 
