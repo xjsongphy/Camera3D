@@ -55,7 +55,10 @@ def soft_correspondence_loss(
 
     # Compute penalty matrix: |n - gt_corr[m]| for all m, n
     # Shape: [H, W, Wp]
-    diff = index[None, None, :] - gt_corr[..., None]
+    # Replace NaN gt_corr with 0 before subtraction to avoid NaN in backward pass.
+    # Invalid pixels' err contribution is zeroed out later.
+    safe_gt = torch.where(valid, gt_corr, torch.zeros_like(gt_corr))
+    diff = index[None, None, :] - safe_gt[..., None]
 
     if penalty == "l1":
         err = diff.abs()
@@ -65,6 +68,9 @@ def soft_correspondence_loss(
         err = (diff.abs() > 1.0).to(dtype)
     else:
         raise ValueError(f"Unknown penalty: {penalty}")
+
+    # Zero out error for invalid pixels so NaN never enters the computation graph
+    err = torch.where(valid[..., None], err, torch.zeros_like(err))
 
     # Softmax over projector columns (temperature-scaled)
     # prob[m, n] = softmax(tau * scores[m, n]) over n
