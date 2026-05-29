@@ -82,10 +82,10 @@ def load_config(config_path: str) -> dict:
 
 
 def create_output_dir(base_dir: str, scene: str, decoder: str, penalty: str) -> Path:
-    """创建带时间戳的输出目录。"""
+    """创建带时间戳的输出目录（在 runs/ 子目录下）。"""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     dir_name = f"{timestamp}_{scene}_{decoder}_{penalty}"
-    output_dir = Path(base_dir) / dir_name
+    output_dir = Path(base_dir) / "runs" / dir_name
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
 
@@ -437,6 +437,15 @@ def generate_comparison(
     print(f"  ZNCC     MAE={zncc_metrics['mae']:.3f}  RMSE={zncc_metrics['rmse']:.3f}  acc<1px={zncc_metrics['acc_1']:.3f}")
     print(f"  ZNCC-NN  MAE={nn_metrics['mae']:.3f}  RMSE={nn_metrics['rmse']:.3f}  acc<1px={nn_metrics['acc_1']:.3f}")
 
+    # 创建符号链接（或路径记录文件）指向两个 decoder 的 run 目录
+    try:
+        comparison_dir.joinpath("zncc_run").symlink_to(zncc_dir, target_is_directory=True)
+        comparison_dir.joinpath("zncc_nn_run").symlink_to(zncc_nn_dir, target_is_directory=True)
+    except OSError:
+        # Windows 上不支持符号链接，用文本文件记录路径
+        (comparison_dir / "zncc_run.txt").write_text(str(zncc_dir), encoding="utf-8")
+        (comparison_dir / "zncc_nn_run.txt").write_text(str(zncc_nn_dir), encoding="utf-8")
+
 
 # =============================================================================
 # 单个 decoder 训练
@@ -448,7 +457,7 @@ def run_single_decoder(
     decoder_name: str,
     cfg: dict,
     device: torch.device,
-    output_dir: Path,
+    output_dir: Path | None,
 ) -> Path:
     """
     运行单个 decoder 的训练。
@@ -458,7 +467,7 @@ def run_single_decoder(
         decoder_name: 'zncc' 或 'zncc_nn'
         cfg: 配置 dict
         device: torch 设备
-        output_dir: 输出目录
+        output_dir: 输出目录（None 时自动生成）
 
     Returns:
         输出目录路径
@@ -469,6 +478,11 @@ def run_single_decoder(
 
     decoder_type = DecoderType.ZNCC if decoder_name == "zncc" else DecoderType.ZNCC_NN
     penalty = training.get("penalty", "l1")
+
+    # 自动生成输出目录（如果未指定）
+    if output_dir is None:
+        base_dir = output_cfg.get("base_dir", "output/lab2")
+        output_dir = create_output_dir(base_dir, scene_name, decoder_name, penalty)
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -658,19 +672,21 @@ def main() -> None:
     decoder = cfg.get("decoder", "zncc")
 
     if decoder == "both":
-        # 运行两个 decoder，然后生成对比
+        # 运行两个 decoder（各自独立生成 run 目录），然后生成对比
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        comparison_dir = Path(base_dir) / f"{timestamp}_{scene_name}_comparison_{penalty}"
+        comparison_dir = Path(base_dir) / "runs" / f"{timestamp}_{scene_name}_comparison_{penalty}"
 
+        # 分别运行两个 decoder，各自生成独立 run 目录
         zncc_dir = run_single_decoder(
             scene_name, "zncc", cfg, device,
-            comparison_dir / "zncc",
+            None,  # 自动生成目录
         )
         zncc_nn_dir = run_single_decoder(
             scene_name, "zncc_nn", cfg, device,
-            comparison_dir / "zncc_nn",
+            None,  # 自动生成目录
         )
 
+        # 生成对比结果（包含符号链接指向两个 run 目录）
         generate_comparison(zncc_dir, zncc_nn_dir, comparison_dir)
     else:
         output_dir = create_output_dir(base_dir, scene_name, decoder, penalty)
