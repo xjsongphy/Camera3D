@@ -36,6 +36,22 @@ class ResidualMLP(nn.Module):
             nn.ReLU(),
             nn.Linear(dim, dim),
         )
+        self._init_weights()
+
+    def _init_weights(self) -> None:
+        """
+        Initialization for stable residual training:
+        - First linear: Kaiming for ReLU.
+        - Second linear: zero init so the residual branch starts from identity.
+        """
+        first = self.net[0]
+        second = self.net[2]
+
+        nn.init.kaiming_uniform_(first.weight, a=0.0, nonlinearity="relu")
+        nn.init.zeros_(first.bias)
+
+        nn.init.zeros_(second.weight)
+        nn.init.zeros_(second.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """

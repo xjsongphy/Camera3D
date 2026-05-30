@@ -94,12 +94,19 @@ class StructuredLightRenderer:
             raise ValueError(f"Expected shape {shape}, got {tuple(t.shape)}")
         return t
 
+    def _to_cpu_tensor(self, x: Any, shape: tuple[int, ...] | None = None) -> torch.Tensor:
+        """Parse config tensors on host so numpy conversion paths remain valid."""
+        t = torch.as_tensor(x, dtype=self.dtype, device="cpu")
+        if shape is not None and tuple(t.shape) != shape:
+            raise ValueError(f"Expected shape {shape}, got {tuple(t.shape)}")
+        return t
+
     def _parse_intrinsics_extrinsics(self, config: dict[str, Any], is_camera: bool) -> CameraConfig | ProjectorConfig:
         w = int(config["width"])
         h = int(config["height"])
 
         if "K" in config:
-            K = self._to_tensor(config["K"], (3, 3))
+            K = self._to_cpu_tensor(config["K"], (3, 3))
             fx, fy = float(K[0, 0]), float(K[1, 1])
             cx, cy = float(K[0, 2]), float(K[1, 2])
         else:
@@ -108,8 +115,9 @@ class StructuredLightRenderer:
             cx = float(config.get("cx", (w - 1) * 0.5))
             cy = float(config.get("cy", (h - 1) * 0.5))
 
-        R = self._to_tensor(config.get("R", torch.eye(3)), (3, 3))
-        t = self._to_tensor(config.get("t", torch.zeros(3)), (3,))
+        # Keep extrinsics on CPU for Mitsuba scene dictionary construction.
+        R = self._to_cpu_tensor(config.get("R", torch.eye(3)), (3, 3))
+        t = self._to_cpu_tensor(config.get("t", torch.zeros(3)), (3,))
 
         if is_camera:
             return CameraConfig(w, h, fx, fy, cx, cy, R, t)
@@ -209,8 +217,9 @@ class StructuredLightRenderer:
         dirs_cam = torch.stack([x, y, torch.ones_like(x)], dim=-1)
         dirs_cam = dirs_cam / torch.norm(dirs_cam, dim=-1, keepdim=True)
 
-        R_cw = cam.R
-        Cw = -(R_cw.T @ cam.t)
+        R_cw = cam.R.to(device=self.device, dtype=self.dtype)
+        t_cw = cam.t.to(device=self.device, dtype=self.dtype)
+        Cw = -(R_cw.T @ t_cw)
         dirs_w = dirs_cam @ R_cw
         dirs_w = dirs_w / torch.norm(dirs_w, dim=-1, keepdim=True)
         rays_o = Cw.view(1, 1, 3).expand(cam.height, cam.width, 3)
@@ -232,7 +241,9 @@ class StructuredLightRenderer:
         pts_world = rays_o + rays_d * self._depth[..., None]
 
         proj = self.projector
-        pts_proj = pts_world @ proj.R.T + proj.t.view(1, 1, 3)
+        R_proj = proj.R.to(device=self.device, dtype=self.dtype)
+        t_proj = proj.t.to(device=self.device, dtype=self.dtype)
+        pts_proj = pts_world @ R_proj.T + t_proj.view(1, 1, 3)
         z = pts_proj[..., 2]
 
         valid = z > 1e-6

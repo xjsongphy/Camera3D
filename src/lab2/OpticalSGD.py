@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import torch
@@ -59,6 +60,10 @@ class OptimizerConfig:
     log_interval: int = 10
     save_interval: int = 50
     output_dir: str | Path | None = None
+    optimizer_name: Literal["adam", "rmsprop"] = "adam"
+    lr_decay_step: int = 0
+    lr_decay_gamma: float = 1.0
+    projector_height: int = 1080  # For 2D pattern visualization
 
 
 def initialize_patterns(
@@ -138,8 +143,10 @@ class OpticalSGDOptimizer:
         self.patterns: torch.nn.Parameter | None = None
         self.decoder: nn.Module | None = None
         self.optimizer: torch.optim.Optimizer | None = None
+        self.scheduler: torch.optim.lr_scheduler._LRScheduler | None = None
         self.iteration = 0
         self.loss_history: list[float] = []
+        self.pattern_snapshots: list[torch.Tensor] = []  # Store pattern snapshots for GIF
 
         # Ensure output directory exists
         if self.config.output_dir is not None:
@@ -194,16 +201,30 @@ class OpticalSGDOptimizer:
         # Patterns have two gradient paths:
         # 1. patterns -> renderer -> images -> decoder -> loss
         # 2. patterns -> projector feature/codebook -> decoder -> loss
+        if self.config.optimizer_name == "rmsprop":
+            opt_ctor = torch.optim.RMSprop
+        else:
+            opt_ctor = torch.optim.Adam
+
         if self.config.decoder_type == DecoderType.ZNCC_NN:
-            self.optimizer = torch.optim.Adam([
+            self.optimizer = opt_ctor([
                 {"params": [self.patterns], "lr": self.config.learning_rate},
                 {"params": self.decoder.parameters(), "lr": self.config.decoder_learning_rate},
             ])
         else:
             # ZNCC decoder has no learnable parameters
-            self.optimizer = torch.optim.Adam(
+            self.optimizer = opt_ctor(
                 [self.patterns], lr=self.config.learning_rate
             )
+
+        if self.config.lr_decay_step > 0 and self.config.lr_decay_gamma != 1.0:
+            self.scheduler = torch.optim.lr_scheduler.StepLR(
+                self.optimizer,
+                step_size=self.config.lr_decay_step,
+                gamma=self.config.lr_decay_gamma,
+            )
+        else:
+            self.scheduler = None
 
         # Sync to renderer
         self.renderer.update_patterns(self.patterns.detach())
@@ -262,6 +283,8 @@ class OpticalSGDOptimizer:
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
+        if self.scheduler is not None:
+            self.scheduler.step()
 
         # Apply constraints (value clamping, frequency filtering)
         with torch.no_grad():
@@ -324,7 +347,10 @@ class OpticalSGDOptimizer:
 
         output_path = Path(self.config.output_dir)
 
-        # Save patterns
+        # Save pattern snapshot for GIF
+        self.pattern_snapshots.append(self.patterns.detach().cpu().clone())
+
+        # Save patterns as 2D visualization
         fig = self.plot_patterns()
         fig.savefig(output_path / f"patterns_iter_{self.iteration}.png", dpi=150, bbox_inches='tight')
         plt.close(fig)
@@ -334,31 +360,28 @@ class OpticalSGDOptimizer:
         fig.savefig(output_path / f"spectrum_iter_{self.iteration}.png", dpi=150, bbox_inches='tight')
         plt.close(fig)
 
-        # Save loss curve
-        fig = self.plot_loss_curve()
-        fig.savefig(output_path / f"loss_iter_{self.iteration}.png", dpi=150, bbox_inches='tight')
-        plt.close(fig)
-
     def plot_patterns(self) -> Figure:
-        """Plot current patterns."""
+        """Plot current patterns as 2D matrices (QR-code style)."""
         if self.patterns is None:
             raise RuntimeError("No patterns to plot")
 
         K, Wp = self.patterns.shape
+        Hp = self.config.projector_height
         patterns_np = self.patterns.detach().cpu().numpy()
 
-        fig, axes = plt.subplots(K, 1, figsize=(10, 2 * K))
+        # Reshape 1D patterns to 2D by tiling vertically
+        patterns_2d = np.tile(patterns_np[:, None, :], (1, Hp, 1))  # [K, Hp, Wp]
+
+        fig, axes = plt.subplots(1, K, figsize=(4 * K, 4))
         if K == 1:
             axes = [axes]
 
         for k in range(K):
-            axes[k].plot(patterns_np[k], linewidth=1.5)
-            axes[k].set_ylim(self.config.min_value, self.config.max_value)
-            axes[k].set_ylabel("Intensity")
+            im = axes[k].imshow(patterns_2d[k], cmap='gray', vmin=self.config.min_value, vmax=self.config.max_value)
             axes[k].set_title(f"Pattern {k + 1}")
-            axes[k].grid(True, alpha=0.3)
+            axes[k].axis('off')
+            plt.colorbar(im, ax=axes[k], fraction=0.046, pad=0.04)
 
-        axes[-1].set_xlabel("Projector Column")
         plt.tight_layout()
         return fig
 
@@ -403,6 +426,67 @@ class OpticalSGDOptimizer:
         ax.grid(True, alpha=0.3)
         plt.tight_layout()
         return fig
+
+    def generate_pattern_evolution_gif(self) -> None:
+        """Generate GIF from pattern evolution snapshots."""
+        if not self.pattern_snapshots or self.config.output_dir is None:
+            return
+
+        try:
+            import imageio.v3 as iio
+        except ImportError:
+            print("  Warning: imageio not available, skipping GIF generation")
+            return
+
+        output_path = Path(self.config.output_dir)
+        K, Wp = self.pattern_snapshots[0].shape
+        Hp = self.config.projector_height
+
+        # Generate frames for GIF
+        frames = []
+        for i, pattern_snapshot in enumerate(self.pattern_snapshots):
+            patterns_np = pattern_snapshot.numpy()
+            patterns_2d = np.tile(patterns_np[:, None, :], (1, Hp, 1))  # [K, Hp, Wp]
+
+            # Create combined visualization of all patterns
+            n_cols = min(K, 5)
+            n_rows = (K + n_cols - 1) // n_cols
+            fig, axes = plt.subplots(n_rows, n_cols, figsize=(3 * n_cols, 3 * n_rows))
+            if K == 1:
+                axes = np.array([[axes]])
+            elif n_rows == 1:
+                axes = axes.reshape(1, -1)
+            elif n_cols == 1:
+                axes = axes.reshape(-1, 1)
+
+            for k in range(K):
+                row, col = k // n_cols, k % n_cols
+                axes[row, col].imshow(patterns_2d[k], cmap='gray', vmin=0.0, vmax=1.0)
+                axes[row, col].set_title(f"P{k + 1}", fontsize=10)
+                axes[row, col].axis('off')
+
+            # Hide empty subplots
+            for k in range(K, n_rows * n_cols):
+                row, col = k // n_cols, k % n_cols
+                axes[row, col].axis('off')
+
+            fig.suptitle(f"Iteration {i + 1}", fontsize=12)
+            plt.tight_layout()
+
+            # Save frame to memory
+            from io import BytesIO
+            buf = BytesIO()
+            fig.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+            buf.seek(0)
+            frame = iio.imread(buf)
+            frames.append(frame)
+            plt.close(fig)
+            buf.close()
+
+        # Save as GIF
+        if frames:
+            iio.imwrite(output_path / "pattern_evolution.gif", frames, duration=500, loop=0)
+            print(f"  Saved pattern evolution GIF: {output_path / 'pattern_evolution.gif'}")
 
 
 def create_optimizer(
