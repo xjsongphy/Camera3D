@@ -1,28 +1,24 @@
-# sl_marble_objects 场景训练配置
-# 用法: uv run python scripts/lab2/run_training.py --config configs/lab2/sl_marble_objects.yaml
-# 覆盖迭代数: uv run python scripts/lab2/run_training.py --config configs/lab2/sl_marble_objects.yaml --iterations 500
-# 续训: uv run python scripts/lab2/run_training.py --config configs/lab2/sl_marble_objects.yaml --resume results/lab2/xxx/checkpoint_final/checkpoint.pt
-
-scene: sl_marble_objects
-decoder: both          # 运行两个 decoder 并自动生成对比图
+﻿scene: sl_marble_objects
+decoder: both
 
 training:
-  iterations: 200
+  iterations: 500
   learning_rate: 0.01
-  decoder_lr: 0.01     # 仅 zncc_nn 使用
-  num_patterns: 4
-  neighborhood: 1       # 1, 3, 5
-  tau: 50.0             # softmax 温度: 小→平滑梯度弱, 大→尖锐梯度强, 50 是平衡值
-  penalty: l1           # l1 / zero_tolerance / one_tolerance
-  init_mode: random     # random / sine / constant / stripe
+  decoder_lr: 0.001
+  optimizer: rmsprop
+  lr_decay_step: 350
+  lr_decay_gamma: 0.5
+  num_patterns: 5
+  neighborhood: 3
+  tau: 50.0
+  penalty: l1
+  init_mode: random
 
 rendering:
   spp: 64
-  device: auto          # auto / cpu / cuda
+  device: auto
 
 output:
-  base_dir: output/lab2
+  base_dir: outputs/lab2
   log_interval: 10
   save_interval: 50
-
-# resume: null          # 取消注释并填入 checkpoint.pt 路径可续训

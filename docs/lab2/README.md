@@ -1,109 +1,86 @@
-# Lab 2: 结构光Pattern自动优化
+# Lab 2 README
 
-基于Optical SGD的结构光投影图案优化闭环实验，复现Chen et al., CVPR 2020论文核心思想。
+Lab2 复现结构光 Pattern 优化闭环，包括场景渲染、自监督优化、解码器对比与结果可视化。
 
-## 实验内容
-
-- **合成渲染器**：Mitsuba渲染的投影仪-相机-场景系统
-- **OpticalSGD优化器**：有限差分与自动微分两种梯度计算方式
-- **Decoder对比**：ZNCC vs ZNCC-NN
-- **材质鲁棒性**：大理石、木头、玻璃等材质测试
-
-## 快速开始
+## 依赖安装
 
 ```bash
-# 同步依赖（需要Python 3.12）
+# Lab2 依赖（推荐 Python 3.12）
 uv sync --group lab2
+```
 
-# 生成场景（环境自动设置）
+## 场景与配置
+
+- 场景定义：`src/lab2/scenes/`
+- 场景入口：`src/lab2/scene_genertor.py`（`SCENE_PRESETS`）
+- 训练配置：`configs/lab2/*.yaml`
+
+当前常用场景示例：
+
+- `sl_training_board`
+- `sl_vases`
+- `sl_marble_objects`
+- `sl_wood_glass`
+- `sl_statue`
+
+## 常用命令
+
+### 1) 生成场景 XML 资源
+
+```bash
 uv run python scripts/lab2/generate_lab2_scenes.py
+```
 
-# 运行训练
-uv run python scripts/lab2/run_training.py --scene sl_plane_diffuse --decoder zncc --penalty l1
+### 2) 生成场景缓存（depth / gt_corr）
 
-# 梯度对比
-uv run python scripts/lab2/compare_gradients.py --scene sl_plane_diffuse
+```bash
+# 单个场景
+uv run python scripts/lab2/generate_scene_cache.py --scene sl_marble_objects
 
-# 渲染器自检
+# 全部场景
+uv run python scripts/lab2/generate_scene_cache.py --all
+```
+
+### 3) 渲染器自检
+
+```bash
+uv run python tests/lab2/test_shader_self_check.py
+# 或
 uv run pytest tests/lab2/test_shader_self_check.py -v
 ```
 
-## 环境依赖
+### 4) 训练
 
-### Python版本
-- **必须使用 Python 3.12**
-
-### Python依赖
 ```bash
-uv sync --group lab2
+# 使用场景配置
+uv run python scripts/lab2/run_training.py --config configs/lab2/sl_marble_objects.yaml
+
+# 用默认配置并覆盖参数
+uv run python scripts/lab2/run_training.py --config configs/lab2/default.yaml --scene sl_wood_glass --decoder zncc_nn --iterations 500
 ```
 
-包含：PyTorch, Mitsuba 3.x, Drjit, OpenCV, Matplotlib等
+### 5) 梯度对比（若使用）
 
-### macOS额外依赖
-
-**重要**：Lab2使用统一的环境设置模块，环境变量会自动配置！
-
-运行任何lab2脚本时会自动：
-- 检测并设置 `DRJIT_LIBLLVM_PATH`
-- 启用 `OPENCV_IO_ENABLE_OPENEXR=1`
-
-**仅需手动安装LLVM**：
 ```bash
-brew install llvm
+uv run python scripts/lab2/compare_gradients.py --help
 ```
 
-然后直接运行脚本即可，无需手动设置环境变量。
+## 输出目录
 
-### 验证安装
-```bash
-# 检查依赖状态
-uv run python -c "from lab2 import env; env.print_dependency_status()"
+训练输出位于：`results/lab2/runs/`
 
-# 运行自检测试
-uv run pytest tests/lab2/test_shader_self_check.py -v
-```
+典型 run 目录内容：
 
-## 作业文档
-
-- [作业要求](lab2.md)
-- [论文笔记](paper.md)
-- [讲义](lab2-讲义.md)
-- [原始论文](Auto-Tuning Structured Light by Optical Stochastic Gradient Descent.pdf)
-
-## 输出结构
-
-```
-results/lab2/
-├─ 20250526_183000_sl_plane_diffuse_zncc_l1/
-│  ├─ config.json           # 训练配置
-│  ├─ scene_info.txt        # 场景信息
-│  ├─ patterns_final.png    # 最终图案
-│  ├─ training_log.csv      # 训练日志
-│  └─ checkpoints/          # 检查点
-└─ gradient_comparison/
-   └─ 20250526_183000_gradient_comparison/
-      ├─ config.json
-      └─ gradient_comparison.png
-```
+- `config.json`
+- `training_log.csv`
+- `patterns_initial.pt`
+- `patterns_final.pt`
+- `patterns_final.png`
+- `loss_curve.png`
+- `metrics_final.json`
+- `rendered_final.png`
 
 ## 常见问题
 
-### Q: 测试跳过并提示Mitsuba不可用？
-A: 确保已安装LLVM并设置环境变量：
-```bash
-export DRJIT_LIBLLVM_PATH=$(brew --prefix llvm)/lib
-```
-
-### Q: OpenEXR codec错误？
-A: 设置环境变量：
-```bash
-export OPENCV_IO_ENABLE_OPENEXR=1
-```
-
-### Q: Python版本不匹配？
-A: 确保使用Python 3.12：
-```bash
-uv python install 3.12
-uv sync --group lab2
-```
+- `jitc_llvm_init(): LLVM API initialization failed ..`：通常是后端初始化警告，若训练/测试继续且通过，可先忽略。
+- Mitsuba 不可用：先确认 `uv sync --group lab2` 完整执行，且 Python 版本为 3.12。
