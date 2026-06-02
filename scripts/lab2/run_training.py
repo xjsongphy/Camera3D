@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import argparse
+import copy
 import csv
 import json
 import random
@@ -8,6 +9,10 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+
+# Set matplotlib backend to non-interactive Agg backend for headless operation
+import matplotlib
+matplotlib.use('Agg')
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -17,6 +22,16 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from lab2.OpticalSGD import DecoderType, OptimizerConfig, OpticalSGDOptimizer
+from lab2.analysis import (
+    export_history_summaries,
+    export_raw_histories,
+    generate_pattern_evolution_gif,
+    generate_spectrum_evolution_gif,
+    plot_frequency_spectrum,
+    plot_loss_curve,
+    plot_patterns,
+    plot_projector_response_curve,
+)
 from lab2.decoder import correspondence_metrics, hard_decode
 from lab2.run_logging import TimingTracker, start_run_logging
 from lab2.scene_genertor import SCENE_PRESETS, create_standard_renderer
@@ -52,11 +67,37 @@ def create_output_dir(base_dir: str, scene: str, decoder: str, penalty: str) -> 
     return out
 
 
+def resolve_decoder_variant(decoder_name: str, training_cfg: dict) -> tuple[DecoderType, bool, str]:
+    if decoder_name == "zncc":
+        return DecoderType.ZNCC, False, "zncc"
+    if decoder_name == "zncc_nn_response":
+        return DecoderType.ZNCC_NN, True, "zncc_nn_response"
+    if decoder_name == "zncc_nn":
+        use_curve = bool(training_cfg.get("use_projector_response_curve", False))
+        variant_name = "zncc_nn_response" if use_curve else "zncc_nn"
+        return DecoderType.ZNCC_NN, use_curve, variant_name
+    raise ValueError(f"Unknown decoder variant: {decoder_name}")
+
+
+def resolve_max_frequency(training_cfg: dict, projector_width: int) -> float | None:
+    max_frequency = training_cfg.get("max_frequency")
+    if max_frequency is not None:
+        return float(max_frequency)
+
+    ratio = training_cfg.get("max_frequency_ratio")
+    if ratio is None:
+        return None
+
+    nyquist = projector_width / 2.0
+    return float(ratio) * nyquist
+
+
 def init_renderer(scene_name: str, device: torch.device, spp: int):
     renderer = create_standard_renderer(scene_name, device=str(device), spp=spp)
     renderer._depth = None
     renderer._gt_corr = None
     renderer.render_depth_for_visualization()
+    renderer.calibrate_autodiff_gain()
     return renderer
 
 
@@ -82,6 +123,9 @@ def save_checkpoint(optimizer: OpticalSGDOptimizer, log_rows: list[dict], ckpt_d
         "optimizer_state_dict": optimizer.optimizer.state_dict() if optimizer.optimizer is not None else None,
         "scheduler_state_dict": optimizer.scheduler.state_dict() if optimizer.scheduler is not None else None,
         "loss_history": optimizer.loss_history,
+        "history_iterations": optimizer.history_iterations,
+        "pattern_history": optimizer.pattern_history,
+        "decoder_param_history": optimizer.decoder_param_history,
     }
     torch.save(state, ckpt_dir / "checkpoint.pt")
     if log_rows:
@@ -94,13 +138,14 @@ def load_checkpoint(ckpt_path: Path, optimizer: OpticalSGDOptimizer) -> int:
     if state.get("decoder_state_dict") is not None and optimizer.decoder is not None:
         optimizer.decoder.load_state_dict(state["decoder_state_dict"])
 
+    opt_ctor = torch.optim.RMSprop if optimizer.config.optimizer_name == "rmsprop" else torch.optim.Adam
     if optimizer.config.decoder_type == DecoderType.ZNCC_NN:
-        optimizer.optimizer = torch.optim.Adam([
+        optimizer.optimizer = opt_ctor([
             {"params": [optimizer.patterns], "lr": optimizer.config.learning_rate},
             {"params": list(optimizer.decoder.parameters()), "lr": optimizer.config.decoder_learning_rate},
         ])
     else:
-        optimizer.optimizer = torch.optim.Adam([optimizer.patterns], lr=optimizer.config.learning_rate)
+        optimizer.optimizer = opt_ctor([optimizer.patterns], lr=optimizer.config.learning_rate)
 
     if state.get("optimizer_state_dict") is not None:
         optimizer.optimizer.load_state_dict(state["optimizer_state_dict"])
@@ -109,6 +154,9 @@ def load_checkpoint(ckpt_path: Path, optimizer: OpticalSGDOptimizer) -> int:
 
     optimizer.loss_history = state.get("loss_history", [])
     optimizer.iteration = state.get("iteration", 0)
+    optimizer.history_iterations = state.get("history_iterations", [])
+    optimizer.pattern_history = state.get("pattern_history", [])
+    optimizer.decoder_param_history = state.get("decoder_param_history", {})
     optimizer.renderer.update_patterns(optimizer.patterns.detach())
     return optimizer.iteration
 
@@ -139,13 +187,18 @@ def render_and_save_gt(renderer, output_dir: Path) -> None:
 
 def save_final_visualizations(optimizer: OpticalSGDOptimizer, output_dir: Path) -> None:
     for plot_fn, name in [
-        (optimizer.plot_patterns, "patterns_final"),
-        (optimizer.plot_frequency_spectrum, "spectrum_final"),
-        (optimizer.plot_loss_curve, "loss_curve"),
+        (lambda: plot_patterns(optimizer), "patterns_final"),
+        (lambda: plot_frequency_spectrum(optimizer), "spectrum_final"),
+        (lambda: plot_loss_curve(optimizer), "loss_curve"),
     ]:
         fig = plot_fn()
         fig.savefig(output_dir / f"{name}.png", dpi=150, bbox_inches="tight")
         plt.close(fig)
+
+    response_curve_fig = plot_projector_response_curve(optimizer)
+    if response_curve_fig is not None:
+        response_curve_fig.savefig(output_dir / "projector_response_curve.png", dpi=150, bbox_inches="tight")
+        plt.close(response_curve_fig)
 
 
 def evaluate_and_save(renderer, optimizer: OpticalSGDOptimizer, output_dir: Path) -> dict:
@@ -197,13 +250,13 @@ def run_single_decoder(scene_name: str, decoder_name: str, cfg: dict, device: to
     output_cfg = cfg["output"]
     seed = training.get("seed")
 
-    decoder_type = DecoderType.ZNCC if decoder_name == "zncc" else DecoderType.ZNCC_NN
+    decoder_type, use_projector_response_curve, variant_name = resolve_decoder_variant(decoder_name, training)
     penalty = training.get("penalty", "l1")
     if output_dir is None:
-        output_dir = create_output_dir(output_cfg.get("base_dir", "output/lab2"), scene_name, decoder_name, penalty)
+        output_dir = create_output_dir(output_cfg.get("base_dir", "output/lab2"), scene_name, variant_name, penalty)
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    log_session = start_run_logging(output_dir, prefix=f"{scene_name}_{decoder_name}")
+    log_session = start_run_logging(output_dir, prefix=f"{scene_name}_{variant_name}")
     timer = TimingTracker()
     run_t0 = time.perf_counter()
     timing_saved = False
@@ -211,7 +264,7 @@ def run_single_decoder(scene_name: str, decoder_name: str, cfg: dict, device: to
     try:
         print(f"\n{'='*60}")
         print(f"  scene: {scene_name}")
-        print(f"  decoder: {decoder_name}")
+        print(f"  decoder: {variant_name}")
         print(f"  iterations: {training['iterations']}")
         print(f"  device: {device}")
         print(f"  output: {output_dir}")
@@ -224,7 +277,13 @@ def run_single_decoder(scene_name: str, decoder_name: str, cfg: dict, device: to
             set_random_seed(int(seed))
 
         with timer.phase("save_config_snapshot"):
-            save_config_snapshot(output_dir, {"scene": scene_name, "decoder": decoder_name, "training": training, "rendering": rendering, "output": output_cfg})
+            save_config_snapshot(output_dir, {
+                "scene": scene_name,
+                "decoder": variant_name,
+                "training": training,
+                "rendering": rendering,
+                "output": output_cfg,
+            })
         with timer.phase("init_renderer"):
             renderer = init_renderer(scene_name, device, rendering.get("spp", 64))
         with timer.phase("render_and_save_gt"):
@@ -237,7 +296,10 @@ def run_single_decoder(scene_name: str, decoder_name: str, cfg: dict, device: to
             tau=training.get("tau", 50.0),
             decoder_type=decoder_type,
             neighborhood_size=training.get("neighborhood", 1),
+            use_projector_response_curve=use_projector_response_curve,
             penalty=penalty,
+            max_frequency=training.get("max_frequency"),
+            frequency_weight=training.get("frequency_weight", 1.0),
             log_interval=output_cfg.get("log_interval", 10),
             save_interval=output_cfg.get("save_interval", 50),
             output_dir=str(output_dir),
@@ -250,11 +312,10 @@ def run_single_decoder(scene_name: str, decoder_name: str, cfg: dict, device: to
         with timer.phase("create_optimizer"):
             optimizer = OpticalSGDOptimizer(renderer, optimizer_config)
             projector_width = renderer.projector.width
+            optimizer.config.max_frequency = resolve_max_frequency(training, projector_width)
 
         with timer.phase("initialize_patterns"):
             patterns = optimizer.initialize_patterns(training.get("num_patterns", 4), projector_width, training.get("init_mode", "random"))
-        with timer.phase("save_initial_patterns"):
-            torch.save(patterns.detach().cpu(), output_dir / "patterns_initial.pt")
 
         resume_ckpt = cfg.get("resume")
         start_iter = 0
@@ -289,14 +350,18 @@ def run_single_decoder(scene_name: str, decoder_name: str, cfg: dict, device: to
         total_time = time.time() - start_time
         with timer.phase("save_training_log"):
             save_training_log(log_rows, output_dir)
-        with timer.phase("save_final_patterns"):
-            torch.save(optimizer.patterns.detach().cpu(), output_dir / "patterns_final.pt")
         with timer.phase("save_final_checkpoint"):
             save_checkpoint(optimizer, log_rows, output_dir / "checkpoint_final")
         with timer.phase("save_final_visualizations"):
             save_final_visualizations(optimizer, output_dir)
+        with timer.phase("export_raw_histories"):
+            export_raw_histories(optimizer, output_dir)
+        with timer.phase("export_history_summaries"):
+            export_history_summaries(optimizer, output_dir)
         with timer.phase("generate_pattern_gif"):
-            optimizer.generate_pattern_evolution_gif()
+            generate_pattern_evolution_gif(optimizer)
+        with timer.phase("generate_spectrum_gif"):
+            generate_spectrum_evolution_gif(optimizer)
         with timer.phase("evaluate_and_save"):
             metrics = evaluate_and_save(renderer, optimizer, output_dir)
         try:
@@ -321,7 +386,7 @@ def run_single_decoder(scene_name: str, decoder_name: str, cfg: dict, device: to
         log_session.close()
 
 
-def generate_comparison(zncc_dir: Path, nn_dir: Path, comparison_dir: Path) -> None:
+def generate_comparison(run_dirs: dict[str, Path], comparison_dir: Path) -> None:
     comparison_dir.mkdir(parents=True, exist_ok=True)
 
     def load_log(d: Path) -> tuple[list[int], list[float]]:
@@ -335,20 +400,17 @@ def generate_comparison(zncc_dir: Path, nn_dir: Path, comparison_dir: Path) -> N
         a, b = zip(*rows)
         return list(a), list(b)
 
-    z_it, z_loss = load_log(zncc_dir)
-    n_it, n_loss = load_log(nn_dir)
-
-    with open(zncc_dir / "metrics_final.json", encoding="utf-8") as f:
-        z_metrics = json.load(f)
-    with open(nn_dir / "metrics_final.json", encoding="utf-8") as f:
-        n_metrics = json.load(f)
+    metrics_bundle = {}
+    fig, ax = plt.subplots(figsize=(10, 5))
+    for label, run_dir in run_dirs.items():
+        iters, losses = load_log(run_dir)
+        with open(run_dir / "metrics_final.json", encoding="utf-8") as f:
+            metrics_bundle[label] = json.load(f)
+        ax.plot(iters, losses, label=label)
 
     with open(comparison_dir / "comparison_metrics.json", "w", encoding="utf-8") as f:
-        json.dump({"zncc": z_metrics, "zncc_nn": n_metrics}, f, indent=2)
+        json.dump(metrics_bundle, f, indent=2)
 
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(z_it, z_loss, label="ZNCC")
-    ax.plot(n_it, n_loss, label="ZNCC-NN")
     ax.set_title("Loss Curves")
     ax.legend()
     ax.grid(True, alpha=0.3)
@@ -362,7 +424,7 @@ def build_argparser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Structured-light training")
     p.add_argument("--config", type=str, required=True)
     p.add_argument("--scene", type=str, default=None)
-    p.add_argument("--decoder", type=str, choices=["zncc", "zncc_nn", "both"], default=None)
+    p.add_argument("--decoder", type=str, choices=["zncc", "zncc_nn", "zncc_nn_response", "both"], default=None)
     p.add_argument("--iterations", type=int, default=None)
     p.add_argument("--device", type=str, choices=["auto", "cpu", "cuda"], default=None)
     p.add_argument("--seed", type=int, default=None)
@@ -405,11 +467,40 @@ def main() -> None:
         base_dir = output_cfg.get("base_dir", "output/lab2")
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         comparison_dir = Path(base_dir) / "runs" / f"{ts}_{scene_name}_comparison_{penalty}"
-        zncc_dir = run_single_decoder(scene_name, "zncc", cfg, device, None)
-        nn_dir = run_single_decoder(scene_name, "zncc_nn", cfg, device, None)
-        generate_comparison(zncc_dir, nn_dir, comparison_dir)
+        zncc_cfg = copy.deepcopy(cfg)
+        zncc_cfg.setdefault("training", {})["use_projector_response_curve"] = False
+
+        zncc_nn_cfg = copy.deepcopy(cfg)
+        zncc_nn_cfg.setdefault("training", {})["use_projector_response_curve"] = False
+
+        zncc_nn_response_cfg = copy.deepcopy(cfg)
+        zncc_nn_response_cfg.setdefault("training", {})["use_projector_response_curve"] = True
+
+        zncc_dir = run_single_decoder(scene_name, "zncc", zncc_cfg, device, None)
+        nn_dir = run_single_decoder(scene_name, "zncc_nn", zncc_nn_cfg, device, None)
+        nn_response_dir = run_single_decoder(scene_name, "zncc_nn_response", zncc_nn_response_cfg, device, None)
+
+        generate_comparison(
+            {
+                "zncc": zncc_dir,
+                "zncc_nn": nn_dir,
+                "zncc_nn_response": nn_response_dir,
+            },
+            comparison_dir,
+        )
+        with open(comparison_dir / "comparison_runs.json", "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "zncc": str(zncc_dir),
+                    "zncc_nn": str(nn_dir),
+                    "zncc_nn_response": str(nn_response_dir),
+                },
+                f,
+                indent=2,
+            )
     else:
-        out = create_output_dir(output_cfg.get("base_dir", "output/lab2"), scene_name, decoder, penalty)
+        _, _, variant_name = resolve_decoder_variant(decoder, training)
+        out = create_output_dir(output_cfg.get("base_dir", "output/lab2"), scene_name, variant_name, penalty)
         run_single_decoder(scene_name, decoder, cfg, device, out)
 
 

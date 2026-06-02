@@ -17,11 +17,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Literal
 
-import numpy as np
 import torch
 import torch.nn as nn
-import matplotlib.pyplot as plt
-from matplotlib.figure import Figure
 
 from .shader import StructuredLightRenderer
 from . import decoder
@@ -47,6 +44,7 @@ class OptimizerConfig:
     # Decoder configuration
     decoder_type: DecoderType = DecoderType.ZNCC
     neighborhood_size: int = 1  # p=1, 3, or 5
+    use_projector_response_curve: bool = False
 
     # Loss function
     penalty: str = "l1"  # "l1", "zero_tolerance", "one_tolerance"
@@ -55,15 +53,16 @@ class OptimizerConfig:
     min_value: float = 0.0
     max_value: float = 1.0
     max_frequency: float | None = None  # Nyquist frequency constraint
+    frequency_weight: float = 1.0
 
-    # Logging and visualization
+    # Logging
     log_interval: int = 10
     save_interval: int = 50
     output_dir: str | Path | None = None
     optimizer_name: Literal["adam", "rmsprop"] = "adam"
     lr_decay_step: int = 0
     lr_decay_gamma: float = 1.0
-    projector_height: int = 1080  # For 2D pattern visualization
+    projector_height: int = 1080
 
 
 def initialize_patterns(
@@ -146,7 +145,9 @@ class OpticalSGDOptimizer:
         self.scheduler: torch.optim.lr_scheduler._LRScheduler | None = None
         self.iteration = 0
         self.loss_history: list[float] = []
-        self.pattern_snapshots: list[torch.Tensor] = []  # Store pattern snapshots for GIF
+        self.history_iterations: list[int] = []
+        self.pattern_history: list[torch.Tensor] = []
+        self.decoder_param_history: dict[str, list[torch.Tensor]] = {}
 
         # Ensure output directory exists
         if self.config.output_dir is not None:
@@ -190,6 +191,7 @@ class OpticalSGDOptimizer:
             self.decoder = decoder.ZNCCNNDecoder(
                 num_patterns=num_patterns,
                 neighborhood_size=self.config.neighborhood_size,
+                use_projector_response_curve=self.config.use_projector_response_curve,
             )
         else:
             raise ValueError(f"Unknown decoder type: {self.config.decoder_type}")
@@ -228,6 +230,7 @@ class OpticalSGDOptimizer:
 
         # Sync to renderer
         self.renderer.update_patterns(self.patterns.detach())
+        self._record_history()
 
         return self.patterns
 
@@ -257,7 +260,10 @@ class OpticalSGDOptimizer:
 
         # Frequency penalty (if configured)
         if self.config.max_frequency is not None:
-            freq_penalty = losses.frequency_penalty(self.patterns, self.config.max_frequency)
+            freq_penalty = self.config.frequency_weight * losses.frequency_penalty(
+                self.patterns,
+                self.config.max_frequency,
+            )
             return corr_loss + freq_penalty
 
         return corr_loss
@@ -307,14 +313,11 @@ class OpticalSGDOptimizer:
         self.iteration += 1
         loss_value = loss.item()
         self.loss_history.append(loss_value)
+        self._record_history()
 
         # Logging
         if self.config.log_interval > 0 and self.iteration % self.config.log_interval == 0:
             self._log_progress(loss_value)
-
-        # Visualization
-        if self.config.save_interval > 0 and self.iteration % self.config.save_interval == 0:
-            self._save_visualization()
 
         return loss_value
 
@@ -338,155 +341,25 @@ class OpticalSGDOptimizer:
     def _log_progress(self, loss: float) -> None:
         """Log optimization progress."""
         decoder_name = self.config.decoder_type.value if self.config.decoder_type else "none"
+        if self.config.decoder_type == DecoderType.ZNCC_NN and self.config.use_projector_response_curve:
+            decoder_name = f"{decoder_name}_response"
         print(f"Iteration {self.iteration}: Loss = {loss:.6f} ({decoder_name})")
 
-    def _save_visualization(self) -> None:
-        """Save visualization of current state."""
-        if self.config.output_dir is None or self.patterns is None:
-            return
-
-        output_path = Path(self.config.output_dir)
-
-        # Save pattern snapshot for GIF
-        self.pattern_snapshots.append(self.patterns.detach().cpu().clone())
-
-        # Save patterns as 2D visualization
-        fig = self.plot_patterns()
-        fig.savefig(output_path / f"patterns_iter_{self.iteration}.png", dpi=150, bbox_inches='tight')
-        plt.close(fig)
-
-        # Save frequency spectrum
-        fig = self.plot_frequency_spectrum()
-        fig.savefig(output_path / f"spectrum_iter_{self.iteration}.png", dpi=150, bbox_inches='tight')
-        plt.close(fig)
-
-    def plot_patterns(self) -> Figure:
-        """Plot current patterns as 2D matrices (QR-code style)."""
+    def _record_history(self) -> None:
+        """Record full optimization history for downstream analysis."""
         if self.patterns is None:
-            raise RuntimeError("No patterns to plot")
-
-        K, Wp = self.patterns.shape
-        Hp = self.config.projector_height
-        patterns_np = self.patterns.detach().cpu().numpy()
-
-        # Reshape 1D patterns to 2D by tiling vertically
-        patterns_2d = np.tile(patterns_np[:, None, :], (1, Hp, 1))  # [K, Hp, Wp]
-
-        fig, axes = plt.subplots(1, K, figsize=(4 * K, 4))
-        if K == 1:
-            axes = [axes]
-
-        for k in range(K):
-            im = axes[k].imshow(patterns_2d[k], cmap='gray', vmin=self.config.min_value, vmax=self.config.max_value)
-            axes[k].set_title(f"Pattern {k + 1}")
-            axes[k].axis('off')
-            plt.colorbar(im, ax=axes[k], fraction=0.046, pad=0.04)
-
-        plt.tight_layout()
-        return fig
-
-    def plot_frequency_spectrum(self) -> Figure:
-        """Plot frequency spectrum of patterns."""
-        if self.patterns is None:
-            raise RuntimeError("No patterns to analyze")
-
-        K = self.patterns.shape[0]
-        patterns_np = self.patterns.detach().cpu().numpy()
-
-        fig, axes = plt.subplots(K, 1, figsize=(10, 2 * K))
-        if K == 1:
-            axes = [axes]
-
-        freq_bins = np.fft.rfftfreq(self.patterns.shape[1], d=1.0 / self.patterns.shape[1])
-
-        for k in range(K):
-            pattern_fft = np.abs(np.fft.rfft(patterns_np[k]))
-            axes[k].plot(freq_bins, pattern_fft, linewidth=1.5)
-            axes[k].set_xlabel("Frequency")
-            axes[k].set_ylabel("Magnitude")
-            axes[k].set_title(f"Pattern {k + 1} Spectrum")
-            axes[k].grid(True, alpha=0.3)
-
-            if self.config.max_frequency is not None:
-                axes[k].axvline(self.config.max_frequency, color='r', linestyle='--',
-                               label='Nyquist Limit')
-                axes[k].legend()
-
-        plt.tight_layout()
-        return fig
-
-    def plot_loss_curve(self) -> Figure:
-        """Plot training loss curve."""
-        fig, ax = plt.subplots(1, 1, figsize=(8, 4))
-        ax.plot(self.loss_history, linewidth=2)
-        ax.set_xlabel("Iteration")
-        ax.set_ylabel("Loss")
-        decoder_name = self.config.decoder_type.value if self.config.decoder_type else "none"
-        ax.set_title(f"Training Loss ({decoder_name})")
-        ax.grid(True, alpha=0.3)
-        plt.tight_layout()
-        return fig
-
-    def generate_pattern_evolution_gif(self) -> None:
-        """Generate GIF from pattern evolution snapshots."""
-        if not self.pattern_snapshots or self.config.output_dir is None:
             return
 
-        try:
-            import imageio.v3 as iio
-        except ImportError:
-            print("  Warning: imageio not available, skipping GIF generation")
+        self.history_iterations.append(self.iteration)
+        self.pattern_history.append(self.patterns.detach().cpu().clone())
+
+        if self.decoder is None:
             return
 
-        output_path = Path(self.config.output_dir)
-        K, Wp = self.pattern_snapshots[0].shape
-        Hp = self.config.projector_height
-
-        # Generate frames for GIF
-        frames = []
-        for i, pattern_snapshot in enumerate(self.pattern_snapshots):
-            patterns_np = pattern_snapshot.numpy()
-            patterns_2d = np.tile(patterns_np[:, None, :], (1, Hp, 1))  # [K, Hp, Wp]
-
-            # Create combined visualization of all patterns
-            n_cols = min(K, 5)
-            n_rows = (K + n_cols - 1) // n_cols
-            fig, axes = plt.subplots(n_rows, n_cols, figsize=(3 * n_cols, 3 * n_rows))
-            if K == 1:
-                axes = np.array([[axes]])
-            elif n_rows == 1:
-                axes = axes.reshape(1, -1)
-            elif n_cols == 1:
-                axes = axes.reshape(-1, 1)
-
-            for k in range(K):
-                row, col = k // n_cols, k % n_cols
-                axes[row, col].imshow(patterns_2d[k], cmap='gray', vmin=0.0, vmax=1.0)
-                axes[row, col].set_title(f"P{k + 1}", fontsize=10)
-                axes[row, col].axis('off')
-
-            # Hide empty subplots
-            for k in range(K, n_rows * n_cols):
-                row, col = k // n_cols, k % n_cols
-                axes[row, col].axis('off')
-
-            fig.suptitle(f"Iteration {i + 1}", fontsize=12)
-            plt.tight_layout()
-
-            # Save frame to memory
-            from io import BytesIO
-            buf = BytesIO()
-            fig.savefig(buf, format='png', dpi=100, bbox_inches='tight')
-            buf.seek(0)
-            frame = iio.imread(buf)
-            frames.append(frame)
-            plt.close(fig)
-            buf.close()
-
-        # Save as GIF
-        if frames:
-            iio.imwrite(output_path / "pattern_evolution.gif", frames, duration=500, loop=0)
-            print(f"  Saved pattern evolution GIF: {output_path / 'pattern_evolution.gif'}")
+        for name, param in self.decoder.named_parameters():
+            self.decoder_param_history.setdefault(name, []).append(
+                param.detach().cpu().clone()
+            )
 
 
 def create_optimizer(
