@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import random
 import sys
 import time
 from dataclasses import dataclass
-from datetime import datetime
 from math import ceil, sqrt
 from pathlib import Path
 from typing import Any
@@ -17,10 +15,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from lab2.common import auto_detect_device, create_timestamped_output_dir, load_config, prepare_decoder_images, set_random_seed
 from lab2.decoder import ZNCCDecoder, ZNCCNNDecoder
 from lab2.losses import soft_correspondence_loss
 from lab2.scene_genertor import SCENE_PRESETS, create_standard_renderer
@@ -48,35 +46,8 @@ class SampleComparison:
     autodiff_time: float
     fd_time: float
 
-
-def auto_detect_device(device_str: str) -> torch.device:
-    if device_str == "auto":
-        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    return torch.device(device_str)
-
-
-def load_config(config_path: str) -> dict[str, Any]:
-    with open(config_path, encoding="utf-8") as f:
-        return yaml.safe_load(f)
-
-
-def set_random_seed(seed: int) -> None:
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(seed)
-        torch.cuda.manual_seed_all(seed)
-        if torch.backends.cudnn.is_available():
-            torch.backends.cudnn.deterministic = True
-            torch.backends.cudnn.benchmark = False
-
-
 def create_output_dir(base_dir: str, scene: str, decoder: str) -> Path:
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out = Path(base_dir) / "gradient_comparison" / f"{timestamp}_{scene}_{decoder}"
-    out.mkdir(parents=True, exist_ok=True)
-    return out
+    return create_timestamped_output_dir(base_dir, "gradient_comparison", f"{scene}_{decoder}")
 
 
 def build_decoder(
@@ -110,21 +81,6 @@ def sample_random_patterns(
     generator.manual_seed(sample_seed)
     patterns = torch.rand((num_patterns, projector_width), generator=generator, dtype=dtype)
     return patterns.to(device=device, dtype=dtype)
-
-
-def prepare_decoder_images(images: torch.Tensor) -> torch.Tensor:
-    """
-    Convert renderer outputs to decoder input shape [K, H, W].
-
-    Mitsuba rendering returns RGB images [K, H, W, 3], while the decoders expect
-    grayscale observations [K, H, W]. The autodiff path already returns grayscale.
-    """
-    if images.ndim == 3:
-        return images
-    if images.ndim == 4 and images.shape[-1] == 3:
-        return images.mean(dim=-1)
-    raise ValueError(f"Unsupported image tensor shape for decoder: {tuple(images.shape)}")
-
 
 def compute_autodiff_gradient(
     renderer,
