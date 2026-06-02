@@ -5,6 +5,7 @@ training:
   iterations: 500
   learning_rate: 0.01
   decoder_lr: 0.001
+  seed: 42
   optimizer: rmsprop
   lr_decay_step: 350
   lr_decay_gamma: 0.5

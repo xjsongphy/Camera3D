@@ -3,6 +3,7 @@
 import argparse
 import csv
 import json
+import random
 import sys
 import time
 from datetime import datetime
@@ -30,6 +31,18 @@ def auto_detect_device(device_str: str) -> torch.device:
 def load_config(config_path: str) -> dict:
     with open(config_path, encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+
+def set_random_seed(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        if torch.backends.cudnn.is_available():
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
 
 
 def create_output_dir(base_dir: str, scene: str, decoder: str, penalty: str) -> Path:
@@ -182,6 +195,7 @@ def run_single_decoder(scene_name: str, decoder_name: str, cfg: dict, device: to
     training = cfg["training"]
     rendering = cfg["rendering"]
     output_cfg = cfg["output"]
+    seed = training.get("seed")
 
     decoder_type = DecoderType.ZNCC if decoder_name == "zncc" else DecoderType.ZNCC_NN
     penalty = training.get("penalty", "l1")
@@ -202,7 +216,12 @@ def run_single_decoder(scene_name: str, decoder_name: str, cfg: dict, device: to
         print(f"  device: {device}")
         print(f"  output: {output_dir}")
         print(f"  log: {log_session.log_path}")
+        if seed is not None:
+            print(f"  seed: {seed}")
         print(f"{'='*60}\n")
+
+        if seed is not None:
+            set_random_seed(int(seed))
 
         with timer.phase("save_config_snapshot"):
             save_config_snapshot(output_dir, {"scene": scene_name, "decoder": decoder_name, "training": training, "rendering": rendering, "output": output_cfg})
@@ -346,6 +365,7 @@ def build_argparser() -> argparse.ArgumentParser:
     p.add_argument("--decoder", type=str, choices=["zncc", "zncc_nn", "both"], default=None)
     p.add_argument("--iterations", type=int, default=None)
     p.add_argument("--device", type=str, choices=["auto", "cpu", "cuda"], default=None)
+    p.add_argument("--seed", type=int, default=None)
     p.add_argument("--resume", type=str, default=None)
     return p
 
@@ -362,6 +382,8 @@ def main() -> None:
         cfg.setdefault("training", {})["iterations"] = args.iterations
     if args.device is not None:
         cfg.setdefault("rendering", {})["device"] = args.device
+    if args.seed is not None:
+        cfg.setdefault("training", {})["seed"] = args.seed
     if args.resume is not None:
         cfg["resume"] = args.resume
 

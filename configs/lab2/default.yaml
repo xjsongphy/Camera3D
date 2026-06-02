@@ -8,6 +8,7 @@ training:
   iterations: 500
   learning_rate: 0.01
   decoder_lr: 0.01     # 仅 zncc_nn 使用
+  seed: 42             # 固定随机种子；decoder=both 时每次子训练开始前都会重置为该种子
   num_patterns: 5
   neighborhood: 1       # 1, 3, 5
   tau: 50.0             # softmax 温度: 小→平滑梯度弱, 大→尖锐梯度强, 50 是平衡值
