@@ -21,7 +21,8 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from lab2.decoder import ZNCCDecoder, ZNCCNNDecoder, soft_correspondence_loss
+from lab2.decoder import ZNCCDecoder, ZNCCNNDecoder
+from lab2.losses import soft_correspondence_loss
 from lab2.scene_genertor import SCENE_PRESETS, create_standard_renderer
 
 
@@ -86,10 +87,11 @@ def build_decoder(
 ) -> torch.nn.Module:
     if decoder_name == "zncc":
         decoder = ZNCCDecoder(neighborhood_size=neighborhood)
-    elif decoder_name == "zncc_nn":
+    elif decoder_name in {"zncc_nn", "zncc_nn_response"}:
         decoder = ZNCCNNDecoder(
             num_patterns=num_patterns,
             neighborhood_size=neighborhood,
+            use_projector_response_curve=(decoder_name == "zncc_nn_response"),
         )
     else:
         raise ValueError(f"Unknown decoder: {decoder_name}")
@@ -110,6 +112,20 @@ def sample_random_patterns(
     return patterns.to(device=device, dtype=dtype)
 
 
+def prepare_decoder_images(images: torch.Tensor) -> torch.Tensor:
+    """
+    Convert renderer outputs to decoder input shape [K, H, W].
+
+    Mitsuba rendering returns RGB images [K, H, W, 3], while the decoders expect
+    grayscale observations [K, H, W]. The autodiff path already returns grayscale.
+    """
+    if images.ndim == 3:
+        return images
+    if images.ndim == 4 and images.shape[-1] == 3:
+        return images.mean(dim=-1)
+    raise ValueError(f"Unsupported image tensor shape for decoder: {tuple(images.shape)}")
+
+
 def compute_autodiff_gradient(
     renderer,
     patterns: torch.Tensor,
@@ -124,7 +140,7 @@ def compute_autodiff_gradient(
     start_time = time.time()
     start_memory = torch.cuda.memory_allocated() / (1024 ** 2) if device.type == "cuda" else 0.0
 
-    images = renderer.render_images_autodiff(patterns_param)
+    images = prepare_decoder_images(renderer.render_images_autodiff(patterns_param))
     gt_corr = renderer.gt_corr
     scores = decoder(images, patterns_param)
     loss = soft_correspondence_loss(scores, gt_corr, tau=tau, penalty=penalty)
@@ -155,7 +171,7 @@ def compute_finite_difference_gradient(
     num_patterns, projector_width = patterns.shape
 
     with torch.no_grad():
-        images = renderer.render_images(patterns)
+        images = prepare_decoder_images(renderer.render_images(patterns))
         gt_corr = renderer.gt_corr
         scores = decoder(images, patterns)
         base_loss = soft_correspondence_loss(scores, gt_corr, tau=tau, penalty=penalty)
@@ -171,7 +187,7 @@ def compute_finite_difference_gradient(
             perturbed_patterns = patterns.clone()
             perturbed_patterns[pattern_idx, column_idx] += epsilon
             with torch.no_grad():
-                images_perturbed = renderer.render_images(perturbed_patterns)
+                images_perturbed = prepare_decoder_images(renderer.render_images(perturbed_patterns))
                 scores_perturbed = decoder(images_perturbed, perturbed_patterns)
                 perturbed_loss = soft_correspondence_loss(
                     scores_perturbed,
@@ -381,6 +397,8 @@ def compare_for_decoder(
     neighborhood = int(training.get("neighborhood", 1))
     tau = float(training.get("tau", 50.0))
     penalty = str(training.get("penalty", "l1"))
+    if decoder_name == "zncc_nn" and training.get("use_projector_response_curve", False):
+        decoder_name = "zncc_nn_response"
 
     print("\n" + "=" * 60)
     print(f"Decoder: {decoder_name}")
@@ -395,6 +413,7 @@ def compare_for_decoder(
     renderer._depth = None
     renderer._gt_corr = None
     renderer.render_depth_for_visualization()
+    renderer.calibrate_autodiff_gain()
 
     set_random_seed(seed)
     decoder = build_decoder(
@@ -478,7 +497,7 @@ def compare_for_decoder(
 def build_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Compare finite-difference and autodiff gradients.")
     parser.add_argument("--config", type=str, required=True, help="YAML config path")
-    parser.add_argument("--decoder", type=str, choices=["zncc", "zncc_nn", "both"], default=None)
+    parser.add_argument("--decoder", type=str, choices=["zncc", "zncc_nn", "zncc_nn_response", "both"], default=None)
     parser.add_argument("--device", type=str, choices=["auto", "cpu", "cuda"], default=None)
     parser.add_argument("--num-samples", type=int, default=4, help="Number of random pattern tensors")
     parser.add_argument("--epsilon", type=float, default=1e-2, help="Finite-difference perturbation")
@@ -530,7 +549,7 @@ def main() -> None:
     print(f"Output directory: {output_root}")
 
     if decoder_mode == "both":
-        for decoder_name in ("zncc", "zncc_nn"):
+        for decoder_name in ("zncc", "zncc_nn", "zncc_nn_response"):
             compare_for_decoder(
                 cfg=cfg,
                 decoder_name=decoder_name,

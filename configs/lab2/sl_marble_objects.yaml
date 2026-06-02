@@ -1,4 +1,4 @@
-﻿scene: sl_marble_objects
+scene: sl_marble_objects
 decoder: both
 
 training:
@@ -11,9 +11,12 @@ training:
   lr_decay_gamma: 0.5
   num_patterns: 5
   neighborhood: 3
+  use_projector_response_curve: false
   tau: 50.0
   penalty: l1
   init_mode: random
+  max_frequency_ratio: 0.5
+  frequency_weight: 0.01
 
 rendering:
   spp: 64

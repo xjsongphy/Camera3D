@@ -16,6 +16,45 @@ import torch
 import torch.nn as nn
 
 
+class MonotonicProjectorResponseCurve(nn.Module):
+    """
+    Monotonic piecewise-linear projector response curve g(x).
+
+    The curve is parameterized by positive segment increments and normalized so that:
+    - g(0) = 0
+    - g(1) = 1
+    - g(x) is monotonic increasing
+    """
+
+    def __init__(self, num_segments: int = 32, min_delta: float = 1e-4) -> None:
+        super().__init__()
+        self.num_segments = num_segments
+        self.min_delta = min_delta
+        self.delta_logits = nn.Parameter(torch.zeros(num_segments))
+
+    def _knot_values(self) -> torch.Tensor:
+        deltas = torch.nn.functional.softplus(self.delta_logits) + self.min_delta
+        cumulative = torch.cumsum(deltas, dim=0)
+        knots = torch.cat([torch.zeros(1, device=deltas.device, dtype=deltas.dtype), cumulative], dim=0)
+        return knots / knots[-1].clamp_min(self.min_delta)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        knots = self._knot_values()
+        x_clamped = x.clamp(0.0, 1.0)
+        scaled = x_clamped * self.num_segments
+        left_idx = torch.floor(scaled).long().clamp(0, self.num_segments - 1)
+        right_idx = (left_idx + 1).clamp(max=self.num_segments)
+        frac = (scaled - left_idx.to(dtype=x.dtype)).clamp(0.0, 1.0)
+        left = knots[left_idx]
+        right = knots[right_idx]
+        return left + (right - left) * frac
+
+    def sample_curve(self, num_points: int = 256) -> tuple[torch.Tensor, torch.Tensor]:
+        x = torch.linspace(0.0, 1.0, num_points, device=self.delta_logits.device, dtype=self.delta_logits.dtype)
+        y = self.forward(x)
+        return x.detach().cpu(), y.detach().cpu()
+
+
 class ResidualMLP(nn.Module):
     """
     Residual MLP with two fully-connected layers and ReLU activation.
@@ -233,6 +272,7 @@ class ZNCCNNDecoder(nn.Module):
         self,
         num_patterns: int,
         neighborhood_size: int = 3,
+        use_projector_response_curve: bool = False,
         eps: float = 1e-6,
     ) -> None:
         """
@@ -247,8 +287,14 @@ class ZNCCNNDecoder(nn.Module):
         self.K = num_patterns
         self.p = neighborhood_size
         self.D = num_patterns * neighborhood_size
+        self.use_projector_response_curve = use_projector_response_curve
         self.eps = eps
 
+        self.projector_response_curve = (
+            MonotonicProjectorResponseCurve(num_segments=32)
+            if use_projector_response_curve
+            else None
+        )
         # Learnable residual networks
         self.camera_net = ResidualMLP(self.D)
         self.projector_net = ResidualMLP(self.D)
@@ -277,6 +323,8 @@ class ZNCCNNDecoder(nn.Module):
 
         # Apply learnable transformations
         cam_feat = self.camera_net(cam_feat)
+        if self.projector_response_curve is not None:
+            proj_feat = self.projector_response_curve(proj_feat)
         proj_feat = self.projector_net(proj_feat)
 
         # Compute ZNCC matrix on transformed features
@@ -284,6 +332,11 @@ class ZNCCNNDecoder(nn.Module):
 
         # Reshape back to spatial dimensions
         return scores.reshape(H, W, Wp)
+
+    def sample_projector_response_curve(self, num_points: int = 256) -> tuple[torch.Tensor, torch.Tensor] | None:
+        if self.projector_response_curve is None:
+            return None
+        return self.projector_response_curve.sample_curve(num_points=num_points)
 
 
 def hard_decode(scores: torch.Tensor) -> torch.Tensor:
