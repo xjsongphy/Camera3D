@@ -63,8 +63,8 @@ def list_recommended():
     click.echo("2. 确认模型可下载且有合适的许可证")
     click.echo("3. 点击 Download 3D Model")
     click.echo("4. 选择 OBJ 格式下载")
-    click.echo("5. 解压并将 .obj 文件放到 resources/geometry/obj/")
-    click.echo("6. 如有纹理，放到 resources/textures/")
+    click.echo("5. 解压并将 .obj 文件放到 assets/geometry/obj/")
+    click.echo("6. 如有纹理，放到 assets/textures/")
     click.echo("=" * 60)
 
 @cli.command()
@@ -96,7 +96,7 @@ def setup_scene(model_name):
     </emitter>
 
     <shape type="obj">
-        <string name="filename" value="resources/geometry/obj/{model_name}"/>
+        <string name="filename" value="assets/geometry/obj/{model_name}"/>
         <transform name="to_world">
             <!-- 调整缩放和旋转 -->
             <scale value="0.01"/>
@@ -111,30 +111,30 @@ def setup_scene(model_name):
 </scene>
 """
 
-    output_path = f"resources/scenes/complex/{model_name.replace('.obj', '')}.xml"
+    output_path = f"assets/scenes/complex/{model_name.replace('.obj', '')}.xml"
     with open(output_path, 'w') as f:
         f.write(template)
 
     click.echo(f"✅ 场景文件已创建: {output_path}")
     click.echo("\n接下来:")
-    click.echo("1. 将模型文件放到 resources/geometry/obj/")
+    click.echo("1. 将模型文件放到 assets/geometry/obj/")
     click.echo(f"2. 确认文件名与场景中一致: {model_name}")
     click.echo("3. 使用 mitsuba 渲染测试场景")
 
 @cli.command()
 def check_resources():
-    """检查 resources 目录状态"""
+    """检查 assets 目录下的 Lab2 资源状态"""
     from pathlib import Path
 
-    click.echo("\n检查 resources 目录状态:")
+    click.echo("\n检查 assets 目录下的 Lab2 资源状态:")
     click.echo("-" * 40)
 
     paths = {
-        "材质目录": Path("resources/geometry/materials"),
-        "OBJ 模型目录": Path("resources/geometry/obj"),
-        "简单场景": Path("resources/scenes/simple"),
-        "复杂场景": Path("resources/scenes/complex"),
-        "纹理目录": Path("resources/textures"),
+        "材质目录": Path("assets/geometry/materials"),
+        "OBJ 模型目录": Path("assets/geometry/obj"),
+        "简单场景": Path("assets/scenes/simple"),
+        "复杂场景": Path("assets/scenes/complex"),
+        "纹理目录": Path("assets/textures"),
     }
 
     for name, path in paths.items():
@@ -145,7 +145,7 @@ def check_resources():
             click.echo(f"❌ {name}: 不存在")
 
     # 检查 .obj 文件
-    obj_dir = Path("resources/geometry/obj")
+    obj_dir = Path("assets/geometry/obj")
     if obj_dir.exists():
         obj_files = list(obj_dir.glob("*.obj"))
         if obj_files:
