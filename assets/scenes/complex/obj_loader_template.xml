@@ -32,9 +32,9 @@
     </emitter>
 
     <!-- Load external .obj model -->
-    <!-- Note: Make sure the .obj file exists in resources/geometry/obj/ -->
+    <!-- Note: Make sure the .obj file exists in assets/geometry/obj/ -->
     <shape type="obj">
-        <string name="filename" value="resources/geometry/obj/MODEL_FILE.obj"/>
+        <string name="filename" value="assets/geometry/obj/MODEL_FILE.obj"/>
         <transform name="to_world">
             <!-- Adjust scale as needed -->
             <scale value="0.01"/>

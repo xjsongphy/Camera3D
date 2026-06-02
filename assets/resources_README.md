@@ -1,18 +1,18 @@
-# Resources Directory
+# Assets Resources
 
-本目录包含 Lab2 结构光实验所需的几何和材质资源。
+本文件说明 `assets/` 目录下供 Lab2 使用的几何、材质、场景模板和纹理资源。
 
 ## 目录结构
 
-```
-resources/
+```text
+assets/
 ├── geometry/
-│   ├── materials/      # 材质 XML 定义（基于 Mitsuba 3）
+│   ├── materials/     # 材质 XML 定义（基于 Mitsuba 3）
 │   └── obj/           # 下载的 .obj 几何模型文件
 ├── scenes/
 │   ├── simple/        # 简单场景（内联几何体）
 │   └── complex/       # 复杂场景（使用 .obj 文件）
-└── textures/         # 纹理贴图文件（可选）
+└── textures/          # 纹理贴图文件（可选）
 ```
 
 ## 材质文件说明
@@ -50,7 +50,7 @@ resources/
    - URL: https://sketchfab.com/3d-models/female-marble-statue-818a96836b5148eba0b394c12c171830
    - 许可: CC BY-NC-SA
    - 三角面数: 66.5k
-   - 下载后重命名为: `resources/geometry/obj/marble_statue.obj`
+   - 下载后重命名为: `assets/geometry/obj/marble_statue.obj`
 
 2. **CC0 雕塑集合**
    - URL: https://sketchfab.com/HannahT25/collections/cc0-statues-913ddbd5777b4430acfc79ed9d500275
@@ -67,12 +67,12 @@ resources/
 3. 点击 "Download 3D Model"
 4. 选择 "OBJ" 格式
 5. 解压下载的文件
-6. 将 .obj 文件复制到 `resources/geometry/obj/` 目录
-7. 将纹理文件（如有）复制到 `resources/textures/` 目录
+6. 将 .obj 文件复制到 `assets/geometry/obj/` 目录
+7. 将纹理文件（如有）复制到 `assets/textures/` 目录
 
 ### 使用下载的模型
 
-参考 `resources/scenes/complex/obj_loader_template.xml` 或 `marble_statue_template.xml`，修改文件名为实际下载的模型。
+参考 `assets/scenes/complex/obj_loader_template.xml` 或 `marble_statue_template.xml`，修改文件名为实际下载的模型。
 
 ## 材质来源说明
 
