@@ -53,31 +53,25 @@
 
 ### 场景结果示意
 
-下图给出了两个场景在最佳实验配置下的最终渲染结果与深度误差图。
+下图给出了两个场景在最佳实验配置下的最终渲染结果与深度误差图。可以看出漫反射场景的干扰比较大。
 
 ![大理石场景最优配置最终渲染](../../outputs/lab2/assignment_runs/20260606_201525/sl_marble_objects/marble_zncc_nn_response_autodiff/rendered_final.png)
 *图 7. 大理石场景最优配置下的最终渲染结果。*
 
-![大理石场景最优配置 GT 深度图](../../outputs/lab2/assignment_runs/20260606_201525/sl_marble_objects/marble_zncc_nn_response_autodiff/depth_gt.png)
-*图 8. 大理石场景最优配置对应的 GT 深度图。*
+![大理石场景结构光深度与渲染器深度对比](../../outputs/lab2/assignment_runs/20260606_201525/sl_marble_objects/marble_zncc_nn_response_autodiff/depth_sl_vs_renderer.png)
+*图 8. 大理石场景中结构光重建深度与渲染器返回深度的对比及误差图。*
 
-![大理石场景最优配置最终 correspondence 与 GT 对比](../../outputs/lab2/assignment_runs/20260606_201525/sl_marble_objects/marble_zncc_nn_response_autodiff/correspondence_final.png)
-*图 9. 大理石场景最优配置下的最终 correspondence 与 GT correspondence 对比。*
-
-![大理石场景最优配置最终误差热力图](../../outputs/lab2/assignment_runs/20260606_201525/sl_marble_objects/marble_zncc_nn_response_autodiff/depth_error_map.png)
-*图 10. 大理石场景最优配置下的 correspondence 绝对误差热力图。*
+![大理石场景严格结构光深度误差热力图](../../outputs/lab2/assignment_runs/20260606_201525/sl_marble_objects/marble_zncc_nn_response_autodiff/depth_sl_abs_error.png)
+*图 9. 大理石场景最优配置下的严格结构光深度绝对误差热力图。*
 
 ![漫反射场景最优配置最终渲染](../../outputs/lab2/assignment_runs/20260606_201525/sl_diffuse_objects/diffuse_zncc_autodiff/rendered_final.png)
 *图 11. 漫反射场景最优配置下的最终渲染结果。*
 
-![漫反射场景最优配置 GT 深度图](../../outputs/lab2/assignment_runs/20260606_201525/sl_diffuse_objects/diffuse_zncc_autodiff/depth_gt.png)
-*图 12. 漫反射场景最优配置对应的 GT 深度图。*
+![漫反射场景结构光深度与渲染器深度对比](../../outputs/lab2/assignment_runs/20260606_201525/sl_diffuse_objects/diffuse_zncc_autodiff/depth_sl_vs_renderer.png)
+*图 12. 漫反射场景中结构光重建深度与渲染器返回深度的对比及误差图。*
 
-![漫反射场景最优配置最终 correspondence 与 GT 对比](../../outputs/lab2/assignment_runs/20260606_201525/sl_diffuse_objects/diffuse_zncc_autodiff/correspondence_final.png)
-*图 13. 漫反射场景最优配置下的最终 correspondence 与 GT correspondence 对比。*
-
-![漫反射场景最优配置最终误差热力图](../../outputs/lab2/assignment_runs/20260606_201525/sl_diffuse_objects/diffuse_zncc_autodiff/depth_error_map.png)
-*图 14. 漫反射场景最优配置下的 correspondence 绝对误差热力图。*
+![漫反射场景严格结构光深度误差热力图](../../outputs/lab2/assignment_runs/20260606_201525/sl_diffuse_objects/diffuse_zncc_autodiff/depth_sl_abs_error.png)
+*图 13. 漫反射场景最优配置下的严格结构光深度绝对误差热力图。*
 
 
 ### 梯度对比结果
@@ -93,7 +87,7 @@
 | 最大值 | 0.0446 |
 
 ![大理石场景中 autodiff 与 finite difference 的带符号相对误差热力图](../../outputs/lab2/assignment_runs/20260606_201525/gradient_comparison/gradient_comparison/20260606_201531_sl_marble_objects_zncc/zncc/signed_relative_error_heatmaps.png)
-*图 15. 大理石场景中 autodiff 与 finite difference 梯度的带符号相对误差热力图。*
+*图 14. 大理石场景中 autodiff 与 finite difference 梯度的带符号相对误差热力图。*
 
 从单样本计时看，autodiff 每次梯度计算约为 `0.07` 到 `0.24` 秒，finite difference 约为 `0.39` 到 `0.41` 秒；在当前抽样配置下，自动微分依然更快，而且更稳定。
 
@@ -104,14 +98,14 @@
 大理石场景中三种 autodiff 配置都能稳定下降，而 finite difference 明显收敛更慢、停留在更高损失区间。
 
 ![大理石场景多方法损失曲线对比](../../outputs/lab2/assignment_runs/20260606_201525/sl_marble_objects/loss_comparison.png)
-*图 16. 大理石场景中多种方法的训练损失曲线对比。*
+*图 15. 大理石场景中多种方法的训练损失曲线对比。*
 
 #### 漫反射场景
 
 漫反射场景的结论和旧版结果不同。最新 run 中，最优配置不再是 `zncc_nn_response`，而是最简单的 `zncc_autodiff`。其最终 loss 为 `0.3618`，优于 `zncc_nn_response_autodiff` 的 `0.4420` 和 `zncc_nn_autodiff` 的 `0.4456`。说明在更接近理想 Lambertian 的场景里，额外的可学习解码器和响应曲线并没有带来收益，反而引入了额外自由度。
 
 ![漫反射场景多方法损失曲线对比](../../outputs/lab2/assignment_runs/20260606_201525/sl_diffuse_objects/loss_comparison.png)
-*图 17. 漫反射场景中多种方法的训练损失曲线对比。*
+*图 16. 漫反射场景中多种方法的训练损失曲线对比。*
 
 ### 定量结果
 
@@ -143,10 +137,10 @@
 下图给出了两个代表性实验的图案演化过程。
 
 ![大理石场景 `zncc_nn_response_autodiff` 图案演化](../../outputs/lab2/assignment_runs/20260606_201525/sl_marble_objects/marble_zncc_nn_response_autodiff/pattern_evolution.gif)
-*图 18. 大理石场景中 `zncc_nn_response_autodiff` 的图案演化过程。*
+*图 17. 大理石场景中 `zncc_nn_response_autodiff` 的图案演化过程。*
 
 ![漫反射场景 `zncc_autodiff` 图案演化](../../outputs/lab2/assignment_runs/20260606_201525/sl_diffuse_objects/diffuse_zncc_autodiff/pattern_evolution.gif)
-*图 19. 漫反射场景中 `zncc_autodiff` 的图案演化过程。*
+*图 18. 漫反射场景中 `zncc_autodiff` 的图案演化过程。*
 
 相比漫反射场景，大理石场景的图案在后期仍然会保留更强的局部变化，这与其更复杂的外观扰动相一致。
 
