@@ -42,7 +42,7 @@ scenes/
     material.xml
     config.yaml
 
-  sl_wood_glass/
+  sl_diffuse_objects/
     scene.xml
     geometry.xml
     material.xml
