@@ -2,9 +2,8 @@
 Generate all scene bundles for Lab 2 experiments.
 
 Creates scene files for:
-- Diffuse plane (baseline)
 - Marble objects
-- Wood + glass materials
+- Diffuse objects
 """
 
 from __future__ import annotations

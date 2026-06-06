@@ -1,0 +1,72 @@
+shared:
+  backend: pytorch
+  device: auto
+  seed: 42
+
+output:
+  base_dir: outputs/lab2/assignment_runs
+
+execution:
+  run_self_check: true
+  run_gradient_comparison: true
+  run_training_experiments: true
+  skip_completed: true
+  auto_resume: true
+
+gradient_comparison:
+  scene_config: configs/lab2/sl_marble_objects.yaml
+  decoder: zncc
+  num_samples: 4
+  fd_num_coords: 16
+
+experiments:
+  - name: marble_zncc_autodiff
+    enabled: true
+    scene_config: configs/lab2/sl_marble_objects.yaml
+    decoder: zncc
+    gradient_mode: autodiff
+    iterations: 500
+
+  - name: marble_zncc_nn_autodiff
+    enabled: true
+    scene_config: configs/lab2/sl_marble_objects.yaml
+    decoder: zncc_nn
+    gradient_mode: autodiff
+    iterations: 500
+
+  - name: marble_zncc_nn_response_autodiff
+    enabled: true
+    scene_config: configs/lab2/sl_marble_objects.yaml
+    decoder: zncc_nn_response
+    gradient_mode: autodiff
+    iterations: 500
+
+  - name: marble_zncc_finite_difference
+    enabled: true
+    scene_config: configs/lab2/sl_marble_objects.yaml
+    decoder: zncc
+    gradient_mode: finite_difference
+    iterations: 500
+    fd_num_coords: 32
+    fd_epsilon: 0.01
+
+  - name: diffuse_zncc_autodiff
+    enabled: true
+    scene_config: configs/lab2/sl_diffuse_objects.yaml
+    decoder: zncc
+    gradient_mode: autodiff
+    iterations: 500
+
+  - name: diffuse_zncc_nn_autodiff
+    enabled: true
+    scene_config: configs/lab2/sl_diffuse_objects.yaml
+    decoder: zncc_nn
+    gradient_mode: autodiff
+    iterations: 500
+
+  - name: diffuse_zncc_nn_response_autodiff
+    enabled: true
+    scene_config: configs/lab2/sl_diffuse_objects.yaml
+    decoder: zncc_nn_response
+    gradient_mode: autodiff
+    iterations: 500
