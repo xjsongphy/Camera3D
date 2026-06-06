@@ -1,4 +1,4 @@
-scene: sl_marble_objects
+scene: sl_diffuse_objects
 decoder: both
 
 training:
