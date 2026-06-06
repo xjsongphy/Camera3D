@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import csv
 import json
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,18 @@ from .common import create_timestamped_output_dir, set_random_seed
 from .decoder import correspondence_metrics, hard_decode
 from .run_logging import TimingTracker, start_run_logging
 from .scene_genertor import create_standard_renderer
+
+
+def format_progress_line(current: int, total: int, loss: float, elapsed: float, eta: float, width: int = 28) -> str:
+    if total <= 0:
+        total = 1
+    ratio = min(max(current / total, 0.0), 1.0)
+    filled = int(width * ratio)
+    bar = "=" * filled + "." * (width - filled)
+    return (
+        f"\r  [{bar}] {current:>4}/{total} "
+        f"loss={loss:.6f} elapsed={elapsed:.1f}s eta={eta:.1f}s"
+    )
 
 
 def create_run_output_dir(base_dir: str, scene: str, decoder: str, penalty: str) -> Path:
@@ -59,12 +72,11 @@ def resolve_max_frequency(training_cfg: dict, projector_width: int) -> float | N
     return float(ratio) * nyquist
 
 
-def init_renderer(scene_name: str, device: torch.device, spp: int):
-    renderer = create_standard_renderer(scene_name, device=str(device), spp=spp)
+def init_renderer(scene_name: str, device: torch.device, spp: int, backend: str = "pytorch"):
+    renderer = create_standard_renderer(scene_name, device=str(device), spp=spp, backend=backend)
     renderer._depth = None
     renderer._gt_corr = None
     renderer.render_depth_for_visualization()
-    renderer.calibrate_autodiff_gain()
     return renderer
 
 
@@ -97,6 +109,29 @@ def save_checkpoint(optimizer: OpticalSGDOptimizer, log_rows: list[dict], ckpt_d
     torch.save(state, ckpt_dir / "checkpoint.pt")
     if log_rows:
         save_training_log(log_rows, ckpt_dir.parent.parent)
+
+
+def save_decoder_snapshot(optimizer: OpticalSGDOptimizer, snapshot_dir: Path) -> Path | None:
+    if optimizer.decoder is None:
+        return None
+
+    state_dict = optimizer.decoder.state_dict()
+    if not state_dict:
+        return None
+
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    snapshot_path = snapshot_dir / f"iter_{optimizer.iteration:05d}.pt"
+    torch.save(
+        {
+            "iteration": optimizer.iteration,
+            "decoder_state_dict": {
+                name: tensor.detach().cpu().clone()
+                for name, tensor in state_dict.items()
+            },
+        },
+        snapshot_path,
+    )
+    return snapshot_path
 
 
 def load_checkpoint(ckpt_path: Path, optimizer: OpticalSGDOptimizer) -> int:
@@ -170,7 +205,8 @@ def save_final_visualizations(optimizer: OpticalSGDOptimizer, output_dir: Path) 
 
 def evaluate_and_save(renderer, optimizer: OpticalSGDOptimizer, output_dir: Path) -> dict:
     patterns = optimizer.patterns
-    images = renderer.render_images_autodiff(patterns)
+    images = renderer.render_images(patterns)
+    images = images.mean(dim=-1) if images.ndim == 4 and images.shape[-1] == 3 else images
     gt_corr = renderer.gt_corr
     scores = optimizer.decoder(images, patterns)
     pred_corr = hard_decode(scores)
@@ -233,6 +269,9 @@ def run_single_decoder(scene_name: str, decoder_name: str, cfg: dict, device: to
         print(f"  scene: {scene_name}")
         print(f"  decoder: {variant_name}")
         print(f"  iterations: {training['iterations']}")
+        print(f"  gradient_mode: {training.get('gradient_mode', 'autodiff')}")
+        if training.get("gradient_mode") == "finite_difference":
+            print(f"  fd_num_coords: {training.get('fd_num_coords', 32)}")
         print(f"  device: {device}")
         print(f"  output: {output_dir}")
         print(f"  log: {log_session.log_path}")
@@ -252,7 +291,12 @@ def run_single_decoder(scene_name: str, decoder_name: str, cfg: dict, device: to
                 "output": output_cfg,
             })
         with timer.phase("init_renderer"):
-            renderer = init_renderer(scene_name, device, rendering.get("spp", 64))
+            renderer = init_renderer(
+                scene_name,
+                device,
+                rendering.get("spp", 64),
+                backend=str(rendering.get("backend", "pytorch")),
+            )
         with timer.phase("render_and_save_gt"):
             render_and_save_gt(renderer, output_dir)
 
@@ -261,6 +305,10 @@ def run_single_decoder(scene_name: str, decoder_name: str, cfg: dict, device: to
             learning_rate=training.get("learning_rate", 0.01),
             decoder_learning_rate=training.get("decoder_lr", 0.01),
             tau=training.get("tau", 50.0),
+            gradient_mode=training.get("gradient_mode", "autodiff"),
+            fd_num_coords=training.get("fd_num_coords", 32),
+            fd_epsilon=training.get("fd_epsilon", 1e-2),
+            fd_seed_base=int(training.get("seed", 0) or 0),
             decoder_type=decoder_type,
             neighborhood_size=training.get("neighborhood", 1),
             use_projector_response_curve=use_projector_response_curve,
@@ -281,8 +329,20 @@ def run_single_decoder(scene_name: str, decoder_name: str, cfg: dict, device: to
             projector_width = renderer.projector.width
             optimizer.config.max_frequency = resolve_max_frequency(training, projector_width)
 
+        initial_patterns = None
+        init_patterns_path = cfg.get("init_patterns_path")
+        if init_patterns_path:
+            initial_patterns = torch.load(init_patterns_path, map_location="cpu", weights_only=False)
+            if not isinstance(initial_patterns, torch.Tensor):
+                raise TypeError(f"Initial patterns file must contain a tensor: {init_patterns_path}")
+
         with timer.phase("initialize_patterns"):
-            optimizer.initialize_patterns(training.get("num_patterns", 4), projector_width, training.get("init_mode", "random"))
+            optimizer.initialize_patterns(
+                training.get("num_patterns", 4),
+                projector_width,
+                training.get("init_mode", "random"),
+                initial_patterns=initial_patterns,
+            )
 
         resume_ckpt = cfg.get("resume")
         start_iter = 0
@@ -301,18 +361,36 @@ def run_single_decoder(scene_name: str, decoder_name: str, cfg: dict, device: to
         iterations = training["iterations"]
         log_interval = output_cfg.get("log_interval", 10)
         save_interval = output_cfg.get("save_interval", 50)
+        decoder_snapshot_dir = output_dir / "decoder_snapshots"
+
+        with timer.phase("save_initial_decoder_snapshot"):
+            save_decoder_snapshot(optimizer, decoder_snapshot_dir)
 
         with timer.phase("training_loop"):
+            last_progress_len = 0
             for i in range(start_iter, iterations):
                 loss = optimizer.step()
+                save_decoder_snapshot(optimizer, decoder_snapshot_dir)
                 elapsed = time.time() - start_time
                 done = (i + 1) - start_iter
                 eta = (iterations - (i + 1)) * (elapsed / max(1, done))
                 log_rows.append({"iteration": i + 1, "loss": loss, "elapsed_sec": round(elapsed, 2)})
+
+                progress_line = format_progress_line(i + 1, iterations, loss, elapsed, eta)
+                pad = " " * max(0, last_progress_len - len(progress_line))
+                sys.stdout.write(progress_line + pad)
+                sys.stdout.flush()
+                last_progress_len = len(progress_line)
+
                 if (i + 1) % log_interval == 0 or i == 0:
-                    print(f"  Iter {i+1}/{iterations}: loss={loss:.6f} (elapsed {elapsed:.1f}s, eta {eta:.1f}s)")
+                    sys.stdout.write("\n")
+                    print(f"  checkpoint iter={i+1}: loss={loss:.6f} elapsed={elapsed:.1f}s eta={eta:.1f}s")
+                    last_progress_len = 0
                 if (i + 1) % save_interval == 0:
                     save_checkpoint(optimizer, log_rows, output_dir / "checkpoints" / f"iter_{i+1}")
+            if iterations > start_iter:
+                sys.stdout.write("\n")
+                sys.stdout.flush()
 
         total_time = time.time() - start_time
         with timer.phase("save_training_log"):
