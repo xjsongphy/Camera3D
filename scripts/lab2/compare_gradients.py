@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import random
 import sys
 import time
 from dataclasses import dataclass
-from datetime import datetime
 from math import ceil, sqrt
 from pathlib import Path
 from typing import Any
@@ -17,10 +15,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from lab2.common import auto_detect_device, create_timestamped_output_dir, load_config, prepare_decoder_images, set_random_seed
 from lab2.decoder import ZNCCDecoder, ZNCCNNDecoder
 from lab2.losses import soft_correspondence_loss
 from lab2.scene_genertor import SCENE_PRESETS, create_standard_renderer
@@ -33,6 +31,7 @@ class GradientComparisonResult:
     memory_mb: float
     gradient: torch.Tensor
     loss_value: float
+    sampled_mask: torch.Tensor | None = None
 
 
 @dataclass
@@ -45,38 +44,12 @@ class SampleComparison:
     signed_relative_error: torch.Tensor
     autodiff_gradient: torch.Tensor
     fd_gradient: torch.Tensor
+    fd_sampled_mask: torch.Tensor
     autodiff_time: float
     fd_time: float
 
-
-def auto_detect_device(device_str: str) -> torch.device:
-    if device_str == "auto":
-        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    return torch.device(device_str)
-
-
-def load_config(config_path: str) -> dict[str, Any]:
-    with open(config_path, encoding="utf-8") as f:
-        return yaml.safe_load(f)
-
-
-def set_random_seed(seed: int) -> None:
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(seed)
-        torch.cuda.manual_seed_all(seed)
-        if torch.backends.cudnn.is_available():
-            torch.backends.cudnn.deterministic = True
-            torch.backends.cudnn.benchmark = False
-
-
 def create_output_dir(base_dir: str, scene: str, decoder: str) -> Path:
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out = Path(base_dir) / "gradient_comparison" / f"{timestamp}_{scene}_{decoder}"
-    out.mkdir(parents=True, exist_ok=True)
-    return out
+    return create_timestamped_output_dir(base_dir, "gradient_comparison", f"{scene}_{decoder}")
 
 
 def build_decoder(
@@ -110,21 +83,6 @@ def sample_random_patterns(
     generator.manual_seed(sample_seed)
     patterns = torch.rand((num_patterns, projector_width), generator=generator, dtype=dtype)
     return patterns.to(device=device, dtype=dtype)
-
-
-def prepare_decoder_images(images: torch.Tensor) -> torch.Tensor:
-    """
-    Convert renderer outputs to decoder input shape [K, H, W].
-
-    Mitsuba rendering returns RGB images [K, H, W, 3], while the decoders expect
-    grayscale observations [K, H, W]. The autodiff path already returns grayscale.
-    """
-    if images.ndim == 3:
-        return images
-    if images.ndim == 4 and images.shape[-1] == 3:
-        return images.mean(dim=-1)
-    raise ValueError(f"Unsupported image tensor shape for decoder: {tuple(images.shape)}")
-
 
 def compute_autodiff_gradient(
     renderer,
@@ -166,6 +124,8 @@ def compute_finite_difference_gradient(
     epsilon: float,
     tau: float,
     penalty: str,
+    num_coords: int,
+    sample_seed: int,
 ) -> GradientComparisonResult:
     device = renderer.device
     num_patterns, projector_width = patterns.shape
@@ -177,25 +137,35 @@ def compute_finite_difference_gradient(
         base_loss = soft_correspondence_loss(scores, gt_corr, tau=tau, penalty=penalty)
 
     gradient = torch.zeros_like(patterns)
+    sampled_mask = torch.zeros_like(patterns, dtype=torch.bool)
 
     torch.cuda.synchronize() if device.type == "cuda" else None
     start_time = time.time()
     start_memory = torch.cuda.memory_allocated() / (1024 ** 2) if device.type == "cuda" else 0.0
 
-    for pattern_idx in range(num_patterns):
-        for column_idx in range(projector_width):
-            perturbed_patterns = patterns.clone()
-            perturbed_patterns[pattern_idx, column_idx] += epsilon
-            with torch.no_grad():
-                images_perturbed = prepare_decoder_images(renderer.render_images(perturbed_patterns))
-                scores_perturbed = decoder(images_perturbed, perturbed_patterns)
-                perturbed_loss = soft_correspondence_loss(
-                    scores_perturbed,
-                    gt_corr,
-                    tau=tau,
-                    penalty=penalty,
-                )
-            gradient[pattern_idx, column_idx] = (perturbed_loss - base_loss) / epsilon
+    total_coords = num_patterns * projector_width
+    sample_count = min(max(1, int(num_coords)), total_coords)
+    generator = torch.Generator(device="cpu")
+    generator.manual_seed(sample_seed)
+    flat_indices = torch.randperm(total_coords, generator=generator)[:sample_count].tolist()
+
+    for flat_idx in flat_indices:
+        pattern_idx = flat_idx // projector_width
+        column_idx = flat_idx % projector_width
+        sampled_mask[pattern_idx, column_idx] = True
+
+        perturbed_patterns = patterns.clone()
+        perturbed_patterns[pattern_idx, column_idx] += epsilon
+        with torch.no_grad():
+            images_perturbed = prepare_decoder_images(renderer.render_images(perturbed_patterns))
+            scores_perturbed = decoder(images_perturbed, perturbed_patterns)
+            perturbed_loss = soft_correspondence_loss(
+                scores_perturbed,
+                gt_corr,
+                tau=tau,
+                penalty=penalty,
+            )
+        gradient[pattern_idx, column_idx] = (perturbed_loss - base_loss) / epsilon
 
     torch.cuda.synchronize() if device.type == "cuda" else None
     end_time = time.time()
@@ -207,6 +177,7 @@ def compute_finite_difference_gradient(
         memory_mb=end_memory - start_memory,
         gradient=gradient,
         loss_value=base_loss.item(),
+        sampled_mask=sampled_mask,
     )
 
 
@@ -220,6 +191,7 @@ def compare_single_sample(
     tau: float,
     penalty: str,
     relative_eps: float,
+    fd_num_coords: int,
 ) -> SampleComparison:
     autodiff_result = compute_autodiff_gradient(
         renderer=renderer,
@@ -235,15 +207,22 @@ def compare_single_sample(
         epsilon=epsilon,
         tau=tau,
         penalty=penalty,
+        num_coords=fd_num_coords,
+        sample_seed=pattern_seed,
     )
 
-    signed_relative_error = (
-        (autodiff_result.gradient - fd_result.gradient)
-        / (autodiff_result.gradient.abs() + relative_eps)
+    if fd_result.sampled_mask is None:
+        raise RuntimeError("Finite-difference comparison requires a sampled coordinate mask.")
+    sampled_mask = fd_result.sampled_mask
+
+    diff = autodiff_result.gradient - fd_result.gradient
+    signed_relative_error = torch.full_like(diff, float("nan"))
+    signed_relative_error[sampled_mask] = (
+        diff[sampled_mask] / (autodiff_result.gradient.abs()[sampled_mask] + relative_eps)
     )
     relative_l2_error = (
-        (autodiff_result.gradient - fd_result.gradient).norm()
-        / (autodiff_result.gradient.norm() + relative_eps)
+        diff[sampled_mask].norm()
+        / (autodiff_result.gradient[sampled_mask].norm() + relative_eps)
     ).item()
 
     return SampleComparison(
@@ -255,6 +234,7 @@ def compare_single_sample(
         signed_relative_error=signed_relative_error.detach().cpu(),
         autodiff_gradient=autodiff_result.gradient.detach().cpu(),
         fd_gradient=fd_result.gradient.detach().cpu(),
+        fd_sampled_mask=sampled_mask.detach().cpu(),
         autodiff_time=autodiff_result.time,
         fd_time=fd_result.time,
     )
@@ -269,7 +249,7 @@ def plot_signed_relative_error_heatmaps(
     num_rows = ceil(num_samples / num_cols)
 
     all_values = np.concatenate([
-        comparison.signed_relative_error.numpy().reshape(-1)
+        comparison.signed_relative_error.numpy()[np.isfinite(comparison.signed_relative_error.numpy())]
         for comparison in comparisons
     ])
     vmax = float(np.max(np.abs(all_values)))
@@ -303,11 +283,19 @@ def plot_signed_relative_error_heatmaps(
     for ax in axes.flat[num_samples:]:
         ax.axis("off")
 
+    fig.subplots_adjust(right=0.88, top=0.90, wspace=0.28, hspace=0.35)
+
     if last_im is not None:
-        fig.colorbar(last_im, ax=axes.ravel().tolist(), shrink=0.92, label="Signed Relative Error")
+        cbar = fig.colorbar(
+            last_im,
+            ax=axes.ravel().tolist(),
+            fraction=0.03,
+            pad=0.02,
+            shrink=0.92,
+        )
+        cbar.set_label("Signed Relative Error")
 
     fig.suptitle("(dL/dc_auto - dL/dc_fd) / (|dL/dc_auto| + eps)", fontsize=14)
-    fig.tight_layout()
     fig.savefig(output_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
@@ -317,17 +305,29 @@ def plot_relative_l2_histogram(
     output_path: Path,
 ) -> None:
     values = np.array([comparison.relative_l2_error for comparison in comparisons], dtype=np.float64)
-    bins = min(20, max(5, len(values)))
-
     fig, ax = plt.subplots(figsize=(8, 5))
-    ax.hist(values, bins=bins, color="steelblue", edgecolor="black", alpha=0.85)
-    ax.set_xlabel(r"$||g_{auto} - g_{fd}|| / ||g_{auto}||$")
-    ax.set_ylabel("Count")
-    ax.set_title("Relative L2 Error Histogram Across Random Pattern Samples")
-    ax.grid(True, alpha=0.3)
-
     mean_value = float(values.mean())
-    ax.axvline(mean_value, color="crimson", linestyle="--", linewidth=2, label=f"mean={mean_value:.3e}")
+    if len(values) < 8:
+        order = np.argsort(values)
+        sorted_values = values[order]
+        x = np.arange(1, len(sorted_values) + 1, dtype=np.int64)
+        ax.plot(x, sorted_values, color="steelblue", linewidth=1.5, alpha=0.9)
+        ax.scatter(x, sorted_values, color="steelblue", edgecolor="black", s=60, zorder=3)
+        for xi, yi in zip(x, sorted_values):
+            ax.text(xi, yi, f"{yi:.3e}", fontsize=8, ha="center", va="bottom")
+        ax.axhline(mean_value, color="crimson", linestyle="--", linewidth=2, label=f"mean={mean_value:.3e}")
+        ax.set_xticks(x)
+        ax.set_xlabel("Sorted sample index")
+        ax.set_ylabel(r"$||g_{auto} - g_{fd}|| / ||g_{auto}||$")
+        ax.set_title("Relative L2 Error Across Random Pattern Samples")
+    else:
+        bins = min(20, max(5, len(values)))
+        ax.hist(values, bins=bins, color="steelblue", edgecolor="black", alpha=0.85)
+        ax.axvline(mean_value, color="crimson", linestyle="--", linewidth=2, label=f"mean={mean_value:.3e}")
+        ax.set_xlabel(r"$||g_{auto} - g_{fd}|| / ||g_{auto}||$")
+        ax.set_ylabel("Count")
+        ax.set_title("Relative L2 Error Histogram Across Random Pattern Samples")
+    ax.grid(True, alpha=0.3)
     ax.legend()
 
     fig.tight_layout()
@@ -357,6 +357,7 @@ def save_summary(
                 "loss_autodiff": comparison.loss_autodiff,
                 "loss_fd": comparison.loss_fd,
                 "relative_l2_error": comparison.relative_l2_error,
+                "fd_sampled_coords": int(comparison.fd_sampled_mask.sum().item()),
                 "autodiff_time": comparison.autodiff_time,
                 "fd_time": comparison.fd_time,
             }
@@ -372,6 +373,7 @@ def save_summary(
             "signed_relative_errors": torch.stack([c.signed_relative_error for c in comparisons], dim=0),
             "autodiff_gradients": torch.stack([c.autodiff_gradient for c in comparisons], dim=0),
             "fd_gradients": torch.stack([c.fd_gradient for c in comparisons], dim=0),
+            "fd_sampled_masks": torch.stack([c.fd_sampled_mask for c in comparisons], dim=0),
             "relative_l2_errors": torch.tensor(relative_l2_values, dtype=torch.float32),
             "pattern_seeds": torch.tensor([c.pattern_seed for c in comparisons], dtype=torch.long),
         },
@@ -385,6 +387,7 @@ def compare_for_decoder(
     num_samples: int,
     epsilon: float,
     relative_eps: float,
+    fd_num_coords: int,
     output_root: Path,
 ) -> None:
     scene_name = cfg["scene"]
@@ -405,15 +408,20 @@ def compare_for_decoder(
     print(f"Scene: {scene_name}")
     print(f"Samples: {num_samples}")
     print(f"Patterns per sample: {num_patterns} x projector_width")
+    print(f"Finite-difference sampled coords: {fd_num_coords}")
     print(f"Device: {device}")
     print("=" * 60)
 
     set_random_seed(seed)
-    renderer = create_standard_renderer(scene_name, device=str(device), spp=spp)
+    renderer = create_standard_renderer(
+        scene_name,
+        device=str(device),
+        spp=spp,
+        backend=str(rendering.get("backend", "pytorch")),
+    )
     renderer._depth = None
     renderer._gt_corr = None
     renderer.render_depth_for_visualization()
-    renderer.calibrate_autodiff_gain()
 
     set_random_seed(seed)
     decoder = build_decoder(
@@ -452,6 +460,7 @@ def compare_for_decoder(
             tau=tau,
             penalty=penalty,
             relative_eps=relative_eps,
+            fd_num_coords=fd_num_coords,
         )
         comparisons.append(comparison)
         print(
@@ -469,6 +478,7 @@ def compare_for_decoder(
         "num_samples": num_samples,
         "epsilon": epsilon,
         "relative_eps": relative_eps,
+        "fd_num_coords": fd_num_coords,
         "seed": seed,
         "training": training,
         "rendering": rendering,
@@ -495,12 +505,13 @@ def compare_for_decoder(
 
 
 def build_argparser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Compare finite-difference and autodiff gradients.")
+    parser = argparse.ArgumentParser(description="Compare Mitsuba finite-difference gradients and Mitsuba autodiff gradients.")
     parser.add_argument("--config", type=str, required=True, help="YAML config path")
     parser.add_argument("--decoder", type=str, choices=["zncc", "zncc_nn", "zncc_nn_response", "both"], default=None)
     parser.add_argument("--device", type=str, choices=["auto", "cpu", "cuda"], default=None)
     parser.add_argument("--num-samples", type=int, default=4, help="Number of random pattern tensors")
     parser.add_argument("--epsilon", type=float, default=1e-2, help="Finite-difference perturbation")
+    parser.add_argument("--fd-num-coords", type=int, default=32, help="Number of randomly sampled pattern coordinates for finite difference")
     parser.add_argument("--relative-eps", type=float, default=1e-8, help="Denominator stabilizer for signed relative error")
     parser.add_argument("--seed", type=int, default=None, help="Override training.seed")
     parser.add_argument("--output-dir", type=str, default=None, help="Override output base directory")
@@ -511,6 +522,8 @@ def main() -> None:
     args = build_argparser().parse_args()
     if args.num_samples < 1:
         raise ValueError("--num-samples must be >= 1")
+    if args.fd_num_coords < 1:
+        raise ValueError("--fd-num-coords must be >= 1")
 
     cfg = load_config(args.config)
 
@@ -536,6 +549,7 @@ def main() -> None:
         "decoder": decoder_mode,
         "num_samples": args.num_samples,
         "epsilon": args.epsilon,
+        "fd_num_coords": args.fd_num_coords,
         "relative_eps": args.relative_eps,
         "device": cfg.setdefault("rendering", {}).get("device", "auto"),
         "seed": cfg.setdefault("training", {}).get("seed"),
@@ -544,7 +558,7 @@ def main() -> None:
         json.dump(run_config, f, indent=2, ensure_ascii=False)
 
     print("=" * 60)
-    print("Gradient Comparison: Finite Difference vs Autodiff")
+    print("Gradient Comparison: Mitsuba Finite Difference vs Mitsuba Autodiff")
     print("=" * 60)
     print(f"Output directory: {output_root}")
 
@@ -556,6 +570,7 @@ def main() -> None:
                 num_samples=args.num_samples,
                 epsilon=args.epsilon,
                 relative_eps=args.relative_eps,
+                fd_num_coords=args.fd_num_coords,
                 output_root=output_root,
             )
     else:
@@ -565,6 +580,7 @@ def main() -> None:
             num_samples=args.num_samples,
             epsilon=args.epsilon,
             relative_eps=args.relative_eps,
+            fd_num_coords=args.fd_num_coords,
             output_root=output_root,
         )
 

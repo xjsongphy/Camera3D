@@ -30,7 +30,7 @@
 
     <!-- Marble statue model -->
     <shape type="obj">
-        <string name="filename" value="resources/geometry/obj/marble_statue.obj"/>
+        <string name="filename" value="assets/geometry/obj/marble_statue.obj"/>
         <transform name="to_world">
             <scale value="0.005"/>
             <rotate y="1" angle="30"/>

@@ -15,11 +15,8 @@ class ScenePreset:
 
 
 SCENE_PRESETS = {
-    "sl_training_board": ScenePreset("sl_training_board", "Training board with random texture (from paper)"),
-    "sl_vases": ScenePreset("sl_vases", "Two vases scene for structured light"),
     "sl_marble_objects": ScenePreset("sl_marble_objects", "Marble-like mixed objects scene"),
-    "sl_wood_glass": ScenePreset("sl_wood_glass", "Wood-like + glass mixed material scene"),
-    "sl_statue": ScenePreset("sl_statue", "Abstract statue scene for complex geometry"),
+    "sl_diffuse_objects": ScenePreset("sl_diffuse_objects", "Simple diffuse baseline scene"),
 }
 
 
@@ -233,6 +230,26 @@ def generate_scene_bundle(scene_root: str | Path, scene_name: str) -> Path:
     <rgb name="diffuse_reflectance" value="0.83, 0.83, 0.85"/>
 </bsdf>
 """
+    elif scene_name == "sl_diffuse_objects":
+        geometry = """<shape type="sphere">
+    <transform name="to_world">
+        <translate x="-0.35" y="-0.15" z="1.9"/>
+        <scale x="0.24" y="0.24" z="0.24"/>
+    </transform>
+    <ref id="mat_main"/>
+</shape>
+<shape type="cube">
+    <transform name="to_world">
+        <translate x="0.35" y="-0.2" z="2.05"/>
+        <scale x="0.24" y="0.24" z="0.24"/>
+    </transform>
+    <ref id="mat_main"/>
+</shape>
+"""
+        material = """<bsdf type="diffuse" id="mat_main">
+    <rgb name="reflectance" value="0.72, 0.72, 0.72"/>
+</bsdf>
+"""
     else:
         geometry = """<shape type="sphere">
     <transform name="to_world">
@@ -325,6 +342,7 @@ def create_standard_renderer(
     spp: int = 64,
     camera_config: dict[str, Any] | None = None,
     projector_config: dict[str, Any] | None = None,
+    backend: str = "pytorch",
 ) -> Any:
     """
     Create a renderer with standard configurations for the given scene.
@@ -341,9 +359,16 @@ def create_standard_renderer(
     Returns:
         Configured StructuredLightRenderer instance
     """
-    from lab2.shader import StructuredLightRenderer
+    if backend == "mitsuba":
+        from lab2.shader import StructuredLightRenderer
 
-    renderer = StructuredLightRenderer(device=device, spp=spp)
+        renderer = StructuredLightRenderer(device=device, spp=spp)
+    elif backend == "pytorch":
+        from lab2.pytorch_renderer import PytorchStructuredLightRenderer
+
+        renderer = PytorchStructuredLightRenderer(device=device, spp=spp)
+    else:
+        raise ValueError(f"Unknown renderer backend: {backend}")
 
     load_scene_with_standard_config(
         renderer,

@@ -1,6 +1,6 @@
 # Lab2 素材来源建议（可直接用）
 
-目标：给 `sl_marble_objects` / `sl_wood_glass` 场景准备可复用、授权清晰的素材。
+目标：给 `sl_marble_objects` / `sl_diffuse_objects` 场景准备可复用、授权清晰的素材。
 
 ## 推荐来源
 
