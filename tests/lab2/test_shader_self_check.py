@@ -4,7 +4,8 @@ Renderer self-check test for Lab 2.
 Validates the Mitsuba projector rendering pipeline:
 1. Renders a stripe pattern projected onto a scene with objects
 2. Verifies the projector is actually contributing (not just ambient)
-3. Saves visualizations showing scene geometry via projected pattern
+3. Verifies the Mitsuba autodiff path produces gradients on patterns
+4. Saves visualizations showing scene geometry via projected pattern
 
 Run with:
     pytest tests/lab2/test_shader_self_check.py -v
@@ -75,6 +76,19 @@ class TestStructuredLightRendererSelfCheck(unittest.TestCase):
             self.assertTrue(torch.isfinite(images).all().item())
             self.assertTrue((images >= 0.0).all().item())
             self.assertTrue((images <= 1.0).all().item())
+
+            # Verify autodiff path on Mitsuba is connected to patterns
+            pattern_autodiff = pattern.clone().detach().requires_grad_(True)
+            images_autodiff = renderer.render_images_autodiff(pattern_autodiff)
+            self.assertEqual(tuple(images_autodiff.shape), (1, 480, 640, 3))
+            loss = images_autodiff.mean()
+            loss.backward()
+            self.assertIsNotNone(pattern_autodiff.grad, f"Autodiff gradient should exist for scene {scene_name}")
+            self.assertGreater(
+                pattern_autodiff.grad.abs().mean().item(),
+                0.0,
+                f"Autodiff gradient should be non-zero for scene {scene_name}",
+            )
 
             # Verify projector is contributing
             img = images[0]

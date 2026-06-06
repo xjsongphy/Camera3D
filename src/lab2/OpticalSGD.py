@@ -17,12 +17,14 @@ from enum import Enum
 from pathlib import Path
 from typing import Literal
 
+import numpy as np
 import torch
 import torch.nn as nn
 
 from .shader import StructuredLightRenderer
 from . import decoder
 from . import losses
+from .common import prepare_decoder_images
 
 
 class DecoderType(Enum):
@@ -40,6 +42,10 @@ class OptimizerConfig:
     learning_rate: float = 0.01
     decoder_learning_rate: float = 0.01  # Learning rate for decoder parameters
     tau: float = 50.0  # Softmax temperature for correspondence
+    gradient_mode: Literal["autodiff", "finite_difference"] = "autodiff"
+    fd_num_coords: int = 32
+    fd_epsilon: float = 1e-2
+    fd_seed_base: int = 0
 
     # Decoder configuration
     decoder_type: DecoderType = DecoderType.ZNCC
@@ -152,12 +158,15 @@ class OpticalSGDOptimizer:
         # Ensure output directory exists
         if self.config.output_dir is not None:
             Path(self.config.output_dir).mkdir(parents=True, exist_ok=True)
+        if self.config.gradient_mode == "finite_difference" and self.config.decoder_type != DecoderType.ZNCC:
+            raise ValueError("Finite-difference training is currently supported only for the ZNCC decoder.")
 
     def initialize_patterns(
         self,
         num_patterns: int,
         projector_width: int,
         init_mode: str = "random",
+        initial_patterns: torch.Tensor | None = None,
     ) -> torch.nn.Parameter:
         """
         Initialize patterns and decoder.
@@ -171,13 +180,25 @@ class OpticalSGDOptimizer:
             Pattern parameter
         """
         # Initialize patterns
-        patterns = initialize_patterns(
-            num_patterns,
-            projector_width,
-            self.renderer.device,
-            self.renderer.dtype,
-            init_mode,
-        )
+        if initial_patterns is None:
+            patterns = initialize_patterns(
+                num_patterns,
+                projector_width,
+                self.renderer.device,
+                self.renderer.dtype,
+                init_mode,
+            )
+        else:
+            expected_shape = (num_patterns, projector_width)
+            if tuple(initial_patterns.shape) != expected_shape:
+                raise ValueError(
+                    f"Initial patterns shape mismatch: expected {expected_shape}, "
+                    f"got {tuple(initial_patterns.shape)}"
+                )
+            patterns = initial_patterns.to(
+                device=self.renderer.device,
+                dtype=self.renderer.dtype,
+            ).clone()
 
         # Make patterns learnable
         self.patterns = torch.nn.Parameter(patterns)
@@ -248,6 +269,8 @@ class OpticalSGDOptimizer:
         if self.decoder is None:
             raise RuntimeError("Decoder must be initialized before computing loss")
 
+        images = prepare_decoder_images(images)
+
         # Compute ZNCC/ZNCC-NN scores
         scores = self.decoder(images, self.patterns)  # [H, W, Wp]
 
@@ -268,6 +291,67 @@ class OpticalSGDOptimizer:
 
         return corr_loss
 
+    def _compute_freq_penalty_grad(self) -> tuple[torch.Tensor | None, float]:
+        if self.patterns is None or self.config.max_frequency is None:
+            return None, 0.0
+
+        patterns = self.patterns.detach().clone().requires_grad_(True)
+        freq_penalty = self.config.frequency_weight * losses.frequency_penalty(
+            patterns,
+            self.config.max_frequency,
+        )
+        (grad,) = torch.autograd.grad(freq_penalty, patterns, retain_graph=False, create_graph=False)
+        return grad.detach(), float(freq_penalty.item())
+
+    def _compute_fd_corr_loss(self, patterns: torch.Tensor) -> torch.Tensor:
+        if self.decoder is None:
+            raise RuntimeError("Decoder must be initialized before computing loss")
+        with torch.no_grad():
+            images = self.renderer.render_images(patterns)
+            images = images.mean(dim=-1) if images.ndim == 4 and images.shape[-1] == 3 else images
+            scores = self.decoder(images, patterns)
+            return losses.soft_correspondence_loss(
+                scores,
+                self.renderer.gt_corr,
+                tau=self.config.tau,
+                penalty=self.config.penalty,
+            )
+
+    def _compute_finite_difference_pattern_grad(self) -> tuple[torch.Tensor, float]:
+        if self.patterns is None or self.decoder is None:
+            raise RuntimeError("Patterns and decoder must be initialized before optimization")
+
+        patterns = self.patterns.detach()
+        device = self.renderer.device
+        num_patterns, projector_width = patterns.shape
+        total_coords = num_patterns * projector_width
+        sample_count = min(max(1, int(self.config.fd_num_coords)), total_coords)
+
+        generator = torch.Generator(device="cpu")
+        generator.manual_seed(int(self.config.fd_seed_base + self.iteration))
+        flat_indices = torch.randperm(total_coords, generator=generator)[:sample_count].tolist()
+
+        direction = torch.zeros_like(patterns)
+        for flat_idx in flat_indices:
+            pattern_idx = flat_idx // projector_width
+            column_idx = flat_idx % projector_width
+            direction[pattern_idx, column_idx] = 1.0 if torch.rand((), generator=generator).item() > 0.5 else -1.0
+
+        epsilon = float(self.config.fd_epsilon)
+        patterns_pos = (patterns + epsilon * direction).clamp(self.config.min_value, self.config.max_value)
+        patterns_neg = (patterns - epsilon * direction).clamp(self.config.min_value, self.config.max_value)
+        loss_pos = self._compute_fd_corr_loss(patterns_pos)
+        loss_neg = self._compute_fd_corr_loss(patterns_neg)
+
+        gradient = direction * ((loss_pos - loss_neg) / (2.0 * epsilon)) * (total_coords / sample_count)
+
+        freq_grad, freq_penalty = self._compute_freq_penalty_grad()
+        if freq_grad is not None:
+            gradient = gradient + freq_grad
+
+        total_loss = float((0.5 * (loss_pos + loss_neg)).item()) + freq_penalty
+        return gradient.to(device=device, dtype=self.renderer.dtype), total_loss
+
     def step(self) -> float:
         """
         Perform one optimization step.
@@ -278,16 +362,17 @@ class OpticalSGDOptimizer:
         if self.patterns is None or self.optimizer is None:
             raise RuntimeError("Patterns must be initialized before optimization")
 
-        # Forward pass: render with differentiable renderer
-        images = self.renderer.render_images_autodiff(self.patterns)
-        gt_corr = self.renderer.gt_corr
-
-        # Compute loss
-        loss = self.compute_loss(images, gt_corr)
-
-        # Backward pass
         self.optimizer.zero_grad()
-        loss.backward()
+        if self.config.gradient_mode == "autodiff":
+            images = self.renderer.render_images_autodiff(self.patterns)
+            gt_corr = self.renderer.gt_corr
+            loss = self.compute_loss(images, gt_corr)
+            loss.backward()
+            with torch.no_grad():
+                loss_value = float(loss.item())
+        else:
+            grad, loss_value = self._compute_finite_difference_pattern_grad()
+            self.patterns.grad = grad
         self.optimizer.step()
         if self.scheduler is not None:
             self.scheduler.step()
@@ -311,7 +396,6 @@ class OpticalSGDOptimizer:
 
         # Update iteration
         self.iteration += 1
-        loss_value = loss.item()
         self.loss_history.append(loss_value)
         self._record_history()
 
