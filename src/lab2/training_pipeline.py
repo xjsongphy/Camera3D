@@ -25,10 +25,36 @@ from .analysis import (
     plot_patterns,
     plot_projector_response_curve,
 )
-from .common import create_timestamped_output_dir, set_random_seed
+from .common import (
+    correspondence_to_depth,
+    create_timestamped_output_dir,
+    set_random_seed,
+)
 from .decoder import correspondence_metrics, hard_decode
 from .run_logging import TimingTracker, start_run_logging
 from .scene_genertor import create_standard_renderer
+
+
+def _prepare_depth_display(
+    depth: np.ndarray,
+    *,
+    invalid_fill: float = -1.0,
+    lower_q: float = 0.02,
+    upper_q: float = 0.98,
+) -> tuple[np.ndarray, float, float]:
+    valid = np.isfinite(depth)
+    if not valid.any():
+        return np.full_like(depth, invalid_fill, dtype=np.float32), invalid_fill, invalid_fill
+
+    valid_values = depth[valid]
+    lo = float(np.quantile(valid_values, lower_q))
+    hi = float(np.quantile(valid_values, upper_q))
+    if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+        lo = float(valid_values.min())
+        hi = float(valid_values.max())
+    clipped = np.clip(depth, lo, hi)
+    display = np.where(valid, clipped, invalid_fill).astype(np.float32, copy=False)
+    return display, lo, hi
 
 
 def format_progress_line(current: int, total: int, loss: float, elapsed: float, eta: float, width: int = 28) -> str:
@@ -165,20 +191,50 @@ def load_checkpoint(ckpt_path: Path, optimizer: OpticalSGDOptimizer) -> int:
 
 def render_and_save_gt(renderer, output_dir: Path) -> None:
     depth = renderer.render_depth_for_visualization().cpu().numpy()
-    gt_corr = renderer.gt_corr.cpu().numpy()
+    gt_corr = renderer.gt_corr
+    gt_corr_np = gt_corr.cpu().numpy()
+    depth_display, depth_lo, depth_hi = _prepare_depth_display(depth)
+
+    # Structured-light depth from ground-truth correspondence
+    if renderer.camera is not None and renderer.projector is not None:
+        gt_depth_sl = correspondence_to_depth(
+            gt_corr,
+            renderer.camera,
+            renderer.projector,
+        ).cpu().numpy()
+    else:
+        gt_depth_sl = None
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
-    im1 = ax1.imshow(depth, cmap="plasma")
-    ax1.set_title(f"GT Depth ({depth.min():.2f}-{depth.max():.2f}m)")
+    im1 = ax1.imshow(depth_display, cmap="plasma", vmin=-1.0, vmax=depth_hi)
+    ax1.set_title(f"GT Depth (display clipped to {depth_lo:.2f}-{depth_hi:.2f}m; invalid=-1)")
     plt.colorbar(im1, ax=ax1)
-    ax2.hist(depth.flatten(), bins=50, edgecolor="black")
+    ax2.hist(depth[np.isfinite(depth)], bins=50, edgecolor="black")
     ax2.set_title("Depth Distribution")
     plt.tight_layout()
     fig.savefig(output_dir / "depth_gt.png", dpi=150)
     plt.close(fig)
 
+    if gt_depth_sl is not None:
+        gt_depth_display, gt_depth_lo, gt_depth_hi = _prepare_depth_display(gt_depth_sl)
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+        im1 = ax1.imshow(gt_depth_display, cmap="plasma", vmin=-1.0, vmax=gt_depth_hi)
+        ax1.set_title(
+            f"SL GT Depth (clipped to {gt_depth_lo:.2f}-{gt_depth_hi:.2f}m; invalid=-1)"
+        )
+        plt.colorbar(im1, ax=ax1)
+
+        diff = np.abs(gt_depth_sl - depth)
+        valid = np.isfinite(diff)
+        im2 = ax2.imshow(np.where(valid, diff, 0), cmap="hot")
+        ax2.set_title(f"SL vs Camera Depth Diff (mean={diff[valid].mean():.4f}m)")
+        plt.colorbar(im2, ax=ax2)
+        plt.tight_layout()
+        fig.savefig(output_dir / "depth_gt_sl.png", dpi=150)
+        plt.close(fig)
+
     fig, ax = plt.subplots(figsize=(8, 4))
-    display = np.where(np.isfinite(gt_corr), gt_corr, -1)
+    display = np.where(np.isfinite(gt_corr_np), gt_corr_np, -1)
     im = ax.imshow(display, cmap="viridis")
     ax.set_title("GT Correspondence")
     plt.colorbar(im, ax=ax)
@@ -228,9 +284,105 @@ def evaluate_and_save(renderer, optimizer: OpticalSGDOptimizer, output_dir: Path
     err = np.where(valid, np.abs(pred_np - gt_np), 0)
     fig, ax = plt.subplots(figsize=(7, 5))
     im = ax.imshow(err, cmap="hot")
-    ax.set_title(f"Error Map (MAE={metrics['mae']:.2f})")
+    ax.set_title(f"Correspondence Error Map (MAE={metrics['mae']:.2f} px)")
     plt.colorbar(im, ax=ax)
-    plt.tight_layout(); fig.savefig(output_dir / "depth_error_map.png", dpi=150); plt.close(fig)
+    plt.tight_layout(); fig.savefig(output_dir / "correspondence_error_map.png", dpi=150); plt.close(fig)
+
+    # ---- Structured-light depth error ------------------------------------
+    if renderer.camera is not None and renderer.projector is not None:
+        pred_depth_sl = correspondence_to_depth(
+            pred_corr,
+            renderer.camera,
+            renderer.projector,
+        )
+        gt_depth_sl = correspondence_to_depth(
+            gt_corr,
+            renderer.camera,
+            renderer.projector,
+        )
+        pred_depth_np = pred_depth_sl.cpu().numpy()
+        gt_depth_np = gt_depth_sl.cpu().numpy()
+        valid_depth = np.isfinite(gt_depth_np) & np.isfinite(pred_depth_np)
+        depth_err = np.abs(pred_depth_np - gt_depth_np)
+        depth_mae = float(depth_err[valid_depth].mean()) if valid_depth.any() else float("nan")
+        depth_rmse = float(np.sqrt((depth_err[valid_depth] ** 2).mean())) if valid_depth.any() else float("nan")
+        pred_display, pred_lo, pred_hi = _prepare_depth_display(pred_depth_np)
+        gt_display_depth, gt_lo, gt_hi = _prepare_depth_display(gt_depth_np)
+        shared_hi = max(pred_hi, gt_hi)
+        err_display = np.where(valid_depth, depth_err, -1.0)
+        renderer_depth_np = renderer.render_depth_for_visualization().cpu().numpy()
+        renderer_display, renderer_lo, renderer_hi = _prepare_depth_display(renderer_depth_np)
+        pred_vs_renderer_valid = np.isfinite(pred_depth_np) & np.isfinite(renderer_depth_np)
+        pred_vs_renderer_err = np.abs(pred_depth_np - renderer_depth_np)
+        pred_vs_renderer_err_display = np.where(pred_vs_renderer_valid, pred_vs_renderer_err, -1.0)
+        shared_renderer_hi = max(pred_hi, renderer_hi)
+
+        # Save depth maps as images
+        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20, 5))
+        im1 = ax1.imshow(pred_display, cmap="plasma", vmin=-1.0, vmax=shared_hi)
+        ax1.set_title(f"SL Pred Depth (clipped to {pred_lo:.2f}-{pred_hi:.2f}m; invalid=-1)")
+        plt.colorbar(im1, ax=ax1)
+        im2 = ax2.imshow(gt_display_depth, cmap="plasma", vmin=-1.0, vmax=shared_hi)
+        ax2.set_title(f"SL GT Depth (clipped to {gt_lo:.2f}-{gt_hi:.2f}m; invalid=-1)")
+        plt.colorbar(im2, ax=ax2)
+        im3 = ax3.imshow(err_display, cmap="hot", vmin=-1.0)
+        ax3.set_title(f"SL Depth Error (MAE={depth_mae:.4f}m, RMSE={depth_rmse:.4f}m)")
+        plt.colorbar(im3, ax=ax3)
+        plt.tight_layout()
+        fig.savefig(output_dir / "depth_sl_error_map.png", dpi=150, bbox_inches="tight")
+        plt.close(fig)
+
+        fig, ax = plt.subplots(figsize=(7, 5))
+        im = ax.imshow(pred_display, cmap="plasma", vmin=-1.0, vmax=shared_hi)
+        ax.set_title("SL Predicted Depth")
+        plt.colorbar(im, ax=ax)
+        plt.tight_layout()
+        fig.savefig(output_dir / "depth_sl_pred.png", dpi=150, bbox_inches="tight")
+        plt.close(fig)
+
+        fig, ax = plt.subplots(figsize=(7, 5))
+        im = ax.imshow(gt_display_depth, cmap="plasma", vmin=-1.0, vmax=shared_hi)
+        ax.set_title("SL GT Depth")
+        plt.colorbar(im, ax=ax)
+        plt.tight_layout()
+        fig.savefig(output_dir / "depth_sl_gt.png", dpi=150, bbox_inches="tight")
+        plt.close(fig)
+
+        fig, ax = plt.subplots(figsize=(7, 5))
+        im = ax.imshow(err_display, cmap="hot", vmin=-1.0)
+        ax.set_title(f"SL Depth Error (MAE={depth_mae:.4f}m, RMSE={depth_rmse:.4f}m)")
+        plt.colorbar(im, ax=ax)
+        plt.tight_layout()
+        fig.savefig(output_dir / "depth_sl_abs_error.png", dpi=150, bbox_inches="tight")
+        plt.close(fig)
+
+        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20, 5))
+        im1 = ax1.imshow(pred_display, cmap="plasma", vmin=-1.0, vmax=shared_renderer_hi)
+        ax1.set_title(f"SL Pred Depth (clipped to {pred_lo:.2f}-{pred_hi:.2f}m; invalid=-1)")
+        plt.colorbar(im1, ax=ax1)
+        im2 = ax2.imshow(renderer_display, cmap="plasma", vmin=-1.0, vmax=shared_renderer_hi)
+        ax2.set_title(f"Renderer Depth (clipped to {renderer_lo:.2f}-{renderer_hi:.2f}m; invalid=-1)")
+        plt.colorbar(im2, ax=ax2)
+        im3 = ax3.imshow(pred_vs_renderer_err_display, cmap="hot", vmin=-1.0)
+        ax3.set_title("SL vs Renderer Depth Error")
+        plt.colorbar(im3, ax=ax3)
+        plt.tight_layout()
+        fig.savefig(output_dir / "depth_sl_vs_renderer.png", dpi=150, bbox_inches="tight")
+        plt.close(fig)
+
+        # Export numeric depth maps
+        np.savez(
+            output_dir / "depth_sl_maps.npz",
+            pred_depth=pred_depth_np,
+            gt_depth=gt_depth_np,
+            depth_error=depth_err,
+            valid_mask=valid_depth,
+        )
+
+        metrics["depth_mae"] = depth_mae
+        metrics["depth_rmse"] = depth_rmse
+        with open(output_dir / "metrics_final.json", "w", encoding="utf-8") as f:
+            json.dump(metrics, f, indent=2)
 
     return metrics
 
