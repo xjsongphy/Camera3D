@@ -46,6 +46,20 @@ Camera = CameraConfig
 Projector = ProjectorConfig
 
 
+class _MitsubaAutodiffRenderFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, patterns: torch.Tensor, renderer: "StructuredLightRenderer") -> torch.Tensor:
+        images, render_state = renderer._render_images_mitsuba_autodiff_forward(patterns)
+        ctx.renderer = renderer
+        ctx.render_state = render_state
+        return images
+
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor) -> tuple[torch.Tensor, None]:
+        grad_patterns = ctx.renderer._render_images_mitsuba_autodiff_backward(ctx.render_state, grad_output)
+        return grad_patterns, None
+
+
 class StructuredLightRenderer:
     """Single shader: Mitsuba rendering backend + torch tensor data API."""
 
@@ -74,7 +88,7 @@ class StructuredLightRenderer:
 
         self._depth: torch.Tensor | None = None
         self._gt_corr: torch.Tensor | None = None
-        self._autodiff_gain: torch.Tensor | None = None
+        self._mitsuba_pattern_tempdir: TemporaryDirectory[str] | None = None
 
     def _require_mitsuba(self):
         try:
@@ -258,64 +272,126 @@ class StructuredLightRenderer:
     def gt_corr(self) -> torch.Tensor:
         return self.compute_gt_corr()
 
-    def _prepare_autodiff_sampling(self, gt_corr: torch.Tensor, wp: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Prepare linear sampling indices/weights for differentiable pattern lookup.
-        Returns (x0, x1, w1) with shape [H, W], and invalid pixels get zeroed.
-        """
-        valid = torch.isfinite(gt_corr)
-        x = torch.where(valid, gt_corr, torch.zeros_like(gt_corr))
-        x0 = torch.floor(x).long().clamp(0, wp - 1)
-        x1 = (x0 + 1).clamp(0, wp - 1)
-        w1 = (x - x0.to(x.dtype)).clamp(0.0, 1.0)
-        w1 = torch.where(valid, w1, torch.zeros_like(w1))
-        return x0, x1, w1
-
-    def calibrate_autodiff_gain(self, pattern_value: float = 1.0) -> torch.Tensor:
-        """
-        Estimate a per-pixel gain map from Mitsuba by rendering a constant pattern.
-        This aligns the differentiable torch path with current scene brightness.
-        """
+    def _pattern_to_mitsuba_tensor(self, pattern_1d: torch.Tensor, mi: Any):
         if self.projector is None:
             raise RuntimeError("Projector is not configured.")
-        wp = self.projector.width
-        p = torch.full((1, wp), float(pattern_value), device=self.device, dtype=self.dtype)
-        img = self.render_images(p)[0]
-        gain = (img - self.lights.ambient).clamp(min=0.0)
-        self._autodiff_gain = gain.detach()
-        return self._autodiff_gain
+        p = pattern_1d.detach().to("cpu", torch.float32).numpy()
+        img = np.tile(p[None, :], (self.projector.height, 1))
+        rgb = np.stack([img, img, img], axis=-1).astype(np.float32, copy=False)
+        return mi.TensorXf(rgb)
+
+    def _get_placeholder_pattern_file(self) -> Path:
+        if self.projector is None:
+            raise RuntimeError("Projector is not configured.")
+        if self._mitsuba_pattern_tempdir is None:
+            self._mitsuba_pattern_tempdir = TemporaryDirectory(prefix="lab2_mitsuba_autodiff_")
+        pattern_file = Path(self._mitsuba_pattern_tempdir.name) / "placeholder.exr"
+        if not pattern_file.exists():
+            try:
+                import imageio.v3 as iio
+            except Exception as exc:
+                raise RuntimeError("imageio is required to write Mitsuba placeholder textures.") from exc
+            zeros = np.zeros((self.projector.height, self.projector.width, 3), dtype=np.float32)
+            iio.imwrite(pattern_file, zeros)
+        return pattern_file
+
+    def _build_mitsuba_autodiff_scene(self):
+        mi = self._require_mitsuba()
+        if self._mi_scene_file is not None:
+            scene = mi.load_file(str(self._mi_scene_file))
+        else:
+            if self.camera is None or self.projector is None:
+                raise RuntimeError("Camera and projector must be configured.")
+            scene_dict = build_runtime_scene_dict(
+                mi=mi,
+                camera=self.camera,
+                projector=self.projector,
+                ambient=self.lights.ambient,
+                pattern_path=str(self._get_placeholder_pattern_file()),
+                scene_name=self._scene_name,
+            )
+            scene_dict["sensor"]["sampler"]["sample_count"] = self.spp
+            scene = mi.load_dict(scene_dict)
+        params = mi.traverse(scene)
+        if "projector.irradiance.data" not in params:
+            raise RuntimeError("Mitsuba scene does not expose 'projector.irradiance.data' for autodiff rendering.")
+        return mi, scene, params
+
+    def _render_images_mitsuba_autodiff_forward(
+        self,
+        patterns: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, list[dict[str, Any]]]:
+        import drjit as dr
+
+        patterns = self._prepare_patterns(patterns)
+        mi, scene, params = self._build_mitsuba_autodiff_scene()
+
+        images: list[torch.Tensor] = []
+        render_state: list[dict[str, Any]] = []
+
+        for pattern_index in range(patterns.shape[0]):
+            tex = self._pattern_to_mitsuba_tensor(patterns[pattern_index], mi)
+            params["projector.irradiance.data"] = tex
+            dr.enable_grad(params["projector.irradiance.data"])
+            params.update()
+
+            img = mi.render(scene, params=params, spp=self.spp, seed=pattern_index)
+            img_np = np.array(img, dtype=np.float32)
+            if img_np.ndim == 2:
+                img_np = img_np[..., None]
+
+            image_t = torch.from_numpy(img_np)
+            clamp_mask = ((image_t >= 0.0) & (image_t <= 1.0)).to(dtype=torch.float32)
+            images.append(image_t.clamp(0.0, 1.0))
+            render_state.append(
+                {
+                    "mi": mi,
+                    "dr": dr,
+                    "image": img,
+                    "texture": params["projector.irradiance.data"],
+                    "clamp_mask": clamp_mask,
+                }
+            )
+
+        stacked = torch.stack(images, dim=0).to(device=self.device, dtype=self.dtype)
+        return stacked, render_state
+
+    def _render_images_mitsuba_autodiff_backward(
+        self,
+        render_state: list[dict[str, Any]],
+        grad_output: torch.Tensor,
+    ) -> torch.Tensor:
+        grad_output = grad_output.detach().to(device="cpu", dtype=torch.float32)
+        grad_patterns: list[torch.Tensor] = []
+
+        for pattern_index, state in enumerate(render_state):
+            dr = state["dr"]
+            image = state["image"]
+            texture = state["texture"]
+            clamp_mask = state["clamp_mask"]
+
+            grad_image = grad_output[pattern_index]
+            if grad_image.ndim == 2:
+                grad_image = grad_image.unsqueeze(-1)
+            grad_image = grad_image * clamp_mask
+
+            loss = dr.sum(image * state["mi"].TensorXf(grad_image.numpy()))
+            dr.backward(loss)
+            tex_grad = dr.grad(texture).numpy()
+            grad_pattern = torch.from_numpy(tex_grad.sum(axis=(0, 2)))
+            grad_patterns.append(grad_pattern)
+
+        return torch.stack(grad_patterns, dim=0).to(device=self.device, dtype=self.dtype)
 
     def render_images_autodiff(
         self,
         patterns: torch.Tensor | None = None,
-        gain: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
-        Differentiable torch renderer for patterns -> captured images.
-        Uses gt_corr sampling + optional gain map, enabling autograd on patterns.
+        Differentiable Mitsuba renderer for patterns -> captured images.
         """
         patterns = self._prepare_patterns(patterns)
-        gt = self.gt_corr
-        k, wp = patterns.shape
-        x0, x1, w1 = self._prepare_autodiff_sampling(gt, wp)
-
-        # [K, H, W] linear sample from 1D projector patterns
-        p0 = patterns[:, x0]
-        p1 = patterns[:, x1]
-        sampled = (1.0 - w1).unsqueeze(0) * p0 + w1.unsqueeze(0) * p1
-
-        if gain is None:
-            if self._autodiff_gain is None:
-                gain_t = torch.ones_like(gt, dtype=self.dtype, device=self.device)
-            else:
-                gain_t = self._autodiff_gain.to(device=self.device, dtype=self.dtype)
-        else:
-            gain_t = gain.to(device=self.device, dtype=self.dtype)
-        if gain_t.shape != gt.shape:
-            raise ValueError(f"gain must be shape {tuple(gt.shape)}, got {tuple(gain_t.shape)}")
-
-        images = sampled * gain_t.unsqueeze(0) + self.lights.ambient
-        return images.clamp(0.0, 1.0)
+        return _MitsubaAutodiffRenderFunction.apply(patterns, self)
 
     def patterns_image_autodiff_grad(
         self,
@@ -323,7 +399,7 @@ class StructuredLightRenderer:
         grad_images: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
-        Compute autograd gradient d(<images, grad_images>)/d(patterns) using torch path.
+        Compute autograd gradient d(<images, grad_images>)/d(patterns) using Mitsuba autodiff rendering.
         """
         p = patterns.to(device=self.device, dtype=self.dtype).detach().requires_grad_(True)
         imgs = self.render_images_autodiff(p)

@@ -45,7 +45,8 @@ def prepare_decoder_images(images: torch.Tensor) -> torch.Tensor:
     Convert renderer outputs to decoder input shape [K, H, W].
 
     Mitsuba rendering may return RGB images [K, H, W, 3], while decoders expect
-    grayscale observations [K, H, W]. The autodiff path already returns grayscale.
+    grayscale observations [K, H, W]. This helper keeps both Mitsuba forward
+    rendering and Mitsuba autodiff rendering on the same decoder interface.
     """
     if images.ndim == 3:
         return images
