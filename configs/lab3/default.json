@@ -1,0 +1,34 @@
+{
+  "input_dir": "docs/lab1/assets/videos",
+  "scene_name": "lab1_sample",
+  "output_root": "outputs/lab3",
+  "methods": ["sfm", "3dgs", "nerf"],
+  "fps": 2.0,
+  "test_ratio": 0.1,
+  "image_limit": null,
+  "ffmpeg_bin": "ffmpeg",
+  "reconstruction": {
+    "sfm": {
+      "colmap_bin": "colmap",
+      "matcher": "sequential",
+      "camera_model": "PINHOLE",
+      "single_camera": true,
+      "dense": false
+    },
+    "3dgs": {
+      "repo_dir": "assets/external/code/gaussian-splatting",
+      "python_bin": "python",
+      "iterations": 7000,
+      "resolution": null,
+      "extra_args": []
+    },
+    "nerf": {
+      "process_bin": "ns-process-data",
+      "train_bin": "ns-train",
+      "method": "nerfacto",
+      "max_num_iterations": 30000,
+      "downscale_factor": null,
+      "skip_process_data": false
+    }
+  }
+}

@@ -1,6 +1,6 @@
 ﻿# Camera3D
 
-基于 `uv` 管理的三维计算成像课程实验仓库，包含 Lab1（视频3D重建）和 Lab2（结构光优化）两个独立实验。
+基于 `uv` 管理的三维计算成像课程实验仓库，包含 Lab1（视频3D重建）、Lab2（结构光优化）和 Lab3（多表示三维场景重建）三个独立实验。
 
 ## 整体设计
 
@@ -29,6 +29,15 @@
 - ZNCC vs ZNCC-NN Decoder对比
 - 多材质鲁棒性测试
 
+### [Lab 3: 多表示三维场景重建](docs/lab3/README.md)
+
+面向自采图片/视频的 SfM、3DGS、NeRF 统一运行框架。
+
+- 混合图片和视频输入整理，统一抽帧、manifest 和 train/test 划分
+- COLMAP SfM 模块
+- GraphDeco 3DGS 与 nerfstudio Nerfacto 外部工具包装
+- 输出运行配置和分方法结果，便于复现实验报告
+
 ## 项目结构
 
 ```
@@ -37,19 +46,24 @@ Camera3D/
 ├─ README.md                # 本文件
 ├─ src/                     # 源码
 │  ├─ lab1/                 # Lab1实现
-│  └─ lab2/                 # Lab2实现
+│  ├─ lab2/                 # Lab2实现
+│  └─ lab3/                 # Lab3实现
 ├─ docs/                    # 文档
 │  ├─ lab1/                 # Lab1文档
-│  └─ lab2/                 # Lab2文档
+│  ├─ lab2/                 # Lab2文档
+│  └─ lab3/                 # Lab3文档
 ├─ scripts/                 # 脚本
 │  ├─ lab1/                 # Lab1脚本
-│  └─ lab2/                 # Lab2脚本
+│  ├─ lab2/                 # Lab2脚本
+│  └─ lab3/                 # Lab3脚本
 ├─ tests/                   # 测试
 │  ├─ lab1/                 # Lab1测试
-│  └─ lab2/                 # Lab2测试
+│  ├─ lab2/                 # Lab2测试
+│  └─ lab3/                 # Lab3测试
 ├─ outputs/                 # 运行输出
 │  ├─ lab1/                 # Lab1输出
-│  └─ lab2/                 # Lab2输出
+│  ├─ lab2/                 # Lab2输出
+│  └─ lab3/                 # Lab3输出
 └─ assets/                  # 资源文件
    ├─ scenes/               # Lab2场景文件
    └─ videos/               # Lab1视频
@@ -77,6 +91,7 @@ uv sync --all-groups       # 所有依赖
 | `lab1` | OpenCV, Matplotlib, Pillow |
 | `lab1-yolo` | Ultralytics YOLO (可选) |
 | `lab2` | PyTorch, Mitsuba, Drjit, OpenCV, Matplotlib |
+| `lab3` | Matplotlib, Pillow；重建主体依赖外部 COLMAP、FFmpeg、nerfstudio、3DGS 仓库 |
 
 ## Python版本要求
 
