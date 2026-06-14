@@ -31,6 +31,7 @@ output/
 TODO.md
 superpowers
 pack/
+docs/lab3/prompt.md
 
 # pytest
 .pytest_cache
