@@ -13,6 +13,10 @@ dev = [
   "pytest>=8.0.0",
   "pytest-cov>=5.0.0",
 ]
+lab3 = [
+  "matplotlib>=3.8.0",
+  "pillow>=10.4.0",
+]
 lab1 = [
   "opencv-python-headless>=4.10.0",
   "matplotlib>=3.8.0",
@@ -45,6 +49,7 @@ cu124 = [
 
 [project.scripts]
 lab1 = "lab1.cli:main"
+lab3 = "lab3.cli:main"
 
 [build-system]
 requires = ["hatchling>=1.25.0"]
@@ -54,4 +59,4 @@ build-backend = "hatchling.build"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/lab1", "src/lab2"]
+packages = ["src/lab1", "src/lab2", "src/lab3"]
