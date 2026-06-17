@@ -31,22 +31,22 @@
 
 正式训练之前，先用自检流程验证场景几何、渲染链路、深度图和 GT correspondence 是否合理。下图分别给出两个场景的自检渲染结果、GT 深度图和 GT correspondence。
 
-![大理石场景自检渲染](../../outputs/lab2/self_check/sl_marble_objects/normal_render.png)
+![大理石场景自检渲染](report_assets/fig01_marble_self_check_render.png)
 *图 1. 大理石场景自检渲染图。*
 
-![大理石场景自检深度图](../../outputs/lab2/self_check/sl_marble_objects/depth_map.png)
+![大理石场景自检深度图](report_assets/fig02_marble_self_check_depth.png)
 *图 2. 大理石场景自检深度图。*
 
-![大理石场景自检 GT correspondence](../../outputs/lab2/self_check/sl_marble_objects/gt_corr.png)
+![大理石场景自检 GT correspondence](report_assets/fig03_marble_self_check_gt_corr.png)
 *图 3. 大理石场景自检 GT correspondence。*
 
-![漫反射场景自检渲染](../../outputs/lab2/self_check/sl_diffuse_objects/normal_render.png)
+![漫反射场景自检渲染](report_assets/fig04_diffuse_self_check_render.png)
 *图 4. 漫反射场景自检渲染图。*
 
-![漫反射场景自检深度图](../../outputs/lab2/self_check/sl_diffuse_objects/depth_map.png)
+![漫反射场景自检深度图](report_assets/fig05_diffuse_self_check_depth.png)
 *图 5. 漫反射场景自检深度图。*
 
-![漫反射场景自检 GT correspondence](../../outputs/lab2/self_check/sl_diffuse_objects/gt_corr.png)
+![漫反射场景自检 GT correspondence](report_assets/fig06_diffuse_self_check_gt_corr.png)
 *图 6. 漫反射场景自检 GT correspondence。*
 
 从自检结果可以看到，两类场景的几何轮廓、地面截面以及投影仪列坐标分布都与场景设置一致，说明当前 PyTorch 渲染器输出的 `depth_gt` 和 `gt_corr` 可以作为后续训练与评估的可靠参考。
@@ -55,22 +55,22 @@
 
 下图给出了两个场景在最佳实验配置下的最终渲染结果与深度误差图。可以看出漫反射场景的干扰比较大。
 
-![大理石场景最优配置最终渲染](../../outputs/lab2/assignment_runs/20260606_201525/sl_marble_objects/marble_zncc_nn_response_autodiff/rendered_final.png)
+![大理石场景最优配置最终渲染](report_assets/fig07_marble_final_render.png)
 *图 7. 大理石场景最优配置下的最终渲染结果。*
 
-![大理石场景结构光深度与渲染器深度对比](../../outputs/lab2/assignment_runs/20260606_201525/sl_marble_objects/marble_zncc_nn_response_autodiff/depth_sl_vs_renderer.png)
+![大理石场景结构光深度与渲染器深度对比](report_assets/fig08_marble_depth_comparison.png)
 *图 8. 大理石场景中结构光重建深度与渲染器返回深度的对比及误差图。*
 
-![大理石场景严格结构光深度误差热力图](../../outputs/lab2/assignment_runs/20260606_201525/sl_marble_objects/marble_zncc_nn_response_autodiff/depth_sl_abs_error.png)
+![大理石场景严格结构光深度误差热力图](report_assets/fig09_marble_depth_error_heatmap.png)
 *图 9. 大理石场景最优配置下的严格结构光深度绝对误差热力图。*
 
-![漫反射场景最优配置最终渲染](../../outputs/lab2/assignment_runs/20260606_201525/sl_diffuse_objects/diffuse_zncc_autodiff/rendered_final.png)
+![漫反射场景最优配置最终渲染](report_assets/fig11_diffuse_final_render.png)
 *图 11. 漫反射场景最优配置下的最终渲染结果。*
 
-![漫反射场景结构光深度与渲染器深度对比](../../outputs/lab2/assignment_runs/20260606_201525/sl_diffuse_objects/diffuse_zncc_autodiff/depth_sl_vs_renderer.png)
+![漫反射场景结构光深度与渲染器深度对比](report_assets/fig12_diffuse_depth_comparison.png)
 *图 12. 漫反射场景中结构光重建深度与渲染器返回深度的对比及误差图。*
 
-![漫反射场景严格结构光深度误差热力图](../../outputs/lab2/assignment_runs/20260606_201525/sl_diffuse_objects/diffuse_zncc_autodiff/depth_sl_abs_error.png)
+![漫反射场景严格结构光深度误差热力图](report_assets/fig13_diffuse_depth_error_heatmap.png)
 *图 13. 漫反射场景最优配置下的严格结构光深度绝对误差热力图。*
 
 
@@ -86,7 +86,7 @@
 | 最小值 | 0.0175 |
 | 最大值 | 0.0446 |
 
-![大理石场景中 autodiff 与 finite difference 的带符号相对误差热力图](../../outputs/lab2/assignment_runs/20260606_201525/gradient_comparison/gradient_comparison/20260606_201531_sl_marble_objects_zncc/zncc/signed_relative_error_heatmaps.png)
+![大理石场景中 autodiff 与 finite difference 的带符号相对误差热力图](report_assets/fig14_gradient_error_heatmap.png)
 *图 14. 大理石场景中 autodiff 与 finite difference 梯度的带符号相对误差热力图。*
 
 从单样本计时看，autodiff 每次梯度计算约为 `0.07` 到 `0.24` 秒，finite difference 约为 `0.39` 到 `0.41` 秒；在当前抽样配置下，自动微分依然更快，而且更稳定。
@@ -97,14 +97,14 @@
 
 大理石场景中三种 autodiff 配置都能稳定下降，而 finite difference 明显收敛更慢、停留在更高损失区间。
 
-![大理石场景多方法损失曲线对比](../../outputs/lab2/assignment_runs/20260606_201525/sl_marble_objects/loss_comparison.png)
+![大理石场景多方法损失曲线对比](report_assets/fig15_marble_loss_comparison.png)
 *图 15. 大理石场景中多种方法的训练损失曲线对比。*
 
 #### 漫反射场景
 
 漫反射场景的结论和旧版结果不同。最新 run 中，最优配置不再是 `zncc_nn_response`，而是最简单的 `zncc_autodiff`。其最终 loss 为 `0.3618`，优于 `zncc_nn_response_autodiff` 的 `0.4420` 和 `zncc_nn_autodiff` 的 `0.4456`。说明在更接近理想 Lambertian 的场景里，额外的可学习解码器和响应曲线并没有带来收益，反而引入了额外自由度。
 
-![漫反射场景多方法损失曲线对比](../../outputs/lab2/assignment_runs/20260606_201525/sl_diffuse_objects/loss_comparison.png)
+![漫反射场景多方法损失曲线对比](report_assets/fig16_diffuse_loss_comparison.png)
 *图 16. 漫反射场景中多种方法的训练损失曲线对比。*
 
 ### 定量结果
@@ -136,10 +136,10 @@
 
 下图给出了两个代表性实验的图案演化过程。
 
-![大理石场景 `zncc_nn_response_autodiff` 图案演化](../../outputs/lab2/assignment_runs/20260606_201525/sl_marble_objects/marble_zncc_nn_response_autodiff/pattern_evolution.gif)
+![大理石场景 `zncc_nn_response_autodiff` 图案演化](report_assets/fig17_marble_pattern_evolution.gif)
 *图 17. 大理石场景中 `zncc_nn_response_autodiff` 的图案演化过程。*
 
-![漫反射场景 `zncc_autodiff` 图案演化](../../outputs/lab2/assignment_runs/20260606_201525/sl_diffuse_objects/diffuse_zncc_autodiff/pattern_evolution.gif)
+![漫反射场景 `zncc_autodiff` 图案演化](report_assets/fig18_diffuse_pattern_evolution.gif)
 *图 18. 漫反射场景中 `zncc_autodiff` 的图案演化过程。*
 
 相比漫反射场景，大理石场景的图案在后期仍然会保留更强的局部变化，这与其更复杂的外观扰动相一致。

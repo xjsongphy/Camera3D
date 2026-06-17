@@ -12,7 +12,7 @@ uv sync --group lab3 --extra cpu
 uv sync --group lab3 --extra cu124
 ```
 
-`lab3` 组：Matplotlib、Pillow、NumPy、lpips、nerfstudio（torch 经 `--extra cpu/cu124` 提供）。lpips 缺失时评测自动降级为只算 PSNR/SSIM。
+`lab3` 组：Matplotlib、Pillow、NumPy、lpips、nerfstudio（torch 经 `--extra cpu/cu124` 提供）。Windows + Python 3.12 下通过 `tool.uv.override-dependencies` 覆盖到 `pymeshlab==2023.12.post1`，并在 `tool.uv.prerelease = "allow"` 下接受 `nerfstudio 1.1.5` 传递依赖的 `newrawpy>=1.0.0b0` 预发布版本。lpips 缺失时评测自动降级为只算 PSNR/SSIM。
 
 系统工具（需在 PATH 中可用）：
 
@@ -53,7 +53,7 @@ uv run lab3 `
 ### 仅重跑评测（跳过训练）
 
 ```bash
-uv run lab3 --run-dir outputs/lab3/my_scene_<timestamp>
+uv run lab3 --run-dir outputs/lab3/<timestamp>_my_scene
 ```
 
 ### 常用开关
@@ -82,21 +82,21 @@ Windows：
 
 ```bash
 # Open3D 几何窗口（SfM 点云 / 3DGS Gaussian / mesh）+ nerfstudio web viewer（NeRF）
-uv run lab3 --view-run outputs/lab3/<scene>_<ts>
+uv run lab3 --view-run outputs/lab3/<ts>_<scene>
 
 # 只看几何，不开 nerfstudio viewer
-uv run lab3 --view-run outputs/lab3/<scene>_<ts> --methods sfm 3dgs --no-nerfstudio-viewer
+uv run lab3 --view-run outputs/lab3/<ts>_<scene> --methods sfm 3dgs --no-nerfstudio-viewer
 ```
 
 - **Open3D**（`pip install open3d`，需显示器）：SfM 点云、COLMAP dense、Poisson mesh、3DGS Gaussian `.ply` 都能交互查看。
   - 注意：Open3D 忽略 3DGS 的 SH 颜色通道，Gaussian 只显示为点云（仍可观察分布、浮点、穿透）。要看真正的实时 splatting 用下面的 SIBR。
 - **nerfstudio web viewer**：`ns-viewer --load-config results/nerf/train/.../config.yml`，浏览器交互查看 NeRF。
 - **3DGS 原生 SIBR viewer**（真正的实时 splatting 渲染）：在 `gaussian-splatting/SIBR_viewers` 编译后运行
-  `./install/bin/SIBR_gaussianViewer_app -m outputs/lab3/<scene>_<ts>/results/3dgs`。
+  `./install/bin/SIBR_gaussianViewer_app -m outputs/lab3/<ts>_<scene>/results/3dgs`。
 
 ## 输出目录
 
-`outputs/lab3/<scene>_<timestamp>/`：
+`outputs/lab3/<timestamp>_<scene>/`：
 
 - `configs/`：`run_config.json`、`prepared_dataset.json`
 - `prepared/`：`images/`、`sparse/0/`（共享 COLMAP）、`manifest.csv`、`train.txt`、`test.txt`
@@ -123,12 +123,10 @@ uv run lab3 --view-run outputs/lab3/<scene>_<ts> --methods sfm 3dgs --no-nerfstu
 | `configs/run_config.json`、`prepared_dataset.json` | 完整运行配置与训练/测试划分清单 | §8 可复现性 |
 | `logs/<method>_<step>.log` | 每条外部命令的完整 stdout/stderr | §8 命令可追踪 |
 
-**测量方式与保真度（诚实披露）**
+**测量方式与保真度**
 
 - **PSNR/SSIM**：纯 NumPy 自实现（`lab3.metrics`），SSIM 用 11×11 高斯窗；所有方法用同一套实现、同一 `eval_size` 分辨率、同一 RGB [0,1] 色彩空间。**LPIPS** 懒加载 `lpips` 包，装不上或权重下载失败时返回空并只报 PSNR/SSIM（作业允许）。
 - **GPU 显存峰值** `gpu_mem_peak_gb`：训练/MVS 命令运行期间后台每 0.5 s 轮询一次 `nvidia-smi memory.used`，取最大值（GiB）。这是 GPU **全局已用**显存，含同卡其他进程，属 best-effort 近似（作业 §5.2 允许“近似观察”）；无 NVIDIA 驱动 / 无 `nvidia-smi`（如纯 CPU）时留空并在报告说明。
 - **渲染 FPS** `render_fps`：3DGS 的 `render.py` 计时**含磁盘 I/O**（写 PNG），数值偏保守；nerfstudio 的 `ns-eval` 计时含渲染故帧数未知、该格常为空，以 `ns-eval` 原生为准。
 - **几何指标**：以 COLMAP dense 点云为 **proxy 而非真值**，比较前双方下采样到 4096 点（`downsample_cap`）；F-score 阈值取 proxy bbox 对角线的 0.5% / 1%，尺度无关。`.ply` 加载需 Open3D，缺失则跳过并写说明行。
 - **公平性**：三方法共享同一套 COLMAP 位姿（`share_poses=true`）；但 held-out 集合不完全相同——3DGS 用 `train.py --eval` 每 8 张留 1，nerfstudio 用其原生 eval split。指标实现与分辨率统一，例外（划分不同）已在 `metrics.csv` 的 `metric_source` / `held_out` / `notes` 列标注，报告需讨论。SfM 为显式点云，RGB 新视角 PSNR 标 `N/A`。
-
-报告骨架见 `docs/lab3/report_template.md`，把上述产物对应填入 §6 八节。

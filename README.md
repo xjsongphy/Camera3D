@@ -94,7 +94,7 @@ uv sync --all-groups       # 所有依赖
 | `lab1` | OpenCV, Matplotlib, Pillow |
 | `lab1-yolo` | Ultralytics YOLO (可选) |
 | `lab2` | PyTorch, Mitsuba, Drjit, OpenCV, Matplotlib |
-| `lab3` | Matplotlib, Pillow, lpips, nerfstudio（torch 经 `--extra cpu/cu124` 提供）；外部 COLMAP、FFmpeg、3DGS 仓库 |
+| `lab3` | Matplotlib, Pillow, lpips, nerfstudio（torch 经 `--extra cpu/cu124` 提供；Windows + Python 3.12 通过 `uv override-dependencies` 固定 `pymeshlab==2023.12.post1`）；外部 COLMAP、FFmpeg、3DGS 仓库 |
 
 ## Python版本要求
 
