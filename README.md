@@ -31,12 +31,14 @@
 
 ### [Lab 3: 多表示三维场景重建](docs/lab3/README.md)
 
-面向自采图片/视频的 SfM、3DGS、NeRF 统一运行框架。
+面向自采图片/视频的 SfM 点云、3DGS、Nerfacto 三表示统一重建与公平评测框架。
 
-- 混合图片和视频输入整理，统一抽帧、manifest 和 train/test 划分
-- COLMAP SfM 模块
-- GraphDeco 3DGS 与 nerfstudio Nerfacto 外部工具包装
-- 输出运行配置和分方法结果，便于复现实验报告
+- 图片/视频统一抽帧、manifest、train/test 划分；位姿共享（单次 COLMAP 供三方法复用）
+- COLMAP SfM（点云/dense）、GraphDeco 3DGS 外部仓库包装、nerfstudio Nerfacto 集成
+- 统一指标（PSNR/SSIM/LPIPS）、渲染 FPS、模型大小、GPU 信息 → `metrics.csv`
+- 几何分期（点云/mesh/depth）与 GT-方法-误差定性对比
+- 交互式 viewer：`lab3 --view-run` 开 Open3D（点云/高斯/mesh）+ nerfstudio web viewer（NeRF），3DGS 可用 SIBR
+- 输出 `metrics.csv`/`qualitative/`/`geometry/`/`logs/`，对应作业 §6 报告骨架（`docs/lab3/report_template.md`）
 
 ## 项目结构
 
@@ -80,6 +82,7 @@ uv sync --help
 # 同步特定lab的依赖
 uv sync --group lab1       # OpenCV, Matplotlib, Pillow
 uv sync --group lab2       # PyTorch, Mitsuba, Drjit
+uv sync --group lab3 --extra cu124  # Matplotlib, Pillow, lpips, nerfstudio + CUDA torch
 uv sync --group lab1-yolo  # Lab1的YOLO依赖
 uv sync --all-groups       # 所有依赖
 ```
@@ -91,7 +94,7 @@ uv sync --all-groups       # 所有依赖
 | `lab1` | OpenCV, Matplotlib, Pillow |
 | `lab1-yolo` | Ultralytics YOLO (可选) |
 | `lab2` | PyTorch, Mitsuba, Drjit, OpenCV, Matplotlib |
-| `lab3` | Matplotlib, Pillow；重建主体依赖外部 COLMAP、FFmpeg、nerfstudio、3DGS 仓库 |
+| `lab3` | Matplotlib, Pillow, lpips, nerfstudio（torch 经 `--extra cpu/cu124` 提供）；外部 COLMAP、FFmpeg、3DGS 仓库 |
 
 ## Python版本要求
 

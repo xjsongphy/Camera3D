@@ -16,6 +16,8 @@ dev = [
 lab3 = [
   "matplotlib>=3.8.0",
   "pillow>=10.4.0",
+  "lpips>=0.1.0",
+  "nerfstudio>=1.1.5",
 ]
 lab1 = [
   "opencv-python-headless>=4.10.0",

@@ -1,6 +1,0 @@
-<!-- Metal/conductor material for comparison -->
-<bsdf type="roughconductor">
-    <string name="material" value="Au"/>
-    <string name="distribution" value="ggx"/>
-    <float name="alpha" value="0.1"/>
-</bsdf>

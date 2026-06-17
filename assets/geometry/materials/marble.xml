@@ -1,7 +1,0 @@
-<!-- Marble material based on measured data from Mitsuba -->
-<bsdf type="roughdielectric">
-    <string name="distribution" value="ggx"/>
-    <float name="alpha" value="0.05"/>
-    <float name="intIOR" value="1.5"/>
-    <float name="extIOR" value="1.0"/>
-</bsdf>

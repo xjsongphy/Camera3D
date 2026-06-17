@@ -27,6 +27,9 @@ output/
 /runs/
 /ultralytics_settings.yaml
 
+# 3dgs
+gaussian-splatting
+
 # Manuscript local artifacts
 TODO.md
 superpowers

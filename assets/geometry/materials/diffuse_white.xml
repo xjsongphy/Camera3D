@@ -1,3 +1,0 @@
-<bsdf type="diffuse">
-    <rgb name="reflectance" value="0.8 0.8 0.8"/>
-</bsdf>
