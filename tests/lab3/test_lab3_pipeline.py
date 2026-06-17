@@ -46,6 +46,18 @@ def test_config_from_dict_normalizes_reconstructors() -> None:
     assert cfg.nerf.max_num_iterations == 200
 
 
+def test_config_from_dict_defaults_dgs_repo_to_relative_checkout() -> None:
+    cfg = config_from_dict(
+        {
+            "input_dir": "data/scene",
+            "scene_name": "desk",
+            "methods": ["3dgs"],
+        }
+    )
+
+    assert cfg.dgs.repo_dir == Path("gaussian-splatting")
+
+
 def test_normalize_method_rejects_unknown() -> None:
     try:
         normalize_method("mesh")
