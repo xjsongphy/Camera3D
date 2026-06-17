@@ -1,73 +1,134 @@
-# Lab 3: 多表示三维场景重建
+# Lab 3 README
 
-本目录对应作业三。代码入口在 `src/lab3`，运行脚本在 `scripts/lab3`，默认配置在 `configs/lab3/default.json`。
+Lab3 是面向自采图片/视频的多表示三维场景重建与评测框架。一条命令走完：抽帧/划分 → COLMAP 位姿 → SfM 点云 / 3DGS / Nerfacto 三种表示 → 渲染 held-out → 统一指标（PSNR/SSIM/LPIPS）+ 效率（训练时间/迭代数/GPU 显存峰值/FPS/模型大小）+ 几何（可视化 + Chamfer/F-score）→ 出 `metrics.csv`、`geometry_metrics.csv`、`qualitative/`、`geometry/`、`timings.json`、`logs/`。对应作业 `docs/lab3/lab3.md`。
 
-## 设计
+## 依赖与工具
 
-- `lab3.extract`: 从指定目录递归收集图片和视频；图片复制到统一数据目录，视频用 FFmpeg 抽帧；写出 `manifest.csv`、`train.txt`、`test.txt`。
-- `lab3.reconstruction.sfm`: 使用 COLMAP CLI 完成 feature extraction、matching、mapper 和模型文本导出。
-- `lab3.reconstruction.dgs`: 调用 GraphDeco 官方 `gaussian-splatting/train.py`，以准备好的数据目录作为输入。
-- `lab3.reconstruction.nerf`: 调用 nerfstudio `ns-process-data images` 和 `ns-train nerfacto`。
-- `lab3.visualization`: 只保留后处理查看入口，不在重建流程中自动启动交互式可视化。
+```bash
+# CPU 环境
+uv sync --group lab3 --extra cpu
 
-Lab 3 不 import Lab 1 代码；COLMAP 命令封装、抽帧和路径组织在 `src/lab3` 内独立实现。
-
-## 输出结构
-
-一次运行会写入：
-
-```text
-outputs/lab3/<scene>_<timestamp>/
-├─ configs/
-│  ├─ run_config.json
-│  └─ prepared_dataset.json
-├─ prepared/
-│  ├─ images/
-│  ├─ manifest.csv
-│  ├─ train.txt
-│  └─ test.txt
-├─ results/
-│  ├─ sfm/
-│  ├─ 3dgs/
-│  └─ nerf/
-└─ timings.json
+# CUDA 12.4 环境（推荐，3DGS/NeRF 训练需要 GPU）
+uv sync --group lab3 --extra cu124
 ```
 
-## 运行
+`lab3` 组：Matplotlib、Pillow、NumPy、lpips、nerfstudio（torch 经 `--extra cpu/cu124` 提供）。lpips 缺失时评测自动降级为只算 PSNR/SSIM。
 
-先做命令检查：
+系统工具（需在 PATH 中可用）：
 
-```powershell
-uv run lab3 --config configs/lab3/default.json --methods sfm --timestamp dryrun --dry-run
+- `colmap`（SfM、共享位姿、dense；CUDA 版用于 MVS）
+- `ffmpeg`（视频抽帧）
+
+外部代码库（完整训练/评测需要）：
+
+- `nerfstudio`：已随 `uv sync --group lab3 --extra cpu|cu124` 安装（提供 `ns-process-data`/`ns-train`/`ns-eval`/`ns-render`）
+- GraphDeco `gaussian-splatting`：默认读取当前工作目录下的相对路径 `./gaussian-splatting`；若 clone 到别处，用 `--dgs-repo` 显式指向（提供 `convert.py`/`train.py`/`render.py`/`metrics.py`）
+
+> 不装这些工具也能用 `--dry-run` 验证整条命令链（见下）。
+
+## 常用命令
+
+### 命令链自检（dry-run，无需重工具）
+
+```bash
+uv run lab3 --config configs/lab3/default.json --methods sfm --dry-run
 ```
 
-使用 Lab 1 视频做 3DGS 测试时，需要先准备官方 3DGS 仓库及环境，然后传入路径：
+### 完整三方法（需先装好 lab3 依赖，并在当前目录准备 `./gaussian-splatting` 或手动传 `--dgs-repo`）
 
-```powershell
-uv run lab3 `
-  --input-dir docs/lab1/assets/videos `
-  --scene-name lab1_sample `
-  --methods 3dgs `
-  --fps 2 `
-  --dgs-repo D:\path\to\gaussian-splatting `
-  --dgs-iterations 7000
-```
+```bash
+# Linux/macOS
+uv run lab3 --input-dir path/to/captured_scene --scene-name my_scene \
+  --methods sfm 3dgs nerf --dgs-repo /path/to/gaussian-splatting --fps 2
 
-完整三方法运行：
-
-```powershell
+# Windows PowerShell
 uv run lab3 `
   --input-dir path\to\captured_scene `
   --scene-name my_scene `
   --methods sfm 3dgs nerf `
-  --fps 2 `
-  --dgs-repo D:\path\to\gaussian-splatting
+  --dgs-repo D:\path\to\gaussian-splatting `
+  --fps 2
 ```
 
-依赖外部工具：
+### 仅重跑评测（跳过训练）
 
-- FFmpeg: 视频抽帧。
-- COLMAP: SfM 和 3DGS/NeRF 常用位姿来源。
-- nerfstudio: `ns-process-data` 和 `ns-train nerfacto`。
-- GraphDeco gaussian-splatting: 官方 3DGS 训练脚本。
+```bash
+uv run lab3 --run-dir outputs/lab3/my_scene_<timestamp>
+```
 
+### 常用开关
+
+| 开关 | 作用 |
+|------|------|
+| `--no-share-poses` | 关闭位姿共享（每方法各自跑 COLMAP） |
+| `--no-evaluate` / `--no-geometry` / `--no-qualitative` | 关闭对应后处理阶段 |
+| `--no-lpips` | 跳过 LPIPS，只算 PSNR/SSIM |
+| `--eval-size H W` | 统一缩放到该分辨率再算指标（公平） |
+| `--test-ratio 0.1` | held-out 比例（写 `prepared/test.txt`） |
+| `--dgs-iterations 7000` / `--nerf-iterations 30000` | 训练迭代数 |
+| `--timestamp <tag>` | 固定输出目录后缀，便于复现 |
+
+### 批处理脚本
+
+Windows：
+
+```powershell
+./scripts/lab3/run_lab3_sample.ps1
+```
+
+## 交互式可视化（作业 §8 加分）
+
+除固定 PNG 外，可对重建结果做交互式查看（orbit / 缩放 / 选中）：
+
+```bash
+# Open3D 几何窗口（SfM 点云 / 3DGS Gaussian / mesh）+ nerfstudio web viewer（NeRF）
+uv run lab3 --view-run outputs/lab3/<scene>_<ts>
+
+# 只看几何，不开 nerfstudio viewer
+uv run lab3 --view-run outputs/lab3/<scene>_<ts> --methods sfm 3dgs --no-nerfstudio-viewer
+```
+
+- **Open3D**（`pip install open3d`，需显示器）：SfM 点云、COLMAP dense、Poisson mesh、3DGS Gaussian `.ply` 都能交互查看。
+  - 注意：Open3D 忽略 3DGS 的 SH 颜色通道，Gaussian 只显示为点云（仍可观察分布、浮点、穿透）。要看真正的实时 splatting 用下面的 SIBR。
+- **nerfstudio web viewer**：`ns-viewer --load-config results/nerf/train/.../config.yml`，浏览器交互查看 NeRF。
+- **3DGS 原生 SIBR viewer**（真正的实时 splatting 渲染）：在 `gaussian-splatting/SIBR_viewers` 编译后运行
+  `./install/bin/SIBR_gaussianViewer_app -m outputs/lab3/<scene>_<ts>/results/3dgs`。
+
+## 输出目录
+
+`outputs/lab3/<scene>_<timestamp>/`：
+
+- `configs/`：`run_config.json`、`prepared_dataset.json`
+- `prepared/`：`images/`、`sparse/0/`（共享 COLMAP）、`manifest.csv`、`train.txt`、`test.txt`
+- `results/{sfm,3dgs,nerf}/`：各方法训练/渲染产物
+- `qualitative/comparison_*.png`：GT vs 方法渲染 vs 误差图（≥3 视角）
+- `geometry/{sfm,3dgs,nerf}/`：点云/mesh/Gaussian `.ply` 汇总
+- `geometry_metrics.csv`：各方法点云 vs COLMAP dense proxy 的 Chamfer / F-score
+- `logs/<method>_<step>.log`：每步外部命令日志
+- `metrics.csv`：作业必交，列 `method, psnr, ssim, lpips, metric_source, held_out, train_time_sec, iterations, gpu_mem_peak_gb, render_fps, model_size_mb, gpu, notes`
+- `timings.json`：各阶段耗时
+
+## 输出与对应指标
+
+框架最终产出下面这些文件，每个文件直接对应作业 `docs/lab3/lab3.md` 的一条评价要求：
+
+| 产物 | 内容 | 对应作业指标 |
+|------|------|-------------|
+| `metrics.csv` | 每方法一行：PSNR / SSIM / LPIPS、训练时间、迭代数、GPU 显存峰值、渲染 FPS、模型大小、GPU 型号 | §5.1 PSNR/SSIM/LPIPS；§5.2 训练时间/迭代数/显存峰值/FPS/模型大小/GPU；§6 结果表 |
+| `geometry_metrics.csv` | 各方法点云 vs COLMAP dense proxy 的 Chamfer（`chamfer_to_proxy`/`from_proxy`/`sym`）与 F-score（bbox 对角线 0.5% / 1%） | §5.3 几何定量分析（proxy，需诚实披露偏差） |
+| `qualitative/comparison_*.png` | GT / 各方法渲染 / 误差图，≥3 个 held-out 视角 | §5.1 定性对比 + 误差图 |
+| `geometry/{sfm,3dgs,nerf}/` | COLMAP dense `.ply`、Poisson mesh、3DGS Gaussian `.ply`、nerfstudio 导出 | §5.3 几何可视化（孔洞/浮点/边界锐利度） |
+| `timings.json` | 各阶段耗时：feature/match/mapper/dense、convert、process_data、train、render、eval | §5.2 预处理 / 训练 / 渲染时间分解 |
+| `results/3dgs/test/.../results.json`、`results/_eval/nerf_eval.json` | 3DGS 原版 `metrics.py` 与 nerfstudio `ns-eval` 的官方指标 | 交叉校验自实现指标的可信度 |
+| `configs/run_config.json`、`prepared_dataset.json` | 完整运行配置与训练/测试划分清单 | §8 可复现性 |
+| `logs/<method>_<step>.log` | 每条外部命令的完整 stdout/stderr | §8 命令可追踪 |
+
+**测量方式与保真度（诚实披露）**
+
+- **PSNR/SSIM**：纯 NumPy 自实现（`lab3.metrics`），SSIM 用 11×11 高斯窗；所有方法用同一套实现、同一 `eval_size` 分辨率、同一 RGB [0,1] 色彩空间。**LPIPS** 懒加载 `lpips` 包，装不上或权重下载失败时返回空并只报 PSNR/SSIM（作业允许）。
+- **GPU 显存峰值** `gpu_mem_peak_gb`：训练/MVS 命令运行期间后台每 0.5 s 轮询一次 `nvidia-smi memory.used`，取最大值（GiB）。这是 GPU **全局已用**显存，含同卡其他进程，属 best-effort 近似（作业 §5.2 允许“近似观察”）；无 NVIDIA 驱动 / 无 `nvidia-smi`（如纯 CPU）时留空并在报告说明。
+- **渲染 FPS** `render_fps`：3DGS 的 `render.py` 计时**含磁盘 I/O**（写 PNG），数值偏保守；nerfstudio 的 `ns-eval` 计时含渲染故帧数未知、该格常为空，以 `ns-eval` 原生为准。
+- **几何指标**：以 COLMAP dense 点云为 **proxy 而非真值**，比较前双方下采样到 4096 点（`downsample_cap`）；F-score 阈值取 proxy bbox 对角线的 0.5% / 1%，尺度无关。`.ply` 加载需 Open3D，缺失则跳过并写说明行。
+- **公平性**：三方法共享同一套 COLMAP 位姿（`share_poses=true`）；但 held-out 集合不完全相同——3DGS 用 `train.py --eval` 每 8 张留 1，nerfstudio 用其原生 eval split。指标实现与分辨率统一，例外（划分不同）已在 `metrics.csv` 的 `metric_source` / `held_out` / `notes` 列标注，报告需讨论。SfM 为显式点云，RGB 新视角 PSNR 标 `N/A`。
+
+报告骨架见 `docs/lab3/report_template.md`，把上述产物对应填入 §6 八节。
