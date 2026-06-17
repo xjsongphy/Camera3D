@@ -4,7 +4,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from lab3.common import Lab3Error, require_tool, run_cmd, timed_block
+from lab3.common import Lab3Error, require_tool, run_cmd, monitored_block, timed_block
 from lab3.reconstruction.base import ReconstructionContext
 
 
@@ -29,8 +29,12 @@ class SfMReconstructor:
             require_tool(self.config.colmap_bin)
             context.output_dir.mkdir(parents=True, exist_ok=True)
 
+        # When pose sharing is enabled the sparse model is written next to the
+        # prepared images (``<shared>/sparse/0``) so 3DGS / nerfstudio consume
+        # the exact same camera poses. Otherwise it stays under the sfm result.
+        colmap_root = context.shared_colmap_dir or context.output_dir
         db_path = context.output_dir / "database.db"
-        sparse_root = context.output_dir / "sparse"
+        sparse_root = colmap_root / "sparse"
         if context.force and not context.dry_run:
             if db_path.exists():
                 db_path.unlink()
@@ -52,6 +56,7 @@ class SfMReconstructor:
                     self.config.camera_model,
                 ],
                 dry_run=context.dry_run,
+                log_path=context.run_dir / "logs" / "sfm_feature_extractor.log" if context.run_dir else None,
             )
 
         matcher_cmd = "sequential_matcher" if self.config.matcher == "sequential" else "exhaustive_matcher"
@@ -59,6 +64,7 @@ class SfMReconstructor:
             run_cmd(
                 [self.config.colmap_bin, matcher_cmd, "--database_path", str(db_path)],
                 dry_run=context.dry_run,
+                log_path=context.run_dir / "logs" / f"sfm_{matcher_cmd}.log" if context.run_dir else None,
             )
 
         with timed_block("sfm_mapper", context.timings):
@@ -74,8 +80,11 @@ class SfMReconstructor:
                     str(sparse_root),
                 ],
                 dry_run=context.dry_run,
+                log_path=context.run_dir / "logs" / "sfm_mapper.log" if context.run_dir else None,
             )
 
+        # mapper writes binary cameras.bin/images.bin/points3D.bin (what 3DGS and
+        # nerfstudio expect); also export a human-readable TXT copy for debugging.
         model_dir = sparse_root / "0"
         with timed_block("sfm_model_converter", context.timings):
             run_cmd(
@@ -90,6 +99,7 @@ class SfMReconstructor:
                     "TXT",
                 ],
                 dry_run=context.dry_run,
+                log_path=context.run_dir / "logs" / "sfm_model_converter.log" if context.run_dir else None,
             )
 
         if self.config.dense:
@@ -97,6 +107,7 @@ class SfMReconstructor:
 
     def _run_dense(self, context: ReconstructionContext, model_dir: Path) -> None:
         dense_dir = context.output_dir / "dense"
+        logs = context.run_dir / "logs" if context.run_dir else None
         with timed_block("sfm_image_undistorter", context.timings):
             run_cmd(
                 [
@@ -110,11 +121,13 @@ class SfMReconstructor:
                     str(dense_dir),
                 ],
                 dry_run=context.dry_run,
+                log_path=logs / "sfm_image_undistorter.log" if logs else None,
             )
-        with timed_block("sfm_patch_match_stereo", context.timings):
+        with monitored_block("sfm_patch_match_stereo", context.timings, context.peaks, enabled=not context.dry_run):
             run_cmd(
                 [self.config.colmap_bin, "patch_match_stereo", "--workspace_path", str(dense_dir)],
                 dry_run=context.dry_run,
+                log_path=logs / "sfm_patch_match_stereo.log" if logs else None,
             )
         with timed_block("sfm_stereo_fusion", context.timings):
             run_cmd(
@@ -127,4 +140,5 @@ class SfMReconstructor:
                     str(dense_dir / "fused.ply"),
                 ],
                 dry_run=context.dry_run,
+                log_path=logs / "sfm_stereo_fusion.log" if logs else None,
             )

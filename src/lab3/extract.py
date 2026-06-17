@@ -66,7 +66,8 @@ def prepare_dataset(cfg: ExtractionConfig) -> PreparedDataset:
         if cfg.image_limit is not None and len(copied_names) >= cfg.image_limit:
             break
         image_name = f"img_{index:06d}{image_path.suffix.lower()}"
-        copy_file(image_path, images_dir / image_name, overwrite=cfg.force)
+        if not cfg.dry_run:
+            copy_file(image_path, images_dir / image_name, overwrite=cfg.force)
         copied_names.append(image_name)
         manifest_rows.append(
             {

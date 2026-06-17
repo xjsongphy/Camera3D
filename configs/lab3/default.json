@@ -7,20 +7,29 @@
   "test_ratio": 0.1,
   "image_limit": null,
   "ffmpeg_bin": "ffmpeg",
+  "share_poses": true,
+  "evaluate": true,
+  "geometry": true,
+  "qualitative": true,
+  "eval_size": null,
+  "lpips": true,
   "reconstruction": {
     "sfm": {
       "colmap_bin": "colmap",
       "matcher": "sequential",
       "camera_model": "PINHOLE",
       "single_camera": true,
-      "dense": false
+      "dense": true
     },
     "3dgs": {
-      "repo_dir": "assets/external/code/gaussian-splatting",
+      "repo_dir": "gaussian-splatting",
       "python_bin": "python",
       "iterations": 7000,
       "resolution": null,
-      "extra_args": []
+      "extra_args": [],
+      "colmap_source": null,
+      "colmap_bin": "colmap",
+      "eval_split": true
     },
     "nerf": {
       "process_bin": "ns-process-data",
@@ -28,7 +37,8 @@
       "method": "nerfacto",
       "max_num_iterations": 30000,
       "downscale_factor": null,
-      "skip_process_data": false
+      "skip_process_data": false,
+      "colmap_model": null
     }
   }
 }

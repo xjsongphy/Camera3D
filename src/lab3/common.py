@@ -3,13 +3,14 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import threading
 from collections import deque
 from contextlib import contextmanager
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
-from typing import Any, Iterator, Protocol, TypeVar
+from typing import Any, Callable, Iterable, Iterator, Protocol, TypeVar
 
 E = TypeVar("E", bound=Exception)
 
@@ -46,9 +47,25 @@ def require_tool(tool_name: str, *, error_cls: type[E] = Lab3Error) -> None:
         raise error_cls(f"Required tool not found in PATH: {tool_name}")
 
 
-def run_cmd(cmd: list[str], *, dry_run: bool = False, cwd: Path | None = None, error_cls: type[E] = Lab3Error) -> None:
+def run_cmd(
+    cmd: list[str],
+    *,
+    dry_run: bool = False,
+    cwd: Path | None = None,
+    log_path: Path | None = None,
+    error_cls: type[E] = Lab3Error,
+) -> None:
     print("$", " ".join(cmd))
+    header = f"$ {' '.join(cmd)}\n"
+    log_file = None
+    if log_path is not None:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_file = log_path.open("a", encoding="utf-8")
+        log_file.write(header)
     if dry_run:
+        if log_file is not None:
+            log_file.write("[dry-run] command not executed\n")
+            log_file.close()
         return
     proc = subprocess.Popen(
         cmd,
@@ -60,9 +77,15 @@ def run_cmd(cmd: list[str], *, dry_run: bool = False, cwd: Path | None = None, e
     )
     tail: deque[str] = deque(maxlen=120)
     assert proc.stdout is not None
-    for line in proc.stdout:
-        print(line, end="")
-        tail.append(line.rstrip("\n"))
+    try:
+        for line in proc.stdout:
+            print(line, end="")
+            tail.append(line.rstrip("\n"))
+            if log_file is not None:
+                log_file.write(line)
+    finally:
+        if log_file is not None:
+            log_file.close()
     return_code = proc.wait()
     if return_code != 0:
         raise error_cls(
@@ -78,6 +101,99 @@ def timed_block(label: str, timings: dict[str, float]) -> Iterator[None]:
         yield
     finally:
         timings[label] = timings.get(label, 0.0) + perf_counter() - started
+
+
+# --------------------------------------------------------------------------- #
+# GPU memory peak tracking (assignment §5.2: record VRAM/memory peak)          #
+# --------------------------------------------------------------------------- #
+# Training happens in external processes (3DGS ``train.py``, ``ns-train``), so
+# we cannot read ``torch.cuda.max_memory_allocated()`` directly. Instead we poll
+# ``nvidia-smi`` from a background thread while a command runs and keep the max
+# sample. Best-effort: if ``nvidia-smi`` is absent (CPU box, no NVIDIA driver)
+# every sample is ``None`` and no peak is recorded — the column stays blank and
+# the report notes the limit, as the assignment allows ("若无法精确记录，可给出近似观察").
+NVIDIA_SMI_FORMAT = "--query-gpu=memory.used --format=csv,noheader,nounits"
+
+
+def parse_nvidia_smi_memory(output: str) -> float | None:
+    """First parseable ``memory.used`` value (MiB) from nvidia-smi, converted to GiB."""
+    for line in output.splitlines():
+        token = line.strip().split(",")[0].strip()
+        try:
+            mib = float(token)
+        except ValueError:
+            continue
+        return mib / 1024.0
+    return None
+
+
+def query_nvidia_smi_gb(nvidia_smi: str = "nvidia-smi") -> float | None:
+    """One best-effort sample of currently-used GPU memory in GiB; ``None`` on any failure."""
+    try:
+        completed = subprocess.run(
+            [nvidia_smi] + NVIDIA_SMI_FORMAT.split(),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except Exception:
+        return None
+    return parse_nvidia_smi_memory(completed.stdout)
+
+
+def peak_from_samples(samples: Iterable[float | None]) -> float | None:
+    """Max of the non-``None`` samples (GiB); ``None`` if none sampled."""
+    values = [s for s in samples if s is not None]
+    return max(values) if values else None
+
+
+@contextmanager
+def monitored_block(
+    label: str,
+    timings: dict[str, float],
+    peaks: dict[str, float] | None = None,
+    *,
+    sampler: Callable[[], float | None] = query_nvidia_smi_gb,
+    interval: float = 0.5,
+    enabled: bool = True,
+) -> Iterator[None]:
+    """Time a block and sample GPU memory in a background thread, recording the peak.
+
+    Mirrors :func:`timed_block` but additionally polls ``sampler`` (default:
+    nvidia-smi used-memory in GiB) every ``interval`` seconds. The running max is
+    written to ``peaks[label]`` only when at least one sample succeeded. When
+    ``enabled`` is False (e.g. dry-run, where no command actually runs) it just
+    times the block without polling, so no ambient GPU reading is recorded.
+    """
+    if not enabled:
+        with timed_block(label, timings):
+            yield
+        return
+
+    started = perf_counter()
+    stop = threading.Event()
+    samples: list[float | None] = []
+
+    def _poll() -> None:
+        while not stop.is_set():
+            try:
+                samples.append(sampler())
+            except Exception:
+                samples.append(None)
+            stop.wait(interval)
+
+    thread = threading.Thread(target=_poll, daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join(timeout=interval + 1.0)
+        timings[label] = timings.get(label, 0.0) + perf_counter() - started
+        peak = peak_from_samples(samples)
+        if peak is not None and peaks is not None:
+            peaks[label] = max(peaks.get(label, 0.0), peak)
 
 
 def write_json(path: Path, payload: Any) -> None:
