@@ -40,6 +40,8 @@ class SfMReconstructor:
                 db_path.unlink()
             if sparse_root.exists():
                 shutil.rmtree(sparse_root)
+        if not context.dry_run:
+            sparse_root.mkdir(parents=True, exist_ok=True)
 
         with timed_block("sfm_feature_extractor", context.timings):
             run_cmd(

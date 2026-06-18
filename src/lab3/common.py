@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
 import shutil
 import subprocess
 import threading
@@ -39,7 +41,7 @@ def timestamp_tag() -> str:
 
 def build_run_dir(output_root: Path, scene_name: str, timestamp: str | None = None) -> Path:
     stamp = timestamp or timestamp_tag()
-    return output_root / f"{slugify(scene_name)}_{stamp}"
+    return output_root / f"{stamp}_{slugify(scene_name)}"
 
 
 def require_tool(tool_name: str, *, error_cls: type[E] = Lab3Error) -> None:
@@ -70,16 +72,23 @@ def run_cmd(
     proc = subprocess.Popen(
         cmd,
         cwd=None if cwd is None else str(cwd),
+        env={
+            **os.environ,
+            "PYTHONUTF8": os.environ.get("PYTHONUTF8", "1"),
+            "PYTHONIOENCODING": os.environ.get("PYTHONIOENCODING", "utf-8"),
+        },
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         bufsize=1,
     )
     tail: deque[str] = deque(maxlen=120)
     assert proc.stdout is not None
     try:
         for line in proc.stdout:
-            print(line, end="")
+            _safe_write_stdout(line)
             tail.append(line.rstrip("\n"))
             if log_file is not None:
                 log_file.write(line)
@@ -229,3 +238,11 @@ def copy_file(src: Path, dst: Path, *, overwrite: bool) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dst)
 
+
+def _safe_write_stdout(text: str) -> None:
+    try:
+        print(text, end="")
+    except UnicodeEncodeError:
+        encoded = text.encode(sys.stdout.encoding or "utf-8", errors="replace")
+        sys.stdout.buffer.write(encoded)
+        sys.stdout.flush()

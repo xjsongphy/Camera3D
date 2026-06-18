@@ -26,8 +26,10 @@ class NeRFReconstructor:
     name: str = "nerf"
 
     def run(self, context: ReconstructionContext) -> None:
-        processed_dir = context.output_dir / "processed"
-        train_dir = context.output_dir / "train"
+        processed_dir = (context.output_dir / "processed").resolve()
+        train_dir = (context.output_dir / "train").resolve()
+        images_dir = context.images_dir.resolve()
+        colmap_model = self.config.colmap_model.resolve() if self.config.colmap_model is not None else None
         logs = context.run_dir / "logs" if context.run_dir else None
         if not context.dry_run:
             require_tool(self.config.process_bin)
@@ -39,13 +41,13 @@ class NeRFReconstructor:
                 self.config.process_bin,
                 "images",
                 "--data",
-                str(context.images_dir),
+                str(images_dir),
                 "--output-dir",
                 str(processed_dir),
             ]
-            if self.config.colmap_model is not None:
+            if colmap_model is not None:
                 cmd.extend(
-                    ["--skip-colmap", "--colmap-model-path", str(self.config.colmap_model)]
+                    ["--skip-colmap", "--colmap-model-path", str(colmap_model)]
                 )
             if self.config.downscale_factor is not None:
                 cmd.extend(["--downscale-factor", str(self.config.downscale_factor)])
@@ -63,6 +65,8 @@ class NeRFReconstructor:
             str(processed_dir),
             "--output-dir",
             str(train_dir),
+            "--vis",
+            "tensorboard",
         ]
         if self.config.max_num_iterations is not None:
             train_cmd.extend(["--max-num-iterations", str(self.config.max_num_iterations)])

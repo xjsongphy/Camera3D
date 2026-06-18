@@ -71,9 +71,12 @@ def save_qualitative(
         return []
     out_dir: Path = context.run_dir / "qualitative"
     out_dir.mkdir(parents=True, exist_ok=True)
+    ordered_renders = {
+        method: _list_render_images(render_dir) for method, render_dir in method_render_dirs.items()
+    }
 
     written: list[Path] = []
-    for name in test_names[:max_views]:
+    for index, name in enumerate(test_names[:max_views]):
         gt_path = prepared_images_dir / name
         if not gt_path.exists():
             continue
@@ -81,6 +84,8 @@ def save_qualitative(
         methods: dict[str, np.ndarray] = {}
         for method, render_dir in method_render_dirs.items():
             render_path = _find_render(render_dir, name)
+            if render_path is None and index < len(ordered_renders.get(method, [])):
+                render_path = ordered_renders[method][index]
             if render_path is not None:
                 methods[method] = load_image(render_path, eval_size)
         if not methods:
@@ -98,7 +103,17 @@ def _find_render(render_dir: Path, target_name: str) -> Path | None:
     if not render_dir.is_dir():
         return None
     stem = Path(target_name).stem
-    for path in sorted(render_dir.rglob("*.png")):
-        if stem in path.stem or path.stem == stem:
-            return path
+    for pattern in ("*.png", "*.jpg", "*.jpeg"):
+        for path in sorted(render_dir.rglob(pattern)):
+            if stem in path.stem or path.stem == stem:
+                return path
     return None
+
+
+def _list_render_images(render_dir: Path) -> list[Path]:
+    if not render_dir.is_dir():
+        return []
+    paths: list[Path] = []
+    for pattern in ("*.png", "*.jpg", "*.jpeg"):
+        paths.extend(sorted(render_dir.rglob(pattern)))
+    return sorted(paths)

@@ -19,7 +19,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Camera3D Lab3 reconstruction runner")
     parser.add_argument("--config", type=Path, help="JSON config file. CLI flags override top-level fields.")
     parser.add_argument("--input-dir", type=Path, help="directory containing images and/or videos")
-    parser.add_argument("--scene-name", help="scene name used in the timestamped output directory")
+    parser.add_argument("--scene-name", help="scene name used in the output directory name")
     parser.add_argument("--output-root", type=Path, default=None, help="output root, default outputs/lab3")
     parser.add_argument("--methods", nargs="+", choices=["sfm", "3dgs", "dgs", "nerf"], help="methods to run")
     parser.add_argument("--fps", type=float, help="frame extraction fps for videos")

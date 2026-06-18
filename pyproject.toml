@@ -60,5 +60,11 @@ build-backend = "hatchling.build"
 [tool.hatch.metadata]
 allow-direct-references = true
 
+[tool.uv]
+prerelease = "allow"
+override-dependencies = [
+  "pymeshlab==2023.12.post1; sys_platform == 'win32'",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/lab1", "src/lab2", "src/lab3"]

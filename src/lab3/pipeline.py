@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -185,6 +186,21 @@ def evaluate_run_dir(run_dir: Path, cfg_overrides: dict[str, Any] | None = None)
     if cfg.geometry:
         staged = stage_geometry(context, ran_configs)
         write_geometry_metrics(context, staged)
+    if cfg.qualitative:
+        method_render_dirs = {
+            "3dgs": _latest(run_dir / "results" / "3dgs" / "test", "ours_*")
+            or (run_dir / "results" / "3dgs"),
+            "nerf": run_dir / "results" / "nerf" / "renders",
+        }
+        test_names = _read_test_names(test_list)
+        save_qualitative(
+            context,
+            None,
+            prepared_images_dir=prepared_root / "images",
+            test_names=test_names,
+            method_render_dirs=method_render_dirs,
+            eval_size=cfg.eval_size,
+        )
     write_json(timings_path, timings)
     return run_dir
 
@@ -247,9 +263,14 @@ def config_from_dict(data: dict[str, Any]) -> Lab3PipelineConfig:
     if not isinstance(reconstruction, dict):
         raise Lab3Error("config.reconstruction must be an object")
 
-    sfm_data = _dict_value(reconstruction, "sfm")
-    dgs_data = _dict_value(reconstruction, "3dgs")
-    nerf_data = _dict_value(reconstruction, "nerf")
+    # Support both the user-facing nested config schema and the run_config.json
+    # snapshots written by this pipeline, which store method configs at top level.
+    sfm_source = _coalesce_config_section(data, reconstruction, "sfm")
+    dgs_source = _coalesce_config_section(data, reconstruction, "3dgs")
+    nerf_source = _coalesce_config_section(data, reconstruction, "nerf")
+    sfm_data = _dict_value(sfm_source)
+    dgs_data = _dict_value(dgs_source)
+    nerf_data = _dict_value(nerf_source)
 
     input_dir = data.get("input_dir")
     scene_name = data.get("scene_name")
@@ -290,7 +311,11 @@ def config_from_dict(data: dict[str, Any]) -> Lab3PipelineConfig:
                 if dgs_data.get("repo_dir") in (None, "")
                 else Path(str(dgs_data["repo_dir"]))
             ),
-            python_bin=str(dgs_data.get("python_bin", "python")),
+            python_bin=(
+                sys.executable
+                if dgs_data.get("python_bin") in (None, "", "python")
+                else str(dgs_data.get("python_bin"))
+            ),
             iterations=_optional_int(dgs_data.get("iterations", 7000)),
             resolution=_optional_int(dgs_data.get("resolution")),
             extra_args=tuple(str(item) for item in dgs_data.get("extra_args", ())),
@@ -314,13 +339,24 @@ def config_from_dict(data: dict[str, Any]) -> Lab3PipelineConfig:
     )
 
 
-def _dict_value(data: dict[str, Any], key: str) -> dict[str, Any]:
-    value = data.get(key, {})
+def _dict_value(value: Any) -> dict[str, Any]:
     if value is None:
         return {}
     if not isinstance(value, dict):
-        raise Lab3Error(f"config.reconstruction.{key} must be an object")
+        raise Lab3Error("method config must be an object")
     return value
+
+
+def _coalesce_config_section(
+    top_level: dict[str, Any], reconstruction: dict[str, Any], key: str
+) -> Any:
+    if key in reconstruction:
+        return reconstruction.get(key)
+    if key == "3dgs" and "dgs" in reconstruction:
+        return reconstruction.get("dgs")
+    if key == "3dgs" and "dgs" in top_level:
+        return top_level.get("dgs")
+    return top_level.get(key)
 
 
 def _optional_int(value: Any) -> int | None:

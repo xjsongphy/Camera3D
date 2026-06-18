@@ -55,11 +55,13 @@ class EvaluateConfig:
 # Command builders (pure)                                                      #
 # --------------------------------------------------------------------------- #
 def build_3dgs_render_command(python_bin: str, repo_dir: Path, model_dir: Path) -> list[str]:
-    return [python_bin, str(repo_dir / "render.py"), "-m", str(model_dir)]
+    script = "render.py" if repo_dir else "render.py"
+    return [python_bin, script, "-m", str(model_dir)]
 
 
 def build_3dgs_metrics_command(python_bin: str, repo_dir: Path, model_dir: Path) -> list[str]:
-    return [python_bin, str(repo_dir / "metrics.py"), "-m", str(model_dir)]
+    script = "metrics.py" if repo_dir else "metrics.py"
+    return [python_bin, script, "-m", str(model_dir)]
 
 
 def build_nerf_eval_command(eval_bin: str, config_path: Path, out_json: Path) -> list[str]:
@@ -76,7 +78,7 @@ def build_nerf_render_command(
         str(config_path),
         "--output-path",
         str(out_dir),
-        "--split-mode",
+        "--split",
         split,
         "--rendered-output-names",
         "rgb",
@@ -141,8 +143,10 @@ def parse_nerf_eval_json(path: Path) -> dict[str, float]:
 def model_size_mb(paths: Iterable[Path]) -> float:
     total = 0
     for path in paths:
-        if path.exists():
+        if path.is_file():
             total += path.stat().st_size
+        elif path.is_dir():
+            total += sum(p.stat().st_size for p in path.rglob("*") if p.is_file())
     return total / (1024 * 1024)
 
 
@@ -220,7 +224,7 @@ def _evaluate_3dgs(
     gpu_peaks: dict[str, float],
     eval_dir: Path,
 ) -> dict[str, Any]:
-    model_dir = context.run_dir / "results" / "3dgs"  # where train.py -m wrote
+    model_dir = (context.run_dir / "results" / "3dgs").resolve()  # where train.py -m wrote
     repo_dir = getattr(dgs_cfg, "repo_dir", None) if dgs_cfg else None
     python_bin = getattr(dgs_cfg, "python_bin", "python") if dgs_cfg else "python"
     logs = context.run_dir / "logs"

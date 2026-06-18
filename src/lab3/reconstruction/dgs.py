@@ -35,8 +35,9 @@ class DGSReconstructor:
                 "3DGS requires --dgs-repo or config.reconstruction.3dgs.repo_dir "
                 "pointing to the GraphDeco gaussian-splatting checkout."
             )
-        train_py = self.config.repo_dir / "train.py"
-        convert_py = self.config.repo_dir / "convert.py"
+        repo_dir = self.config.repo_dir.resolve()
+        train_py = repo_dir / "train.py"
+        convert_py = repo_dir / "convert.py"
         logs = context.run_dir / "logs" if context.run_dir else None
         if not context.dry_run:
             require_tool(self.config.python_bin)
@@ -44,7 +45,8 @@ class DGSReconstructor:
                 raise Lab3Error(f"3DGS train.py not found: {train_py}")
             context.output_dir.mkdir(parents=True, exist_ok=True)
 
-        source = self.config.colmap_source or context.prepared_dir
+        source = (self.config.colmap_source or context.prepared_dir).resolve()
+        output_dir = context.output_dir.resolve()
 
         # train.py needs a COLMAP sparse model under the source. When poses are
         # not shared, build one with convert.py (runs COLMAP). Without this the
@@ -52,24 +54,24 @@ class DGSReconstructor:
         if self.config.colmap_source is None:
             if not context.dry_run and not convert_py.exists():
                 raise Lab3Error(f"3DGS convert.py not found: {convert_py}")
-            convert_cmd = [self.config.python_bin, str(convert_py), "-s", str(source)]
+            convert_cmd = [self.config.python_bin, "convert.py", "-s", str(source)]
             if self.config.colmap_bin != "colmap":
                 convert_cmd.extend(["--colmap_executable", self.config.colmap_bin])
             with timed_block("3dgs_convert", context.timings):
                 run_cmd(
                     convert_cmd,
                     dry_run=context.dry_run,
-                    cwd=self.config.repo_dir,
+                    cwd=repo_dir,
                     log_path=logs / "3dgs_convert.log" if logs else None,
                 )
 
         cmd = [
             self.config.python_bin,
-            str(train_py),
+            "train.py",
             "-s",
             str(source),
             "-m",
-            str(context.output_dir),
+            str(output_dir),
         ]
         if self.config.eval_split:
             cmd.append("--eval")
@@ -83,6 +85,6 @@ class DGSReconstructor:
             run_cmd(
                 cmd,
                 dry_run=context.dry_run,
-                cwd=self.config.repo_dir,
+                cwd=repo_dir,
                 log_path=logs / "3dgs_train.log" if logs else None,
             )
