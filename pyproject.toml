@@ -18,6 +18,10 @@ lab3 = [
   "pillow>=10.4.0",
   "lpips>=0.1.0",
   "nerfstudio>=1.1.5",
+  "tinycudann @ git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch",
+  "diff-gaussian-rasterization @ file:///D:/Develop/Camera3D/gaussian-splatting/submodules/diff-gaussian-rasterization",
+  "simple-knn @ file:///D:/Develop/Camera3D/gaussian-splatting/submodules/simple-knn",
+  "fused-ssim @ file:///D:/Develop/Camera3D/gaussian-splatting/submodules/fused-ssim",
 ]
 lab1 = [
   "opencv-python-headless>=4.10.0",
@@ -65,6 +69,15 @@ prerelease = "allow"
 override-dependencies = [
   "pymeshlab==2023.12.post1; sys_platform == 'win32'",
 ]
+
+[tool.uv.extra-build-dependencies]
+tinycudann = [
+  "setuptools==70.2.0",
+  "torch @ https://download.pytorch.org/whl/cu124/torch-2.5.1%2Bcu124-cp312-cp312-win_amd64.whl",
+]
+
+[tool.uv.extra-build-variables]
+tinycudann = { DISTUTILS_USE_SDK = "1", MSSdk = "1", CUDA_HOME = "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.4", CUDA_PATH = "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.4", TORCH_CUDA_ARCH_LIST = "8.9", INCLUDE = "C:\\Program Files (x86)\\Microsoft Visual Studio\\18\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\include;C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.22621.0\\ucrt;C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.22621.0\\shared;C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.22621.0\\um;C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.22621.0\\winrt;C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.22621.0\\cppwinrt", LIB = "C:\\Program Files (x86)\\Microsoft Visual Studio\\18\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\lib\\x64;C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.22621.0\\ucrt\\x64;C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.22621.0\\um\\x64", PATH = "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.4\\bin;C:\\Program Files (x86)\\Microsoft Visual Studio\\18\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64;C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.22621.0\\x64;C:\\Windows\\System32;C:\\Windows" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/lab1", "src/lab2", "src/lab3"]

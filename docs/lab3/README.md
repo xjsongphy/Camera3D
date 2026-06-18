@@ -12,7 +12,7 @@ uv sync --group lab3 --extra cpu
 uv sync --group lab3 --extra cu124
 ```
 
-`lab3` 组：Matplotlib、Pillow、NumPy、lpips、nerfstudio（torch 经 `--extra cpu/cu124` 提供）。Windows + Python 3.12 下通过 `tool.uv.override-dependencies` 覆盖到 `pymeshlab==2023.12.post1`，并在 `tool.uv.prerelease = "allow"` 下接受 `nerfstudio 1.1.5` 传递依赖的 `newrawpy>=1.0.0b0` 预发布版本。lpips 缺失时评测自动降级为只算 PSNR/SSIM。
+`lab3` 组：Matplotlib、Pillow、NumPy、lpips、nerfstudio、tiny-cuda-nn，以及 3DGS 依赖的本地扩展 `diff-gaussian-rasterization` / `simple-knn` / `fused-ssim`（torch 经 `--extra cpu/cu124` 提供）。Windows + Python 3.12 下通过 `tool.uv.override-dependencies` 覆盖到 `pymeshlab==2023.12.post1`，并在 `tool.uv.prerelease = "allow"` 下接受 `nerfstudio 1.1.5` 传递依赖的 `newrawpy>=1.0.0b0` 预发布版本。`tiny-cuda-nn` 通过 Git 源码编译安装，要求本机 CUDA/MSVC 工具链可用；3DGS 三个扩展通过仓库内 `gaussian-splatting/submodules/` 本地路径构建安装，因此同步前需保证该目录存在。lpips 缺失时评测自动降级为只算 PSNR/SSIM。
 
 系统工具（需在 PATH 中可用）：
 

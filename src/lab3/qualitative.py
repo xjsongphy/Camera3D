@@ -17,12 +17,14 @@ matplotlib.use("Agg")  # headless rendering
 
 import matplotlib.pyplot as plt
 import numpy as np
+from PIL import Image
 
 from lab3.metrics import load_image
 
 
 def error_map(gt: np.ndarray, pred: np.ndarray) -> np.ndarray:
     """Per-pixel absolute error normalized to [0, 1] for display."""
+    pred = _resize_like(pred, gt)
     diff = np.mean(np.abs(np.asarray(gt, dtype=np.float64) - np.asarray(pred, dtype=np.float64)), axis=-1)
     peak = float(diff.max())
     if peak <= 0:
@@ -43,6 +45,7 @@ def build_comparison_figure(view_name: str, gt: np.ndarray, methods: dict[str, n
     axes[0].axis("off")
 
     for idx, (method, image) in enumerate(methods.items(), start=1):
+        image = _resize_like(image, gt)
         render_ax = axes[2 * idx - 1]
         error_ax = axes[2 * idx]
         render_ax.imshow(np.clip(image, 0, 1))
@@ -117,3 +120,13 @@ def _list_render_images(render_dir: Path) -> list[Path]:
     for pattern in ("*.png", "*.jpg", "*.jpeg"):
         paths.extend(sorted(render_dir.rglob(pattern)))
     return sorted(paths)
+
+
+def _resize_like(image: np.ndarray, reference: np.ndarray) -> np.ndarray:
+    if image.shape[:2] == reference.shape[:2]:
+        return image
+    ref_h, ref_w = reference.shape[:2]
+    array = np.clip(image, 0.0, 1.0)
+    pil = Image.fromarray((array * 255.0).astype(np.uint8))
+    resized = pil.resize((ref_w, ref_h), Image.Resampling.BILINEAR)
+    return np.asarray(resized, dtype=np.float32) / 255.0
