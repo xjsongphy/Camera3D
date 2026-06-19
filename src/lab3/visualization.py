@@ -103,7 +103,7 @@ def view_run_dir(
     *,
     nerfstudio_viewer: bool = True,
     dry_run: bool = False,
-    nerf_viewer_bin: str = "ns-viewer",
+    nerf_viewer_bin: str = "lab3-viewer",
 ) -> None:
     """Launch the appropriate interactive viewer for each requested method."""
     if not run_dir.exists():

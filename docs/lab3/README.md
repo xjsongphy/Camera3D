@@ -90,9 +90,22 @@ uv run lab3 --view-run outputs/lab3/<ts>_<scene> --methods sfm 3dgs --no-nerfstu
 
 - **Open3D**（`pip install open3d`，需显示器）：SfM 点云、COLMAP dense、Poisson mesh、3DGS Gaussian `.ply` 都能交互查看。
   - 注意：Open3D 忽略 3DGS 的 SH 颜色通道，Gaussian 只显示为点云（仍可观察分布、浮点、穿透）。要看真正的实时 splatting 用下面的 SIBR。
-- **nerfstudio web viewer**：`ns-viewer --load-config results/nerf/train/.../config.yml`，浏览器交互查看 NeRF。
+- **nerfstudio web viewer**（NeRF 交互预览）
+  - **快速预览**：直接用 `uv run lab3 --view-run <run-dir>`（见上方命令）。框架会递归扫 `results/nerf/train/` 下最新的 `config.yml` 并拉起 viewer，**默认 png（无损，停下后更清晰）**，无需手填路径。
+  - **手动指定 config 时**直接调 `lab3-viewer`（`--view-run` 不透传画质参数）。nerfstudio 训练把 config 写在 `<run-dir>/results/nerf/train/processed/nerfacto/<时间戳>/config.yml`——`processed` 来自数据目录名，`<时间戳>` 是 nerfstudio 按训练时间生成的 `YYYY-MM-DD_HHMMSS`。例：
+    ```bash
+    lab3-viewer --load-config outputs/lab3/20260618_172030_dormitory/results/nerf/train/processed/nerfacto/2026-06-18_195843/config.yml
+    ```
+    `lab3-viewer` 是仓库封装入口（`src/lab3/nerfstudio_viewer.py`）：在 import nerfstudio 前压掉当前栈几条低价值 warning，并把 viewer 默认从 jpeg 改成 png（命令行显式传 `--viewer.image-format` 仍优先生效）。原生 `ns-viewer` 也能用，只是终端更吵、且仍是 jpeg 默认。
+  - **画质说明**：默认 png 无损、停下后更清晰，代价是交互可能比 jpeg 略卡；viewer 还会动态降分辨率保帧率，所以拖动时发糊属正常，停下后逐步补细，峰值仍可能低于离线 `ns-render`。若 png 明显卡顿，显式退回 jpeg：
+    ```bash
+    lab3-viewer --load-config <config.yml> --viewer.image-format jpeg --viewer.jpeg-quality 100
+    ```
+    判画质别在相机运动中看，停 1–3 秒再观察；停住仍明显模糊通常是模型/数据质量问题，不是 viewer 参数。
 - **3DGS 原生 SIBR viewer**（真正的实时 splatting 渲染）：在 `gaussian-splatting/SIBR_viewers` 编译后运行
   `./install/bin/SIBR_gaussianViewer_app -m outputs/lab3/<ts>_<scene>/results/3dgs`。
+  Windows 下可先用仓库脚本编译：
+  `./scripts/lab3/build_sibr_viewer.ps1`
 
 ## 输出目录
 
@@ -105,6 +118,8 @@ uv run lab3 --view-run outputs/lab3/<ts>_<scene> --methods sfm 3dgs --no-nerfstu
 - `geometry/{sfm,3dgs,nerf}/`：点云/mesh/Gaussian `.ply` 汇总
 - `geometry_metrics.csv`：各方法点云 vs COLMAP dense proxy 的 Chamfer / F-score
 - `logs/<method>_<step>.log`：每步外部命令日志
+- `logs/*_train_scalars.csv`：从 TensorBoard `tfevents` 导出的训练标量长表（tag / step / value / wall_time）
+- `logs/*_train_loss_curve.csv`、`logs/*_train_loss_curve.png`：训练 loss 曲线导出；`3dgs` 与 `nerf` 都会生成
 - `metrics.csv`：作业必交，列 `method, psnr, ssim, lpips, metric_source, held_out, train_time_sec, iterations, gpu_mem_peak_gb, render_fps, model_size_mb, gpu, notes`
 - `timings.json`：各阶段耗时
 
@@ -119,6 +134,7 @@ uv run lab3 --view-run outputs/lab3/<ts>_<scene> --methods sfm 3dgs --no-nerfstu
 | `qualitative/comparison_*.png` | GT / 各方法渲染 / 误差图，≥3 个 held-out 视角 | §5.1 定性对比 + 误差图 |
 | `geometry/{sfm,3dgs,nerf}/` | COLMAP dense `.ply`、Poisson mesh、3DGS Gaussian `.ply`、nerfstudio 导出 | §5.3 几何可视化（孔洞/浮点/边界锐利度） |
 | `timings.json` | 各阶段耗时：feature/match/mapper/dense、convert、process_data、train、render、eval | §5.2 预处理 / 训练 / 渲染时间分解 |
+| `logs/*_train_scalars.csv`、`logs/*_train_loss_curve.{csv,png}` | 训练过程标量与 loss 曲线导出，便于直接画图/写报告，无需再手动开 TensorBoard | §5.2 训练过程记录；§6 报告图表 |
 | `results/3dgs/test/.../results.json`、`results/_eval/nerf_eval.json` | 3DGS 原版 `metrics.py` 与 nerfstudio `ns-eval` 的官方指标 | 交叉校验自实现指标的可信度 |
 | `configs/run_config.json`、`prepared_dataset.json` | 完整运行配置与训练/测试划分清单 | §8 可复现性 |
 | `logs/<method>_<step>.log` | 每条外部命令的完整 stdout/stderr | §8 命令可追踪 |
