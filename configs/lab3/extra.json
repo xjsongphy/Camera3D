@@ -14,13 +14,14 @@
   "qualitative": true,
   "eval_size": null,
   "lpips": true,
+  "native_crosscheck": false,
   "reconstruction": {
     "sfm": {
       "colmap_bin": "colmap",
       "matcher": "sequential",
       "camera_model": "PINHOLE",
       "single_camera": true,
-      "dense": true
+      "dense": false
     },
     "3dgs": {
       "repo_dir": "gaussian-splatting",

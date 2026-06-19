@@ -1,6 +1,6 @@
 # Lab 3 README
 
-Lab3 是面向自采图片/视频的多表示三维场景重建与评测框架。一条命令走完：抽帧/划分 → COLMAP 位姿 → SfM 点云 / 3DGS / Nerfacto 三种表示 → 渲染 held-out → 统一指标（PSNR/SSIM/LPIPS）+ 效率（训练时间/迭代数/GPU 显存峰值/FPS/模型大小）+ 几何（可视化 + Chamfer/F-score）→ 出 `metrics.csv`、`geometry_metrics.csv`、`qualitative/`、`geometry/`、`timings.json`、`logs/`。对应作业 `docs/lab3/lab3.md`。
+Lab3 是面向自采图片/视频的多表示三维场景重建与评测框架。一条命令走完：抽帧/划分 → 共享 COLMAP 位姿 → SfM 点云 / 3DGS / Nerfacto / NeuS 四种表示 → 渲染同一 held-out → 统一指标（PSNR/SSIM/LPIPS）+ 效率（训练时间/迭代数/GPU 显存峰值/FPS/模型大小）+ 几何（可视化 + Chamfer/F-score）→ 出 `metrics.csv`、`geometry_metrics.csv`、`qualitative/`、`geometry/`、`timings.json`、`logs/`。对应作业 `docs/lab3/lab3.md`。
 
 ## 依赖与工具
 
@@ -67,9 +67,10 @@ SDFStudio 所需的 `meta_data.json` 并归一化场景，因此应同时启用 
 
 | 开关 | 作用 |
 |------|------|
-| `--no-share-poses` | 关闭位姿共享（每方法各自跑 COLMAP） |
+| `--no-share-poses` | 显式关闭公平位姿模式（3DGS/NeRF 各自跑 COLMAP；NeuS 需另给 `colmap_model`） |
 | `--no-evaluate` / `--no-geometry` / `--no-qualitative` | 关闭对应后处理阶段 |
 | `--no-lpips` | 跳过 LPIPS，只算 PSNR/SSIM |
+| `--native-crosscheck` | 额外运行 3DGS/nerfstudio 原生指标作交叉校验；会重复部分计算，默认关闭 |
 | `--eval-size H W` | 统一缩放到该分辨率再算指标（公平） |
 | `--test-ratio 0.1` | held-out 比例（写 `prepared/test.txt`） |
 | `--dgs-iterations 7000` / `--nerf-iterations 30000` / `--neus-iterations 20001` | 训练迭代数 |
@@ -141,10 +142,10 @@ uv run lab3 --view-run outputs/lab3/<ts>_<scene> --methods sfm 3dgs --no-nerfstu
 | `metrics.csv` | 每方法一行：PSNR / SSIM / LPIPS、训练时间、迭代数、GPU 显存峰值、渲染 FPS、模型大小、GPU 型号 | §5.1 PSNR/SSIM/LPIPS；§5.2 训练时间/迭代数/显存峰值/FPS/模型大小/GPU；§6 结果表 |
 | `geometry_metrics.csv` | 各方法点云 vs COLMAP dense proxy 的 Chamfer（`chamfer_to_proxy`/`from_proxy`/`sym`）与 F-score（bbox 对角线 0.5% / 1%） | §5.3 几何定量分析（proxy，需诚实披露偏差） |
 | `qualitative/comparison_*.png` | GT / 各方法渲染 / 误差图，≥3 个 held-out 视角 | §5.1 定性对比 + 误差图 |
-| `geometry/{sfm,3dgs,nerf}/` | COLMAP dense `.ply`、Poisson mesh、3DGS Gaussian `.ply`、nerfstudio 导出 | §5.3 几何可视化（孔洞/浮点/边界锐利度） |
+| `geometry/{sfm,3dgs,nerf,neus}/` | COLMAP dense `.ply`、Poisson mesh、3DGS Gaussian `.ply`、nerfstudio/NeuS 导出 | §5.3 几何可视化（孔洞/浮点/边界锐利度） |
 | `timings.json` | 各阶段耗时：feature/match/mapper/dense、convert、process_data、train、render、eval | §5.2 预处理 / 训练 / 渲染时间分解 |
 | `logs/*_train_scalars.csv`、`logs/*_train_loss_curve.{csv,png}` | 训练过程标量与 loss 曲线导出，便于直接画图/写报告，无需再手动开 TensorBoard | §5.2 训练过程记录；§6 报告图表 |
-| `results/3dgs/test/.../results.json`、`results/_eval/nerf_eval.json` | 3DGS 原版 `metrics.py` 与 nerfstudio `ns-eval` 的官方指标 | 交叉校验自实现指标的可信度 |
+| `results/3dgs/test/.../results.json`、`results/_eval/{nerf,neus}_eval.json` | 启用 `--native-crosscheck` 后生成的框架官方指标 | 交叉校验统一指标的可信度（默认关闭以节省时间） |
 | `configs/run_config.json`、`prepared_dataset.json` | 完整运行配置与训练/测试划分清单 | §8 可复现性 |
 | `logs/<method>_<step>.log` | 每条外部命令的完整 stdout/stderr | §8 命令可追踪 |
 
@@ -154,4 +155,5 @@ uv run lab3 --view-run outputs/lab3/<ts>_<scene> --methods sfm 3dgs --no-nerfstu
 - **GPU 显存峰值** `gpu_mem_peak_gb`：训练/MVS 命令运行期间后台每 0.5 s 轮询一次 `nvidia-smi memory.used`，取最大值（GiB）。这是 GPU **全局已用**显存，含同卡其他进程，属 best-effort 近似（作业 §5.2 允许“近似观察”）；无 NVIDIA 驱动 / 无 `nvidia-smi`（如纯 CPU）时留空并在报告说明。
 - **渲染 FPS** `render_fps`：3DGS 的 `render.py` 计时**含磁盘 I/O**（写 PNG），数值偏保守；nerfstudio 的 `ns-eval` 计时含渲染故帧数未知、该格常为空，以 `ns-eval` 原生为准。
 - **几何指标**：以 COLMAP dense 点云为 **proxy 而非真值**，比较前双方下采样到 4096 点（`downsample_cap`）；F-score 阈值取 proxy bbox 对角线的 0.5% / 1%，尺度无关。`.ply` 加载需 Open3D，缺失则跳过并写说明行。
-- **公平性**：三方法共享同一套 COLMAP 位姿（`share_poses=true`）；但 held-out 集合不完全相同——3DGS 用 `train.py --eval` 每 8 张留 1，nerfstudio 用其原生 eval split。指标实现与分辨率统一，例外（划分不同）已在 `metrics.csv` 的 `metric_source` / `held_out` / `notes` 列标注，报告需讨论。SfM 为显式点云，RGB 新视角 PSNR 标 `N/A`。
+- **公平性**：默认四方法共享唯一一套全视角 COLMAP 位姿；相机位姿估计可读取全部图片，但 3DGS、NeRF、NeuS 的模型训练只消费 `prepared/train.txt`，并统一在 `prepared/test.txt` 上评测。3DGS adapter 通过其已有的 `sparse/0/test.txt` 能力读取 manifest，NeRF 使用 transforms 显式 split，NeuS 使用同一归一化坐标下的 train/test 元数据。`share_poses=true` 却缺少 SfM 会提前失败，避免静默重复 COLMAP。SfM 为显式点云，RGB 新视角 PSNR 标 `N/A`。
+- **分层**：`pipeline` 只遍历 reconstruction registry 并调用统一生命周期（训练、评测、几何、viewer）；命令、split 适配、输出查找和进程入口均由对应 adapter 持有。配置也按 registry 存储和解析，新增方法不需要在 pipeline 增加方法分支。

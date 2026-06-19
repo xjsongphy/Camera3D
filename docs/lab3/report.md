@@ -47,7 +47,7 @@
 
 用 Lecture 10 七维分析三者取舍：Differentiability / Memory Efficiency / Rendering Speed / Geometric Fidelity / Data Acquisition / Topology Flexibility / ML Integration。结合 Lecture 11 讨论 NeRF（表面 fuzzy）、NeuS/隐式面（几何好但慢，本次未做可作对比引用）、3DGS/2DGS（实时但 normal/mesh 不可靠）的具体失败模式。
 
-诚实说明：3DGS（每 8 张留一）与 nerfstudio（原生 eval split）held-out 集合不完全相同；位姿共享、指标实现/分辨率统一。
+诚实说明：SfM 使用全量图像估计所有相机位姿；3DGS、NeRF、NeuS 的表示训练统一只使用 `prepared/train.txt`，并在同一 `prepared/test.txt` 上评测。位姿、held-out 集合、指标实现与分辨率均统一。
 
 ## 7. 结论
 
