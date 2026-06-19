@@ -23,8 +23,16 @@ def test_config_from_dict_parses_new_fields() -> None:
             "eval_size": [800, 800],
             "lpips": False,
             "reconstruction": {
-                "3dgs": {"repo_dir": "external/gaussian-splatting", "eval_split": False},
-                "nerf": {"colmap_model": "prepared/sparse/0"},
+                "3dgs": {
+                    "repo_dir": "external/gaussian-splatting",
+                    "eval_split": False,
+                    "save_every": 4000,
+                },
+                "nerf": {
+                    "colmap_model": "prepared/sparse/0",
+                    "save_every": 5000,
+                    "save_only_latest_checkpoint": False,
+                },
             },
         }
     )
@@ -34,7 +42,10 @@ def test_config_from_dict_parses_new_fields() -> None:
     assert cfg.lpips is False
     assert cfg.eval_size == (800, 800)
     assert cfg.dgs.eval_split is False
+    assert cfg.dgs.save_every == 4000
     assert cfg.nerf.colmap_model == Path("prepared/sparse/0")
+    assert cfg.nerf.save_every == 5000
+    assert cfg.nerf.save_only_latest_checkpoint is False
 
 
 def test_resolve_shared_configs_injects_when_sharing(tmp_path: Path) -> None:

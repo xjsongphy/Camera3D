@@ -34,8 +34,16 @@ def test_config_from_dict_normalizes_reconstructors() -> None:
             "scene_name": "desk",
             "methods": ["dgs", "nerf"],
             "reconstruction": {
-                "3dgs": {"repo_dir": "external/gaussian-splatting", "iterations": 100},
-                "nerf": {"max_num_iterations": 200},
+                "3dgs": {
+                    "repo_dir": "external/gaussian-splatting",
+                    "iterations": 100,
+                    "save_every": 25,
+                },
+                "nerf": {
+                    "max_num_iterations": 200,
+                    "save_every": 50,
+                    "save_only_latest_checkpoint": False,
+                },
             },
         }
     )
@@ -43,7 +51,10 @@ def test_config_from_dict_normalizes_reconstructors() -> None:
     assert cfg.methods == ("3dgs", "nerf")
     assert cfg.dgs.repo_dir == Path("external/gaussian-splatting")
     assert cfg.dgs.iterations == 100
+    assert cfg.dgs.save_every == 25
     assert cfg.nerf.max_num_iterations == 200
+    assert cfg.nerf.save_every == 50
+    assert cfg.nerf.save_only_latest_checkpoint is False
 
 
 def test_config_from_dict_defaults_dgs_repo_to_relative_checkout() -> None:

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from lab3.common import require_tool, run_cmd, monitored_block, timed_block
 from lab3.reconstruction.base import ReconstructionContext
+from lab3.training_artifacts import export_training_scalar_artifacts
 
 
 @dataclass(frozen=True)
@@ -13,6 +15,8 @@ class NeRFConfig:
     train_bin: str = "ns-train"
     method: str = "nerfacto"
     max_num_iterations: int | None = 30000
+    save_every: int | None = 2000
+    save_only_latest_checkpoint: bool = False
     downscale_factor: int | None = None
     skip_process_data: bool = False
     # Shared COLMAP ``sparse/0`` dir. When set, ns-process-data reuses these
@@ -70,9 +74,32 @@ class NeRFReconstructor:
         ]
         if self.config.max_num_iterations is not None:
             train_cmd.extend(["--max-num-iterations", str(self.config.max_num_iterations)])
+        if self.config.save_every is not None:
+            train_cmd.extend(["--steps-per-save", str(self.config.save_every)])
+        train_cmd.extend(
+            ["--save-only-latest-checkpoint", str(self.config.save_only_latest_checkpoint)]
+        )
+
+        if logs is not None:
+            wrapped_cmd = [
+                sys.executable,
+                "-m",
+                "lab3.ns_train_wrapper",
+                "--log-path",
+                str(logs / "nerf_train.log"),
+                "--",
+                *train_cmd,
+            ]
+            train_log_path: Path | None = None
+        else:
+            wrapped_cmd = train_cmd
+            train_log_path = None
+
         with monitored_block("nerf_train", context.timings, context.peaks, enabled=not context.dry_run):
             run_cmd(
-                train_cmd,
+                wrapped_cmd,
                 dry_run=context.dry_run,
-                log_path=logs / "nerf_train.log" if logs else None,
+                log_path=train_log_path,
             )
+        if logs is not None and not context.dry_run:
+            export_training_scalar_artifacts("nerf", train_dir, logs)

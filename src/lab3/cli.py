@@ -33,7 +33,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="GraphDeco gaussian-splatting repository path (default: ./gaussian-splatting)",
     )
     parser.add_argument("--dgs-iterations", type=int, help="3DGS training iterations")
+    parser.add_argument("--dgs-save-every", type=int, help="save 3DGS model every N iterations")
     parser.add_argument("--nerf-iterations", type=int, help="nerfstudio training iterations")
+    parser.add_argument("--nerf-save-every", type=int, help="save nerfstudio checkpoint every N iterations")
     parser.add_argument("--timestamp", help="fixed timestamp tag for reproducible output paths")
     parser.add_argument("--force", action="store_true", help="overwrite prepared and method outputs")
     parser.add_argument("--dry-run", action="store_true", help="print commands and write configs where possible")
@@ -153,7 +155,7 @@ def _build_config(args: argparse.Namespace) -> Lab3PipelineConfig:
         cfg = Lab3PipelineConfig(
             **{**cfg.__dict__, "sfm": cfg.sfm.__class__(**{**cfg.sfm.__dict__, "colmap_bin": args.colmap_bin})}
         )
-    if args.dgs_repo is not None or args.dgs_iterations is not None:
+    if args.dgs_repo is not None or args.dgs_iterations is not None or args.dgs_save_every is not None:
         cfg = Lab3PipelineConfig(
             **{
                 **cfg.__dict__,
@@ -164,16 +166,27 @@ def _build_config(args: argparse.Namespace) -> Lab3PipelineConfig:
                         "iterations": args.dgs_iterations
                         if args.dgs_iterations is not None
                         else cfg.dgs.iterations,
+                        "save_every": args.dgs_save_every
+                        if args.dgs_save_every is not None
+                        else cfg.dgs.save_every,
                     }
                 ),
             }
         )
-    if args.nerf_iterations is not None:
+    if args.nerf_iterations is not None or args.nerf_save_every is not None:
         cfg = Lab3PipelineConfig(
             **{
                 **cfg.__dict__,
                 "nerf": cfg.nerf.__class__(
-                    **{**cfg.nerf.__dict__, "max_num_iterations": args.nerf_iterations}
+                    **{
+                        **cfg.nerf.__dict__,
+                        "max_num_iterations": args.nerf_iterations
+                        if args.nerf_iterations is not None
+                        else cfg.nerf.max_num_iterations,
+                        "save_every": args.nerf_save_every
+                        if args.nerf_save_every is not None
+                        else cfg.nerf.save_every,
+                    }
                 ),
             }
         )

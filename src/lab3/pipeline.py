@@ -317,6 +317,7 @@ def config_from_dict(data: dict[str, Any]) -> Lab3PipelineConfig:
                 else str(dgs_data.get("python_bin"))
             ),
             iterations=_optional_int(dgs_data.get("iterations", 7000)),
+            save_every=_optional_int(dgs_data.get("save_every", 2000)),
             resolution=_optional_int(dgs_data.get("resolution")),
             extra_args=tuple(str(item) for item in dgs_data.get("extra_args", ())),
             colmap_source=None
@@ -330,6 +331,10 @@ def config_from_dict(data: dict[str, Any]) -> Lab3PipelineConfig:
             train_bin=str(nerf_data.get("train_bin", "ns-train")),
             method=str(nerf_data.get("method", "nerfacto")),
             max_num_iterations=_optional_int(nerf_data.get("max_num_iterations", 30000)),
+            save_every=_optional_int(nerf_data.get("save_every", 2000)),
+            save_only_latest_checkpoint=bool(
+                nerf_data.get("save_only_latest_checkpoint", False)
+            ),
             downscale_factor=_optional_int(nerf_data.get("downscale_factor")),
             skip_process_data=bool(nerf_data.get("skip_process_data", False)),
             colmap_model=None

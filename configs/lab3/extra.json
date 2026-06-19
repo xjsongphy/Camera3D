@@ -24,7 +24,7 @@
     "3dgs": {
       "repo_dir": "gaussian-splatting",
       "python_bin": "python",
-      "iterations": 7000,
+      "iterations": 15000,
       "save_every": 2000,
       "resolution": null,
       "extra_args": [],
@@ -36,7 +36,7 @@
       "process_bin": "ns-process-data",
       "train_bin": "ns-train",
       "method": "nerfacto",
-      "max_num_iterations": 30000,
+      "max_num_iterations": 60000,
       "save_every": 2000,
       "save_only_latest_checkpoint": false,
       "downscale_factor": null,
