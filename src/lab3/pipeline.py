@@ -12,6 +12,7 @@ from lab3.geometry import stage_geometry, write_geometry_metrics
 from lab3.qualitative import save_qualitative
 from lab3.reconstruction import (
     DGSConfig,
+    DatasetSplit,
     NeRFConfig,
     NeuSConfig,
     RECONSTRUCTIONS,
@@ -84,6 +85,7 @@ def run_pipeline(cfg: Lab3PipelineConfig) -> Path:
     gpu_peaks: dict[str, float] = {}
     shared_dir = prepared.root
     reconstructors = _build_reconstructors(cfg, shared_dir)
+    split = DatasetSplit.from_files(prepared.train_list, prepared.test_list)
 
     for reconstructor in reconstructors:
         method_dir = results_dir / reconstructor.name
@@ -99,6 +101,7 @@ def run_pipeline(cfg: Lab3PipelineConfig) -> Path:
             timings=timings,
             peaks=gpu_peaks,
             shared_colmap_dir=shared_colmap,
+            split=split,
         )
         reconstructor.run(context)
 
@@ -112,6 +115,7 @@ def run_pipeline(cfg: Lab3PipelineConfig) -> Path:
         force=cfg.force,
         timings=timings,
         peaks=gpu_peaks,
+        split=split,
     )
 
     if cfg.evaluate:
@@ -157,6 +161,7 @@ def evaluate_run_dir(run_dir: Path, cfg_overrides: dict[str, Any] | None = None)
     timings = read_json(timings_path) if timings_path.exists() else {}
 
     reconstructors = _build_reconstructors(cfg, prepared_root)
+    split = DatasetSplit.from_files(prepared_root / "train.txt", prepared_root / "test.txt")
     context = ReconstructionContext(
         run_dir=run_dir,
         prepared_dir=prepared_root,
@@ -165,6 +170,7 @@ def evaluate_run_dir(run_dir: Path, cfg_overrides: dict[str, Any] | None = None)
         config_dir=run_dir / "configs",
         dry_run=False,
         timings=timings,
+        split=split,
     )
     eval_cfg = EvaluateConfig(
         enabled=True,

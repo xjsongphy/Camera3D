@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from lab3.reconstruction.base import ReconstructionContext, Reconstructor, ViewerTarget
+from lab3.reconstruction.base import DatasetSplit, ReconstructionContext, Reconstructor, ViewerTarget
 from lab3.reconstruction.dgs import DGSConfig, DGSReconstructor
 from lab3.reconstruction.nerf import NeRFConfig, NeRFReconstructor
 from lab3.reconstruction.neus import NeuSConfig, NeuSReconstructor
@@ -48,6 +48,7 @@ __all__ = [
     "NeuSConfig",
     "NeuSReconstructor",
     "ReconstructionContext",
+    "DatasetSplit",
     "Reconstructor",
     "ViewerTarget",
     "SfMConfig",

@@ -6,6 +6,28 @@ from typing import Any, Literal
 
 
 @dataclass(frozen=True)
+class DatasetSplit:
+    """Canonical image split shared by every reconstruction backend."""
+
+    train: tuple[str, ...] = ()
+    test: tuple[str, ...] = ()
+
+    @classmethod
+    def from_files(cls, train_path: Path, test_path: Path) -> DatasetSplit:
+        return cls(_read_names(train_path), _read_names(test_path))
+
+    @property
+    def all(self) -> tuple[str, ...]:
+        return self.train + self.test
+
+
+def _read_names(path: Path) -> tuple[str, ...]:
+    if not path.exists():
+        return ()
+    return tuple(line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
+
+
+@dataclass(frozen=True)
 class ReconstructionContext:
     run_dir: Path
     prepared_dir: Path
@@ -22,6 +44,7 @@ class ReconstructionContext:
     # When set (pose sharing), COLMAP SfM writes the shared ``sparse/0`` model
     # under this directory so 3DGS / nerfstudio reuse identical camera poses.
     shared_colmap_dir: Path | None = None
+    split: DatasetSplit = field(default_factory=DatasetSplit)
 
 
 @dataclass(frozen=True)
