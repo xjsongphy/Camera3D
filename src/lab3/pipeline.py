@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -11,16 +10,14 @@ from lab3.extract import ExtractionConfig, prepare_dataset
 from lab3.geometry import stage_geometry, write_geometry_metrics
 from lab3.qualitative import save_qualitative
 from lab3.reconstruction import (
-    DGSConfig,
     DatasetSplit,
-    NeRFConfig,
-    NeuSConfig,
     RECONSTRUCTIONS,
     ReconstructionContext,
     Reconstructor,
-    SfMConfig,
     create_reconstructor,
+    default_reconstruction_configs,
     normalize_reconstruction_name,
+    parse_reconstruction_configs,
 )
 
 
@@ -47,10 +44,15 @@ class Lab3PipelineConfig:
     qualitative: bool = True
     eval_size: tuple[int, int] | None = None
     lpips: bool = True
-    sfm: SfMConfig = field(default_factory=SfMConfig)
-    dgs: DGSConfig = field(default_factory=DGSConfig)
-    nerf: NeRFConfig = field(default_factory=NeRFConfig)
-    neus: NeuSConfig = field(default_factory=NeuSConfig)
+    native_crosscheck: bool = False
+    reconstruction: dict[str, Any] = field(default_factory=default_reconstruction_configs)
+
+    def __getattr__(self, name: str) -> Any:
+        """Compatibility access; storage remains registry-keyed and extensible."""
+        for method, registration in RECONSTRUCTIONS.items():
+            if registration.config_attr == name:
+                return self.reconstruction[method]
+        raise AttributeError(name)
 
 
 def run_pipeline(cfg: Lab3PipelineConfig) -> Path:
@@ -58,6 +60,8 @@ def run_pipeline(cfg: Lab3PipelineConfig) -> Path:
     prepared_dir = run_dir / "prepared"
     configs_dir = run_dir / "configs"
     results_dir = run_dir / "results"
+    # Validate method/pose topology before extraction or any heavy subprocess.
+    reconstructors = _build_reconstructors(cfg, prepared_dir)
 
     if not cfg.dry_run:
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -83,13 +87,15 @@ def run_pipeline(cfg: Lab3PipelineConfig) -> Path:
 
     timings: dict[str, float] = {}
     gpu_peaks: dict[str, float] = {}
-    shared_dir = prepared.root
-    reconstructors = _build_reconstructors(cfg, shared_dir)
-    split = DatasetSplit.from_files(prepared.train_list, prepared.test_list)
+    split = DatasetSplit(prepared.train_names, prepared.test_names)
+    if not cfg.dry_run and (cfg.evaluate or cfg.qualitative) and not split.test:
+        raise Lab3Error(
+            "Evaluation requires a non-empty canonical test split; increase test_ratio or add more images."
+        )
 
     for reconstructor in reconstructors:
         method_dir = results_dir / reconstructor.name
-        shared_colmap = shared_dir if cfg.share_poses and reconstructor.writes_shared_poses else None
+        shared_colmap = prepared.root if cfg.share_poses and reconstructor.writes_shared_poses else None
         context = ReconstructionContext(
             run_dir=run_dir,
             prepared_dir=prepared.root,
@@ -123,6 +129,7 @@ def run_pipeline(cfg: Lab3PipelineConfig) -> Path:
             enabled=True,
             eval_size=cfg.eval_size,
             lpips=cfg.lpips,
+            native_crosscheck=cfg.native_crosscheck,
         )
         evaluate_run(
             eval_context,
@@ -132,7 +139,9 @@ def run_pipeline(cfg: Lab3PipelineConfig) -> Path:
 
     if cfg.geometry:
         staged = stage_geometry(eval_context, reconstructors)
-        write_geometry_metrics(eval_context, staged)
+        write_geometry_metrics(
+            eval_context, staged, proxy_method=_geometry_reference(reconstructors)
+        )
 
     if cfg.qualitative and not cfg.dry_run:
         method_render_dirs = _qualitative_render_dirs(reconstructors, run_dir)
@@ -176,11 +185,14 @@ def evaluate_run_dir(run_dir: Path, cfg_overrides: dict[str, Any] | None = None)
         enabled=True,
         eval_size=cfg.eval_size,
         lpips=cfg.lpips,
+        native_crosscheck=cfg.native_crosscheck,
     )
     evaluate_run(context, eval_cfg, reconstructors)
     if cfg.geometry:
         staged = stage_geometry(context, reconstructors)
-        write_geometry_metrics(context, staged)
+        write_geometry_metrics(
+            context, staged, proxy_method=_geometry_reference(reconstructors)
+        )
     if cfg.qualitative:
         method_render_dirs = _qualitative_render_dirs(reconstructors, run_dir)
         test_names = _read_test_names(test_list)
@@ -199,9 +211,18 @@ def evaluate_run_dir(run_dir: Path, cfg_overrides: dict[str, Any] | None = None)
 def _build_reconstructors(cfg: Lab3PipelineConfig, shared_dir: Path) -> list[Reconstructor]:
     reconstructors = [create_reconstructor(method, cfg) for method in cfg.methods]
     has_pose_provider = any(reconstructor.writes_shared_poses for reconstructor in reconstructors)
+    has_pose_consumers = any(reconstructor.consumes_shared_poses for reconstructor in reconstructors)
+    if cfg.share_poses and has_pose_consumers and not has_pose_provider:
+        raise Lab3Error(
+            "share_poses=true requires a pose provider (include sfm in methods), or explicitly use "
+            "--no-share-poses for independent reconstruction."
+        )
     if cfg.share_poses and has_pose_provider:
         reconstructors = [reconstructor.with_shared_poses(shared_dir) for reconstructor in reconstructors]
         reconstructors.sort(key=lambda reconstructor: reconstructor.shared_pose_priority)
+    else:
+        for reconstructor in reconstructors:
+            reconstructor.validate_standalone_poses()
     return reconstructors
 
 
@@ -214,6 +235,13 @@ def _qualitative_render_dirs(
         if directory is not None:
             directories[reconstructor.name] = directory
     return directories
+
+
+def _geometry_reference(reconstructors: list[Reconstructor]) -> str | None:
+    return next(
+        (reconstructor.name for reconstructor in reconstructors if reconstructor.geometry_reference),
+        None,
+    )
 
 
 def normalize_method(method: str) -> str:
@@ -238,22 +266,19 @@ def load_pipeline_config(path: Path, overrides: dict[str, Any] | None = None) ->
 
 
 def config_from_dict(data: dict[str, Any]) -> Lab3PipelineConfig:
-    reconstruction = data.get("reconstruction", {})
-    if reconstruction is None:
-        reconstruction = {}
-    if not isinstance(reconstruction, dict):
+    reconstruction_data = data.get("reconstruction", {})
+    if reconstruction_data is None:
+        reconstruction_data = {}
+    if not isinstance(reconstruction_data, dict):
         raise Lab3Error("config.reconstruction must be an object")
-
-    # Support both the user-facing nested config schema and the run_config.json
-    # snapshots written by this pipeline, which store method configs at top level.
-    sfm_source = _coalesce_config_section(data, reconstruction, "sfm")
-    dgs_source = _coalesce_config_section(data, reconstruction, "3dgs")
-    nerf_source = _coalesce_config_section(data, reconstruction, "nerf")
-    neus_source = _coalesce_config_section(data, reconstruction, "neus")
-    sfm_data = _dict_value(sfm_source)
-    dgs_data = _dict_value(dgs_source)
-    nerf_data = _dict_value(nerf_source)
-    neus_data = _dict_value(neus_source)
+    # Older run snapshots stored method configs at top level. Merge those into
+    # the registry-shaped mapping without teaching this module backend schemas.
+    merged_reconstruction = dict(reconstruction_data)
+    for method, registration in RECONSTRUCTIONS.items():
+        if method not in merged_reconstruction:
+            legacy = data.get(registration.config_attr, data.get(method))
+            if isinstance(legacy, dict):
+                merged_reconstruction[method] = legacy
 
     input_dir = data.get("input_dir")
     scene_name = data.get("scene_name")
@@ -282,85 +307,9 @@ def config_from_dict(data: dict[str, Any]) -> Lab3PipelineConfig:
         qualitative=bool(data.get("qualitative", True)),
         eval_size=_parse_eval_size(data.get("eval_size")),
         lpips=bool(data.get("lpips", True)),
-        sfm=SfMConfig(
-            colmap_bin=str(sfm_data.get("colmap_bin", "colmap")),
-            matcher=str(sfm_data.get("matcher", "sequential")),
-            camera_model=str(sfm_data.get("camera_model", "PINHOLE")),
-            single_camera=bool(sfm_data.get("single_camera", True)),
-            dense=bool(sfm_data.get("dense", False)),
-        ),
-        dgs=DGSConfig(
-            repo_dir=(
-                Path("gaussian-splatting")
-                if dgs_data.get("repo_dir") in (None, "")
-                else Path(str(dgs_data["repo_dir"]))
-            ),
-            python_bin=(
-                sys.executable
-                if dgs_data.get("python_bin") in (None, "", "python")
-                else str(dgs_data.get("python_bin"))
-            ),
-            iterations=_optional_int(dgs_data.get("iterations", 7000)),
-            save_every=_optional_int(dgs_data.get("save_every", 2000)),
-            resolution=_optional_int(dgs_data.get("resolution")),
-            extra_args=tuple(str(item) for item in dgs_data.get("extra_args", ())),
-            colmap_source=None
-            if dgs_data.get("colmap_source") in (None, "")
-            else Path(str(dgs_data["colmap_source"])),
-            colmap_bin=str(dgs_data.get("colmap_bin", "colmap")),
-            eval_split=bool(dgs_data.get("eval_split", True)),
-        ),
-        nerf=NeRFConfig(
-            process_bin=str(nerf_data.get("process_bin", "ns-process-data")),
-            train_bin=str(nerf_data.get("train_bin", "ns-train")),
-            method=str(nerf_data.get("method", "nerfacto")),
-            max_num_iterations=_optional_int(nerf_data.get("max_num_iterations", 30000)),
-            save_every=_optional_int(nerf_data.get("save_every", 2000)),
-            save_only_latest_checkpoint=bool(
-                nerf_data.get("save_only_latest_checkpoint", False)
-            ),
-            downscale_factor=_optional_int(nerf_data.get("downscale_factor")),
-            skip_process_data=bool(nerf_data.get("skip_process_data", False)),
-            colmap_model=None
-            if nerf_data.get("colmap_model") in (None, "")
-            else Path(str(nerf_data["colmap_model"])),
-        ),
-        neus=NeuSConfig(
-            train_bin=str(neus_data.get("train_bin", "ns-train")),
-            method=str(neus_data.get("method", "neus-facto")),
-            max_num_iterations=_optional_int(neus_data.get("max_num_iterations", 20001)),
-            save_every=_optional_int(neus_data.get("save_every", 2000)),
-            save_only_latest_checkpoint=bool(
-                neus_data.get("save_only_latest_checkpoint", False)
-            ),
-            colmap_model=None
-            if neus_data.get("colmap_model") in (None, "")
-            else Path(str(neus_data["colmap_model"])),
-            scene_scale=float(neus_data.get("scene_scale", 2.0)),
-            export_mesh=bool(neus_data.get("export_mesh", True)),
-            mesh_resolution=int(neus_data.get("mesh_resolution", 512)),
-        ),
+        native_crosscheck=bool(data.get("native_crosscheck", False)),
+        reconstruction=parse_reconstruction_configs(merged_reconstruction),
     )
-
-
-def _dict_value(value: Any) -> dict[str, Any]:
-    if value is None:
-        return {}
-    if not isinstance(value, dict):
-        raise Lab3Error("method config must be an object")
-    return value
-
-
-def _coalesce_config_section(
-    top_level: dict[str, Any], reconstruction: dict[str, Any], key: str
-) -> Any:
-    if key in reconstruction:
-        return reconstruction.get(key)
-    if key == "3dgs" and "dgs" in reconstruction:
-        return reconstruction.get("dgs")
-    if key == "3dgs" and "dgs" in top_level:
-        return top_level.get("dgs")
-    return top_level.get(key)
 
 
 def _optional_int(value: Any) -> int | None:

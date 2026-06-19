@@ -43,19 +43,6 @@ GEOMETRY_METRIC_COLUMNS = [
 ]
 
 
-def find_3dgs_pointcloud(model_dir: Path) -> Path | None:
-    """Latest 3DGS trained point cloud (``point_cloud/iteration_*/point_cloud.ply``)."""
-    if not model_dir.is_dir():
-        return None
-    matches = sorted((model_dir / "point_cloud").glob("iteration_*/point_cloud.ply"))
-    return matches[-1] if matches else None
-
-
-def find_sfm_dense(sfm_dir: Path) -> Path | None:
-    fused = sfm_dir / "dense" / "fused.ply"
-    return fused if fused.exists() else None
-
-
 def copy_geometry(src: Path, dest_dir: Path, name: str) -> Path:
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / name
@@ -216,7 +203,7 @@ def write_geometry_metrics_csv(rows: Sequence[dict[str, Any]], path: Path) -> No
 def write_geometry_metrics(
     context: Any,
     staged: dict[str, list[Path]],
-    proxy_method: str = "sfm",
+    proxy_method: str | None,
     *,
     out_name: str = "geometry_metrics.csv",
 ) -> Path | None:
@@ -229,7 +216,7 @@ def write_geometry_metrics(
     run_dir: Path = context.run_dir
     out_path = run_dir / out_name
 
-    proxy_paths = staged.get(proxy_method, [])
+    proxy_paths = staged.get(proxy_method, []) if proxy_method is not None else []
     proxy_xyz = _load_first_xyz(proxy_paths)
     rows: list[dict[str, Any]] = []
     if proxy_xyz is None:

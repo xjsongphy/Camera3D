@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import json
 import math
+import argparse
 import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
+import yaml
 
 from lab3.common import Lab3Error, monitored_block, require_tool, run_cmd, timed_block
 from lab3.reconstruction.base import ReconstructionContext, Reconstructor, ViewerTarget
+from lab3.reconstruction.nerfstudio import evaluate_nerfstudio, latest_config, train_monitor_command
 from lab3.training_artifacts import export_training_scalar_artifacts
 
 
@@ -28,10 +31,42 @@ class NeuSConfig:
     mesh_resolution: int = 512
 
 
+def config_from_dict(values: dict) -> NeuSConfig:
+    return NeuSConfig(
+        train_bin=str(values.get("train_bin", "ns-train")),
+        method=str(values.get("method", "neus-facto")),
+        max_num_iterations=_optional_int(values.get("max_num_iterations", 20001)),
+        save_every=_optional_int(values.get("save_every", 2000)),
+        save_only_latest_checkpoint=bool(values.get("save_only_latest_checkpoint", False)),
+        colmap_model=(
+            None if values.get("colmap_model") in (None, "")
+            else Path(str(values["colmap_model"]))
+        ),
+        scene_scale=float(values.get("scene_scale", 2.0)),
+        export_mesh=bool(values.get("export_mesh", True)),
+        mesh_resolution=int(values.get("mesh_resolution", 512)),
+    )
+
+
+def add_cli_arguments(parser) -> None:
+    parser.add_argument("--neus-iterations", type=int, help="NeuS/NeuS-facto training iterations")
+    parser.add_argument("--neus-save-every", type=int, help="save NeuS checkpoint every N iterations")
+
+
+def cli_overrides(arguments) -> dict:
+    return {
+        key: value for key, value in {
+            "max_num_iterations": arguments.neus_iterations,
+            "save_every": arguments.neus_save_every,
+        }.items() if value is not None
+    }
+
+
 @dataclass(frozen=True)
 class NeuSReconstructor(Reconstructor):
     config: NeuSConfig
     name: str = "neus"
+    consumes_shared_poses: bool = True
 
     def run(self, context: ReconstructionContext) -> None:
         if self.config.method not in {"neus", "neus-facto"}:
@@ -43,7 +78,8 @@ class NeuSReconstructor(Reconstructor):
         if model_dir is None:
             model_dir = context.prepared_dir / "sparse" / "0"
         model_dir = model_dir.resolve()
-        dataset_dir = (context.output_dir / "processed").resolve()
+        train_dataset_dir = (context.output_dir / "processed" / "train").resolve()
+        test_dataset_dir = (context.output_dir / "processed" / "test").resolve()
         train_dir = (context.output_dir / "train").resolve()
         logs = context.run_dir / "logs"
 
@@ -59,20 +95,29 @@ class NeuSReconstructor(Reconstructor):
 
         with timed_block("neus_process_data", context.timings):
             if context.dry_run:
-                print(f"$ lab3 NeuS COLMAP-to-SDFStudio {model_dir} -> {dataset_dir}")
+                print(f"$ lab3 NeuS COLMAP-to-SDFStudio {model_dir} -> {train_dataset_dir}")
             else:
                 build_sdfstudio_dataset(
                     model_dir,
                     context.images_dir.resolve(),
-                    dataset_dir,
+                    train_dataset_dir,
                     scene_scale=self.config.scene_scale,
+                    image_names=context.split.train,
                 )
+                if context.split.test:
+                    build_sdfstudio_dataset(
+                        model_dir,
+                        context.images_dir.resolve(),
+                        test_dataset_dir,
+                        scene_scale=self.config.scene_scale,
+                        image_names=context.split.test,
+                    )
 
         train_cmd = [
             self.config.train_bin,
             self.config.method,
             "--data",
-            str(dataset_dir),
+            str(train_dataset_dir),
             "--output-dir",
             str(train_dir),
             "--vis",
@@ -85,15 +130,10 @@ class NeuSReconstructor(Reconstructor):
         train_cmd.extend(
             ["--save-only-latest-checkpoint", str(self.config.save_only_latest_checkpoint)]
         )
-        wrapped_cmd = [
-            sys.executable,
-            "-m",
-            "lab3.ns_train_wrapper",
-            "--log-path",
-            str(logs / "neus_train.log"),
-            "--",
-            *train_cmd,
-        ]
+        train_cmd.extend(
+            ["sdfstudio-data", "--data", str(train_dataset_dir), "--auto-orient", "False"]
+        )
+        wrapped_cmd = train_monitor_command(train_cmd, logs / "neus_train.log")
         with monitored_block(
             "neus_train", context.timings, context.peaks, enabled=not context.dry_run
         ):
@@ -103,13 +143,13 @@ class NeuSReconstructor(Reconstructor):
             export_training_scalar_artifacts("neus", train_dir, logs)
 
         if self.config.export_mesh:
-            config_path = _latest_config(train_dir)
+            config_path = latest_config(train_dir)
             if config_path is None and not context.dry_run:
                 raise Lab3Error(f"NeuS training config.yml not found under {train_dir}")
             export_cmd = [
                 sys.executable,
-                "-m",
-                "lab3.reconstruction.neus_export",
+                str(Path(__file__).resolve()),
+                "export-mesh",
                 "--load-config",
                 str(config_path or train_dir / "config.yml"),
                 "--output-path",
@@ -129,23 +169,25 @@ class NeuSReconstructor(Reconstructor):
                 )
 
     def evaluate(self, context: ReconstructionContext, eval_config, eval_dir: Path):
-        from lab3.evaluate import evaluate_nerfstudio
+        training_config = latest_config(context.run_dir / "results" / self.name / "train")
+        evaluation_config = context.run_dir / "results" / self.name / "eval_config.yml"
+        if not context.dry_run:
+            if training_config is None:
+                raise Lab3Error("NeuS training config.yml is missing")
+            write_neus_eval_config(
+                training_config,
+                context.run_dir / "results" / self.name / "processed" / "test",
+                evaluation_config,
+            )
 
         return evaluate_nerfstudio(
             self.name,
             context,
             eval_config,
             self.config,
-            context.timings,
-            context.peaks,
             eval_dir,
-            held_out="SDFStudio eval views (also seen during training)",
-            notes=(
-                "SDFStudioDataParser does not exclude eval frames from training; NeuS RGB metrics "
-                "are training-view diagnostics, while mesh/geometry is the primary result"
-            ),
-            train_timing_key="neus_train",
-            train_peak_key="neus_train",
+            notes="NeuS trains on train-only metadata and evaluates with a held-out config in the same coordinates",
+            config_path=evaluation_config if not context.dry_run else None,
         )
 
     def stage_geometry(self, context: ReconstructionContext) -> list[Path]:
@@ -159,7 +201,10 @@ class NeuSReconstructor(Reconstructor):
     def viewer_targets(self, run_dir: Path) -> list[ViewerTarget]:
         train_root = run_dir / "results" / self.name / "train"
         configs = sorted(train_root.rglob("config.yml")) if train_root.exists() else []
-        targets = [ViewerTarget(self.name, "nerfstudio", path) for path in configs[-1:]]
+        targets = [
+            ViewerTarget(self.name, "external", path, ("--load-config", str(path)))
+            for path in configs[-1:]
+        ]
         mesh = run_dir / "geometry" / self.name / "sdf_mesh.ply"
         if mesh.exists():
             targets.insert(0, ViewerTarget(self.name, "geometry", mesh))
@@ -168,6 +213,13 @@ class NeuSReconstructor(Reconstructor):
     def with_shared_poses(self, shared_dir: Path) -> Reconstructor:
         return replace(self, config=replace(self.config, colmap_model=shared_dir / "sparse" / "0"))
 
+    def validate_standalone_poses(self) -> None:
+        if self.config.colmap_model is None:
+            raise Lab3Error(
+                "NeuS cannot estimate poses itself. Enable share_poses with sfm, or set "
+                "reconstruction.neus.colmap_model explicitly."
+            )
+
 
 def build_sdfstudio_dataset(
     colmap_model: Path,
@@ -175,6 +227,7 @@ def build_sdfstudio_dataset(
     output_dir: Path,
     *,
     scene_scale: float = 2.0,
+    image_names: tuple[str, ...] | None = None,
 ) -> Path:
     """Convert COLMAP TXT cameras into nerfstudio's SDFStudio ``meta_data.json``.
 
@@ -200,9 +253,12 @@ def build_sdfstudio_dataset(
     scale = (scene_scale * 0.45) / radius
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    allowed_names = None if image_names is None else set(image_names)
     frames = []
     width = height = None
     for image_name, c2w, camera_id in images:
+        if allowed_names is not None and image_name not in allowed_names:
+            continue
         if camera_id not in cameras:
             raise Lab3Error(f"COLMAP image {image_name} references missing camera {camera_id}")
         intrinsics, camera_width, camera_height = cameras[camera_id]
@@ -219,6 +275,8 @@ def build_sdfstudio_dataset(
                 "intrinsics": intrinsics.tolist(),
             }
         )
+    if not frames:
+        raise Lab3Error(f"NeuS split contains no registered images under {images_dir}")
 
     half = scene_scale / 2.0
     metadata = {
@@ -234,6 +292,25 @@ def build_sdfstudio_dataset(
     path = output_dir / "meta_data.json"
     path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
     return path
+
+
+def write_neus_eval_config(training_config: Path, test_data_dir: Path, output_path: Path) -> Path:
+    """Clone a trained NeuS config while pointing its parser at held-out frames."""
+    # nerfstudio serializes typed config objects with Python YAML tags. The file
+    # is produced locally by ns-train, so using its matching loader is expected.
+    config = yaml.load(training_config.read_text(encoding="utf-8"), Loader=yaml.Loader)
+    test_data_dir = test_data_dir.resolve()
+    try:
+        config.data = test_data_dir
+        config.pipeline.datamanager.data = test_data_dir
+        dataparser = config.pipeline.datamanager.dataparser
+    except AttributeError as exc:
+        raise Lab3Error(f"Unexpected NeuS config structure: {training_config}") from exc
+    dataparser.data = test_data_dir
+    dataparser.auto_orient = False
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(yaml.dump(config), encoding="utf-8")
+    return output_path
 
 
 def _read_cameras(path: Path) -> dict[int, tuple[np.ndarray, int, int]]:
@@ -255,6 +332,10 @@ def _read_cameras(path: Path) -> dict[int, tuple[np.ndarray, int, int]]:
         intrinsics = np.array([[fx, 0.0, cx], [0.0, fy, cy], [0.0, 0.0, 1.0]])
         cameras[camera_id] = (intrinsics, width, height)
     return cameras
+
+
+def _optional_int(value: object) -> int | None:
+    return None if value in (None, "") else int(value)
 
 
 def _read_images(path: Path) -> list[tuple[str, np.ndarray, int]]:
@@ -312,6 +393,43 @@ def _qvec_to_rotmat(qvec: np.ndarray) -> np.ndarray:
     )
 
 
-def _latest_config(train_dir: Path) -> Path | None:
-    matches = sorted(train_dir.rglob("config.yml")) if train_dir.exists() else []
-    return matches[-1] if matches else None
+def _export_mesh(argv: list[str]) -> None:
+    parser = argparse.ArgumentParser(description="Export a NeuS SDF zero-level mesh")
+    parser.add_argument("--load-config", type=Path, required=True)
+    parser.add_argument("--output-path", type=Path, required=True)
+    parser.add_argument("--resolution", type=int, default=512)
+    parser.add_argument("--bound", type=float, default=1.0)
+    args = parser.parse_args(argv)
+    if args.resolution < 512 or args.resolution % 512 != 0:
+        raise SystemExit("resolution must be a positive multiple of 512")
+
+    from nerfstudio.exporter.marching_cubes import generate_mesh_with_multires_marching_cubes
+    from nerfstudio.fields.sdf_field import SDFField
+    from nerfstudio.utils.eval_utils import eval_setup
+
+    _, pipeline, _, _ = eval_setup(args.load_config, test_mode="inference")
+    field = getattr(pipeline.model, "field", None)
+    if not isinstance(field, SDFField):
+        raise RuntimeError(f"Loaded field is {type(field).__name__}, expected SDFField")
+    bound = float(args.bound)
+    mesh = generate_mesh_with_multires_marching_cubes(
+        geometry_callable_field=lambda points: field.forward_geonetwork(points)[:, 0].contiguous(),
+        resolution=args.resolution,
+        bounding_box_min=(-bound, -bound, -bound),
+        bounding_box_max=(bound, bound, bound),
+        isosurface_threshold=0.0,
+        coarse_mask=None,
+    )
+    args.output_path.parent.mkdir(parents=True, exist_ok=True)
+    mesh.export(args.output_path)
+    print(f"NeuS mesh: {args.output_path}")
+
+
+def main() -> None:
+    if len(sys.argv) < 2 or sys.argv[1] != "export-mesh":
+        raise SystemExit("usage: neus.py export-mesh ...")
+    _export_mesh(sys.argv[2:])
+
+
+if __name__ == "__main__":
+    main()

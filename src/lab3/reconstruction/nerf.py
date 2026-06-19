@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import sys
+import json
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from lab3.common import require_tool, run_cmd, monitored_block, timed_block
+from lab3.common import Lab3Error, require_tool, run_cmd, monitored_block, timed_block
 from lab3.reconstruction.base import ReconstructionContext, Reconstructor, ViewerTarget
+from lab3.reconstruction.nerfstudio import evaluate_nerfstudio, train_monitor_command
 from lab3.training_artifacts import export_training_scalar_artifacts
 
 
@@ -24,10 +25,42 @@ class NeRFConfig:
     colmap_model: Path | None = None
 
 
+def config_from_dict(values: dict) -> NeRFConfig:
+    return NeRFConfig(
+        process_bin=str(values.get("process_bin", "ns-process-data")),
+        train_bin=str(values.get("train_bin", "ns-train")),
+        method=str(values.get("method", "nerfacto")),
+        max_num_iterations=_optional_int(values.get("max_num_iterations", 30000)),
+        save_every=_optional_int(values.get("save_every", 2000)),
+        save_only_latest_checkpoint=bool(values.get("save_only_latest_checkpoint", False)),
+        downscale_factor=_optional_int(values.get("downscale_factor")),
+        skip_process_data=bool(values.get("skip_process_data", False)),
+        colmap_model=(
+            None if values.get("colmap_model") in (None, "")
+            else Path(str(values["colmap_model"]))
+        ),
+    )
+
+
+def add_cli_arguments(parser) -> None:
+    parser.add_argument("--nerf-iterations", type=int, help="nerfstudio training iterations")
+    parser.add_argument("--nerf-save-every", type=int, help="save nerfstudio checkpoint every N iterations")
+
+
+def cli_overrides(arguments) -> dict:
+    return {
+        key: value for key, value in {
+            "max_num_iterations": arguments.nerf_iterations,
+            "save_every": arguments.nerf_save_every,
+        }.items() if value is not None
+    }
+
+
 @dataclass(frozen=True)
 class NeRFReconstructor(Reconstructor):
     config: NeRFConfig
     name: str = "nerf"
+    consumes_shared_poses: bool = True
 
     def run(self, context: ReconstructionContext) -> None:
         processed_dir = (context.output_dir / "processed").resolve()
@@ -62,6 +95,12 @@ class NeRFReconstructor(Reconstructor):
                     log_path=logs / "nerf_process_data.log" if logs else None,
                 )
 
+        transforms_path = processed_dir / "transforms.json"
+        if context.dry_run:
+            print(f"$ inject canonical split into {transforms_path}")
+        else:
+            apply_nerfstudio_split(transforms_path, context.split.train, context.split.test)
+
         train_cmd = [
             self.config.train_bin,
             self.config.method,
@@ -81,15 +120,7 @@ class NeRFReconstructor(Reconstructor):
         )
 
         if logs is not None:
-            wrapped_cmd = [
-                sys.executable,
-                "-m",
-                "lab3.ns_train_wrapper",
-                "--log-path",
-                str(logs / "nerf_train.log"),
-                "--",
-                *train_cmd,
-            ]
+            wrapped_cmd = train_monitor_command(train_cmd, logs / "nerf_train.log")
             train_log_path: Path | None = None
         else:
             wrapped_cmd = train_cmd
@@ -105,20 +136,13 @@ class NeRFReconstructor(Reconstructor):
             export_training_scalar_artifacts("nerf", train_dir, logs)
 
     def evaluate(self, context: ReconstructionContext, eval_config, eval_dir: Path):
-        from lab3.evaluate import evaluate_nerfstudio
-
         return evaluate_nerfstudio(
             self.name,
             context,
             eval_config,
             self.config,
-            context.timings,
-            context.peaks,
             eval_dir,
-            held_out="nerfstudio native eval split",
-            notes="held-out split differs from 3dgs; see report discussion",
-            train_timing_key="nerf_train",
-            train_peak_key="nerf_train",
+            notes="transforms.json contains the repository's explicit train/val/test filenames",
         )
 
     def stage_geometry(self, context: ReconstructionContext) -> list[Path]:
@@ -132,7 +156,44 @@ class NeRFReconstructor(Reconstructor):
     def viewer_targets(self, run_dir: Path) -> list[ViewerTarget]:
         train_root = run_dir / "results" / self.name / "train"
         configs = sorted(train_root.rglob("config.yml")) if train_root.exists() else []
-        return [ViewerTarget(self.name, "nerfstudio", path) for path in configs[-1:]]
+        return [
+            ViewerTarget(self.name, "external", path, ("--load-config", str(path)))
+            for path in configs[-1:]
+        ]
 
     def with_shared_poses(self, shared_dir: Path) -> Reconstructor:
         return replace(self, config=replace(self.config, colmap_model=shared_dir / "sparse" / "0"))
+
+
+def apply_nerfstudio_split(
+    transforms_path: Path, train_names: tuple[str, ...], test_names: tuple[str, ...]
+) -> None:
+    """Inject explicit filename splits supported by NerfstudioDataParser."""
+    if not transforms_path.is_file():
+        raise Lab3Error(f"nerfstudio transforms.json not found: {transforms_path}")
+    metadata = json.loads(transforms_path.read_text(encoding="utf-8"))
+    frames = metadata.get("frames", [])
+    paths_by_name = {
+        Path(str(frame["file_path"])).name: str(frame["file_path"])
+        for frame in frames
+        if "file_path" in frame
+    }
+
+    def resolve(names: tuple[str, ...]) -> list[str]:
+        missing = [name for name in names if name not in paths_by_name]
+        if missing:
+            raise Lab3Error(
+                f"Canonical split references images absent from {transforms_path}: {missing[:5]}"
+            )
+        return [paths_by_name[name] for name in names]
+
+    train_paths = resolve(train_names)
+    test_paths = resolve(test_names)
+    metadata["train_filenames"] = train_paths
+    metadata["val_filenames"] = test_paths
+    metadata["test_filenames"] = test_paths
+    transforms_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+
+
+def _optional_int(value: object) -> int | None:
+    return None if value in (None, "") else int(value)

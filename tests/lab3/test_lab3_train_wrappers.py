@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from lab3.gs_train_wrapper import ProgressFilter
-from lab3.ns_train_wrapper import NerfstudioProgressFilter
+from lab3.reconstruction.dgs import ProgressFilter
+from lab3.reconstruction.nerfstudio import NerfstudioProgressFilter
 
 
 def test_3dgs_progress_filter_keeps_console_progress_but_not_log_rewrites() -> None:
@@ -33,7 +33,7 @@ def test_nerfstudio_progress_filter_collapses_table_row_for_console() -> None:
     )
 
     assert console == (
-        "\rNeRF train: step 28140 (46.90%) | iter 19.582 ms | ETA 10 m, 23 s | "
+        "\rNerfstudio train: step 28140 (46.90%) | iter 19.582 ms | ETA 10 m, 23 s | "
         "train 213.22 K | test 1.01 M"
     )
 

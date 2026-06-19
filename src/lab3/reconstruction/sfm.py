@@ -17,12 +17,31 @@ class SfMConfig:
     dense: bool = False
 
 
+def config_from_dict(values: dict) -> SfMConfig:
+    return SfMConfig(
+        colmap_bin=str(values.get("colmap_bin", "colmap")),
+        matcher=str(values.get("matcher", "sequential")),
+        camera_model=str(values.get("camera_model", "PINHOLE")),
+        single_camera=bool(values.get("single_camera", True)),
+        dense=bool(values.get("dense", False)),
+    )
+
+
+def add_cli_arguments(parser) -> None:
+    parser.add_argument("--colmap-bin", help="COLMAP executable")
+
+
+def cli_overrides(arguments) -> dict:
+    return {"colmap_bin": arguments.colmap_bin} if arguments.colmap_bin is not None else {}
+
+
 @dataclass(frozen=True)
 class SfMReconstructor(Reconstructor):
     config: SfMConfig
     name: str = "sfm"
     shared_pose_priority: int = 0
     writes_shared_poses: bool = True
+    geometry_reference: bool = True
 
     def run(self, context: ReconstructionContext) -> None:
         if self.config.matcher not in {"sequential", "exhaustive"}:
@@ -160,9 +179,9 @@ class SfMReconstructor(Reconstructor):
         )
 
     def stage_geometry(self, context: ReconstructionContext) -> list[Path]:
-        from lab3.geometry import copy_geometry, find_sfm_dense, maybe_poisson_mesh
+        from lab3.geometry import copy_geometry, maybe_poisson_mesh
 
-        dense = find_sfm_dense(context.run_dir / "results" / self.name)
+        dense = _find_dense(context.run_dir / "results" / self.name)
         if dense is None:
             return []
         destination = context.run_dir / "geometry" / self.name
@@ -179,3 +198,8 @@ class SfMReconstructor(Reconstructor):
             run_dir / "results" / self.name / "dense" / "fused.ply",
         ]
         return [ViewerTarget(self.name, "geometry", path) for path in candidates if path.exists()]
+
+
+def _find_dense(method_dir: Path) -> Path | None:
+    fused = method_dir / "dense" / "fused.ply"
+    return fused if fused.exists() else None

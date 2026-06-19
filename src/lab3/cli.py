@@ -12,7 +12,12 @@ from lab3.pipeline import (
     normalize_method,
     run_pipeline,
 )
-from lab3.reconstruction import METHOD_ALIASES, RECONSTRUCTIONS
+from lab3.reconstruction import (
+    METHOD_ALIASES,
+    RECONSTRUCTIONS,
+    add_reconstruction_cli_arguments,
+    apply_reconstruction_cli_overrides,
+)
 from lab3.visualization import view_run_dir
 
 
@@ -37,18 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="drop images/frames whose Laplacian-variance sharpness score falls below this threshold",
     )
     parser.add_argument("--ffmpeg-bin", help="ffmpeg executable")
-    parser.add_argument("--colmap-bin", help="COLMAP executable")
-    parser.add_argument(
-        "--dgs-repo",
-        type=Path,
-        help="GraphDeco gaussian-splatting repository path (default: ./gaussian-splatting)",
-    )
-    parser.add_argument("--dgs-iterations", type=int, help="3DGS training iterations")
-    parser.add_argument("--dgs-save-every", type=int, help="save 3DGS model every N iterations")
-    parser.add_argument("--nerf-iterations", type=int, help="nerfstudio training iterations")
-    parser.add_argument("--nerf-save-every", type=int, help="save nerfstudio checkpoint every N iterations")
-    parser.add_argument("--neus-iterations", type=int, help="NeuS/NeuS-facto training iterations")
-    parser.add_argument("--neus-save-every", type=int, help="save NeuS checkpoint every N iterations")
+    add_reconstruction_cli_arguments(parser)
     parser.add_argument("--timestamp", help="fixed timestamp tag for reproducible output paths")
     parser.add_argument("--force", action="store_true", help="overwrite prepared and method outputs")
     parser.add_argument("--dry-run", action="store_true", help="print commands and write configs where possible")
@@ -82,6 +76,12 @@ def build_parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         default=None,
         help="compute LPIPS when the lpips package is available (default: on)",
+    )
+    parser.add_argument(
+        "--native-crosscheck",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="also run framework-native metrics (slower; default: off)",
     )
     parser.add_argument(
         "--eval-size",
@@ -157,6 +157,7 @@ def _build_config(args: argparse.Namespace) -> Lab3PipelineConfig:
         "geometry": args.geometry,
         "qualitative": args.qualitative,
         "lpips": args.lpips,
+        "native_crosscheck": args.native_crosscheck,
         "eval_size": tuple(args.eval_size) if args.eval_size else None,
     }
     if args.config is not None:
@@ -165,63 +166,7 @@ def _build_config(args: argparse.Namespace) -> Lab3PipelineConfig:
         data = {key: value for key, value in overrides.items() if value is not None}
         cfg = config_from_dict(data)
 
-    if args.colmap_bin is not None:
-        cfg = Lab3PipelineConfig(
-            **{**cfg.__dict__, "sfm": cfg.sfm.__class__(**{**cfg.sfm.__dict__, "colmap_bin": args.colmap_bin})}
-        )
-    if args.dgs_repo is not None or args.dgs_iterations is not None or args.dgs_save_every is not None:
-        cfg = Lab3PipelineConfig(
-            **{
-                **cfg.__dict__,
-                "dgs": cfg.dgs.__class__(
-                    **{
-                        **cfg.dgs.__dict__,
-                        "repo_dir": args.dgs_repo if args.dgs_repo is not None else cfg.dgs.repo_dir,
-                        "iterations": args.dgs_iterations
-                        if args.dgs_iterations is not None
-                        else cfg.dgs.iterations,
-                        "save_every": args.dgs_save_every
-                        if args.dgs_save_every is not None
-                        else cfg.dgs.save_every,
-                    }
-                ),
-            }
-        )
-    if args.nerf_iterations is not None or args.nerf_save_every is not None:
-        cfg = Lab3PipelineConfig(
-            **{
-                **cfg.__dict__,
-                "nerf": cfg.nerf.__class__(
-                    **{
-                        **cfg.nerf.__dict__,
-                        "max_num_iterations": args.nerf_iterations
-                        if args.nerf_iterations is not None
-                        else cfg.nerf.max_num_iterations,
-                        "save_every": args.nerf_save_every
-                        if args.nerf_save_every is not None
-                        else cfg.nerf.save_every,
-                    }
-                ),
-            }
-        )
-    if args.neus_iterations is not None or args.neus_save_every is not None:
-        cfg = Lab3PipelineConfig(
-            **{
-                **cfg.__dict__,
-                "neus": cfg.neus.__class__(
-                    **{
-                        **cfg.neus.__dict__,
-                        "max_num_iterations": args.neus_iterations
-                        if args.neus_iterations is not None
-                        else cfg.neus.max_num_iterations,
-                        "save_every": args.neus_save_every
-                        if args.neus_save_every is not None
-                        else cfg.neus.save_every,
-                    }
-                ),
-            }
-        )
-    return cfg
+    return apply_reconstruction_cli_overrides(cfg, args)
 
 
 if __name__ == "__main__":

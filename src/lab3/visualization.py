@@ -50,11 +50,6 @@ def _viewer_target_records(run_dir: Path, methods: Iterable[str]) -> list[Viewer
     return records
 
 
-def build_nerfstudio_viewer_command(viewer_bin: str, config_path: Path) -> list[str]:
-    """``ns-viewer --load-config <config.yml>`` -> interactive web viewer."""
-    return [viewer_bin, "--load-config", str(config_path)]
-
-
 def open3d_viewer(paths: Iterable[Path], *, title: str = "lab3") -> None:
     """Open an interactive Open3D window over the given point clouds / meshes.
 
@@ -109,10 +104,9 @@ def view_run_dir(
     elif not target_records:
         print("[lab3.visualization] no staged geometry found; run `lab3` with geometry stage on first.")
 
-    nerfstudio_target = next((target for target in target_records if target.kind == "nerfstudio"), None)
-    if nerfstudio_viewer and nerfstudio_target is not None:
-        config_path = nerfstudio_target.path
-        cmd = build_nerfstudio_viewer_command(nerf_viewer_bin, config_path)
+    external_target = next((target for target in target_records if target.kind == "external"), None)
+    if nerfstudio_viewer and external_target is not None:
+        cmd = external_target.command(nerf_viewer_bin)
         print("$", " ".join(cmd))
         if not dry_run:
             if shutil.which(nerf_viewer_bin) is None:

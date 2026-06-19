@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import csv
-import json
 from pathlib import Path
 
 import pytest
@@ -9,50 +8,23 @@ import pytest
 from lab3.evaluate import (
     METRIC_COLUMNS,
     EvaluateConfig,
-    build_3dgs_metrics_command,
-    build_3dgs_render_command,
-    build_nerf_eval_command,
-    build_nerf_render_command,
     gpu_summary,
     model_size_mb,
-    pair_3dgs_renders,
-    parse_3dgs_results_json,
-    parse_nerf_eval_json,
+    pair_rendered_views,
     write_metrics_csv,
 )
+from lab3.reconstruction.dgs import _graphdeco_command, _pair_renders
 from types import SimpleNamespace
 
 
 def test_build_3dgs_render_command_targets_render_py(tmp_path: Path) -> None:
     repo = tmp_path / "gaussian-splatting"
-    cmd = build_3dgs_render_command("python", repo, tmp_path / "model")
+    cmd = _graphdeco_command("python", repo, "render.py", ["-m", str(tmp_path / "model")])
     assert cmd[0] == "python"
-    assert cmd[1].endswith("render.py")
+    assert cmd[1].endswith("reconstruction/dgs.py")
+    assert "render.py" in cmd
     assert "-m" in cmd
     assert str(tmp_path / "model") in cmd
-
-
-def test_build_3dgs_metrics_command_targets_metrics_py(tmp_path: Path) -> None:
-    repo = tmp_path / "gaussian-splatting"
-    cmd = build_3dgs_metrics_command("python", repo, tmp_path / "model")
-    assert cmd[1].endswith("metrics.py")
-    assert "-m" in cmd
-
-
-def test_build_nerf_eval_command_uses_load_config(tmp_path: Path) -> None:
-    cmd = build_nerf_eval_command("ns-eval", tmp_path / "config.yml", tmp_path / "out.json")
-    assert cmd[0] == "ns-eval"
-    assert "--load-config" in cmd
-    assert "--output-path" in cmd
-
-
-def test_build_nerf_render_command_requests_rgb_dataset(tmp_path: Path) -> None:
-    cmd = build_nerf_render_command("ns-render", tmp_path / "config.yml", tmp_path / "renders", "test")
-    assert cmd[0] == "ns-render"
-    assert "dataset" in cmd
-    assert "--split" in cmd
-    assert "test" in cmd
-    assert "rgb" in cmd
 
 
 def test_pair_3dgs_renders_matches_gt_by_name(tmp_path: Path) -> None:
@@ -65,47 +37,25 @@ def test_pair_3dgs_renders_matches_gt_by_name(tmp_path: Path) -> None:
     (renders / "00001.png").write_bytes(b"x")
     # gt for 00001 intentionally missing -> dropped
 
-    pairs = pair_3dgs_renders(tmp_path)
+    pairs = _pair_renders(tmp_path)
 
     assert len(pairs) == 1
     assert pairs[0][0].name == "00000.png"
 
 
-def test_parse_3dgs_results_json_extracts_metrics(tmp_path: Path) -> None:
-    payload = {"scene": {"ours_7000": {"PSNR": 28.1, "SSIM": 0.91, "LPIPS": 0.12}}}
-    path = tmp_path / "results.json"
-    path.write_text(json.dumps(payload), encoding="utf-8")
+def test_pair_rendered_views_uses_canonical_names_and_stems(tmp_path: Path) -> None:
+    images = tmp_path / "images"
+    renders = tmp_path / "renders" / "test" / "rgb"
+    images.mkdir()
+    renders.mkdir(parents=True)
+    (images / "a.jpg").write_bytes(b"gt")
+    (images / "b.jpg").write_bytes(b"gt")
+    (renders / "a.jpg").write_bytes(b"pred")
+    (renders / "b.png").write_bytes(b"pred")
 
-    result = parse_3dgs_results_json(path)
+    pairs = pair_rendered_views(images, ("a.jpg", "b.jpg"), renders)
 
-    assert result["psnr"] == pytest.approx(28.1)
-    assert result["ssim"] == pytest.approx(0.91)
-    assert result["lpips"] == pytest.approx(0.12)
-
-
-def test_parse_nerf_eval_json_handles_aggregate(tmp_path: Path) -> None:
-    payload = {"results": {"psnr": 27.4, "ssim": 0.88, "lpips": 0.15}}
-    path = tmp_path / "eval.json"
-    path.write_text(json.dumps(payload), encoding="utf-8")
-
-    result = parse_nerf_eval_json(path)
-
-    assert result["psnr"] == pytest.approx(27.4)
-    assert result["ssim"] == pytest.approx(0.88)
-
-
-def test_parse_nerf_eval_json_averages_per_image_list(tmp_path: Path) -> None:
-    payload = [
-        {"psnr": 26.0, "ssim": 0.8, "lpips": 0.2},
-        {"psnr": 28.0, "ssim": 0.9, "lpips": 0.1},
-    ]
-    path = tmp_path / "eval.json"
-    path.write_text(json.dumps(payload), encoding="utf-8")
-
-    result = parse_nerf_eval_json(path)
-
-    assert result["psnr"] == pytest.approx(27.0)
-    assert result["ssim"] == pytest.approx(0.85)
+    assert [(gt.name, pred.name) for gt, pred in pairs] == [("a.jpg", "a.jpg"), ("b.jpg", "b.png")]
 
 
 def test_model_size_mb_sums_file_sizes(tmp_path: Path) -> None:
@@ -136,7 +86,7 @@ def test_write_metrics_csv_has_required_columns(tmp_path: Path) -> None:
             "ssim": 0.91,
             "lpips": 0.12,
             "metric_source": "lab3.metrics",
-            "held_out": "every-8th (train.py --eval)",
+            "held_out": "prepared/test.txt (canonical split)",
             "train_time_sec": 600.0,
             "render_fps": 142.0,
             "model_size_mb": 12.3,

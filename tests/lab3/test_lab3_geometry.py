@@ -16,8 +16,6 @@ from lab3.geometry import (
     copy_geometry,
     downsample_points,
     f_score,
-    find_3dgs_pointcloud,
-    find_sfm_dense,
     stage_geometry,
     write_geometry_metrics,
     write_geometry_metrics_csv,
@@ -31,7 +29,9 @@ def test_find_3dgs_pointcloud_picks_latest_iteration(tmp_path: Path) -> None:
     (model / "point_cloud" / "iteration_3000" / "point_cloud.ply").write_bytes(b"old")
     (model / "point_cloud" / "iteration_7000" / "point_cloud.ply").write_bytes(b"new")
 
-    found = find_3dgs_pointcloud(model)
+    from lab3.reconstruction.dgs import _find_point_cloud
+
+    found = _find_point_cloud(model)
 
     assert found is not None
     assert found.read_bytes() == b"new"
@@ -42,7 +42,9 @@ def test_find_sfm_dense_locates_fused_ply(tmp_path: Path) -> None:
     (sfm / "dense").mkdir(parents=True)
     (sfm / "dense" / "fused.ply").write_bytes(b"xyz")
 
-    found = find_sfm_dense(sfm)
+    from lab3.reconstruction.sfm import _find_dense
+
+    found = _find_dense(sfm)
 
     assert found is not None
     assert found.name == "fused.ply"
@@ -174,5 +176,5 @@ def test_write_geometry_metrics_csv_has_columns(tmp_path: Path) -> None:
 
 def test_write_geometry_metrics_skips_in_dry_run(tmp_path: Path) -> None:
     context = SimpleNamespace(run_dir=tmp_path, dry_run=True)
-    path = write_geometry_metrics(context, {"3dgs": []})
+    path = write_geometry_metrics(context, {"3dgs": []}, proxy_method="sfm")
     assert path is None

@@ -31,6 +31,13 @@ def test_split_train_test_uses_regular_holdout() -> None:
     assert not (set(train) & set(test))
 
 
+def test_split_train_test_keeps_one_holdout_for_small_dataset() -> None:
+    train, test = split_train_test(["a.jpg", "b.jpg", "c.jpg"], 0.1)
+
+    assert train == ["a.jpg", "b.jpg"]
+    assert test == ["c.jpg"]
+
+
 def test_config_from_dict_normalizes_reconstructors() -> None:
     cfg = config_from_dict(
         {

@@ -3,13 +3,15 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
+import pytest
+
 from lab3.pipeline import (
     Lab3PipelineConfig,
     _build_reconstructors,
     config_from_dict,
     run_pipeline,
 )
-from lab3.reconstruction import DGSConfig
+from lab3.reconstruction import DGSConfig, default_reconstruction_configs
 
 
 def test_config_from_dict_parses_new_fields() -> None:
@@ -69,7 +71,7 @@ def test_resolve_shared_configs_leaves_them_empty_when_not_sharing(tmp_path: Pat
     cfg = config_from_dict(
         {
             "input_dir": str(tmp_path),
-            "methods": ["sfm", "3dgs", "nerf", "neus"],
+            "methods": ["sfm", "3dgs", "nerf"],
             "share_poses": False,
         }
     )
@@ -79,7 +81,6 @@ def test_resolve_shared_configs_leaves_them_empty_when_not_sharing(tmp_path: Pat
 
     assert configs["3dgs"].colmap_source is None
     assert configs["nerf"].colmap_model is None
-    assert configs["neus"].colmap_model is None
 
 
 def test_order_methods_runs_sfm_first_when_sharing() -> None:
@@ -97,6 +98,24 @@ def test_order_methods_preserves_order_when_not_sharing() -> None:
     )
     ordered = _build_reconstructors(cfg, Path("prepared"))
     assert [reconstructor.name for reconstructor in ordered] == ["3dgs", "nerf", "sfm"]
+
+
+def test_shared_poses_fails_fast_without_sfm() -> None:
+    cfg = config_from_dict(
+        {"input_dir": "data/scene", "methods": ["nerf", "neus"], "share_poses": True}
+    )
+
+    with pytest.raises(Exception, match="requires a pose provider"):
+        _build_reconstructors(cfg, Path("prepared"))
+
+
+def test_neus_standalone_requires_explicit_colmap_model() -> None:
+    cfg = config_from_dict(
+        {"input_dir": "data/scene", "methods": ["neus"], "share_poses": False}
+    )
+
+    with pytest.raises(Exception, match="cannot estimate poses"):
+        _build_reconstructors(cfg, Path("prepared"))
 
 
 def test_dry_run_pipeline_writes_configs_and_metrics_skeleton(tmp_path: Path) -> None:
@@ -119,7 +138,10 @@ def test_dry_run_pipeline_writes_configs_and_metrics_skeleton(tmp_path: Path) ->
         qualitative=True,
         dry_run=True,
         timestamp="dry",
-        dgs=DGSConfig(repo_dir=repo),
+        reconstruction={
+            **default_reconstruction_configs(),
+            "3dgs": DGSConfig(repo_dir=repo),
+        },
     )
 
     run_dir = run_pipeline(cfg)

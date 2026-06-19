@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from lab3.visualization import (
-    build_nerfstudio_viewer_command,
     find_viewer_targets,
     view_run_dir,
 )
@@ -55,7 +54,11 @@ def test_find_viewer_targets_prefers_staged_over_raw_results(tmp_path: Path) -> 
 
 def test_build_nerfstudio_viewer_command_uses_load_config(tmp_path: Path) -> None:
     cfg = tmp_path / "config.yml"
-    cmd = build_nerfstudio_viewer_command("ns-viewer", cfg)
+    from lab3.reconstruction.base import ViewerTarget
+
+    cmd = ViewerTarget("nerf", "external", cfg, ("--load-config", str(cfg))).command(
+        "ns-viewer"
+    )
     assert cmd[0] == "ns-viewer"
     assert "--load-config" in cmd
     assert str(cfg) in cmd

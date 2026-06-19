@@ -35,6 +35,8 @@ class PreparedDataset:
     video_count: int
     train_count: int
     test_count: int
+    train_names: tuple[str, ...] = ()
+    test_names: tuple[str, ...] = ()
     blurry_rejected_count: int = 0
 
 
@@ -139,7 +141,7 @@ def prepare_dataset(cfg: ExtractionConfig) -> PreparedDataset:
         _write_lines(train_list, train_names)
         _write_lines(test_list, test_names)
     else:
-        train_names, test_names = [], []
+        train_names, test_names = split_train_test(copied_names, cfg.test_ratio)
 
     return PreparedDataset(
         root=cfg.output_dir,
@@ -151,6 +153,8 @@ def prepare_dataset(cfg: ExtractionConfig) -> PreparedDataset:
         video_count=len(videos),
         train_count=len(train_names),
         test_count=len(test_names),
+        train_names=tuple(train_names),
+        test_names=tuple(test_names),
         blurry_rejected_count=blurry_rejected_count,
     )
 
@@ -169,7 +173,7 @@ def split_train_test(image_names: list[str], test_ratio: float) -> tuple[list[st
         return list(image_names), []
     stride = max(round(1.0 / test_ratio), 2)
     test = [name for idx, name in enumerate(image_names) if idx % stride == stride - 1]
-    if not test and len(image_names) >= 10:
+    if not test and len(image_names) >= 2:
         test = [image_names[-1]]
     test_set = set(test)
     train = [name for name in image_names if name not in test_set]

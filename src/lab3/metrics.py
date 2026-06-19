@@ -110,6 +110,7 @@ def compute_image_metrics(
     gt_paths: Iterable[Path],
     pred_paths: Iterable[Path],
     eval_size: tuple[int, int] | None = None,
+    lpips_enabled: bool = True,
 ) -> dict[str, float | int | None]:
     """Compute mean PSNR/SSIM/(LPIPS) over matched GT/prediction image pairs.
 
@@ -129,7 +130,7 @@ def compute_image_metrics(
         pred_img = load_image(pred_path, eval_size)
         psnrs.append(psnr(gt_img, pred_img))
         ssims.append(ssim(gt_img, pred_img))
-        score = lpips_score(gt_img, pred_img)
+        score = lpips_score(gt_img, pred_img) if lpips_enabled else None
         if score is not None:
             lpipss.append(score)
 

@@ -52,8 +52,12 @@ class ViewerTarget:
     """A viewable artifact exposed by a reconstructor."""
 
     method: str
-    kind: Literal["geometry", "nerfstudio"]
+    kind: Literal["geometry", "external"]
     path: Path
+    launcher_args: tuple[str, ...] = ()
+
+    def command(self, executable: str) -> list[str]:
+        return [executable, *self.launcher_args]
 
 
 class Reconstructor:
@@ -67,6 +71,8 @@ class Reconstructor:
     config: Any
     shared_pose_priority: int = 100
     writes_shared_poses: bool = False
+    consumes_shared_poses: bool = False
+    geometry_reference: bool = False
 
     def run(self, context: ReconstructionContext) -> None:
         raise NotImplementedError
@@ -87,3 +93,6 @@ class Reconstructor:
 
     def with_shared_poses(self, shared_dir: Path) -> Reconstructor:
         return self
+
+    def validate_standalone_poses(self) -> None:
+        return None
