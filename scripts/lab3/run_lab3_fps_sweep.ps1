@@ -1,15 +1,14 @@
-param(
-    [switch]$DryRun
-)
-
 $ErrorActionPreference = "Stop"
 
 $RootDir = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 Set-Location $RootDir
 
-# Edit the values in this block for your own scene / machine.
+# All parameters live in this block; edit a value and run the script directly.
+# No command-line args, no JSON config. discover_inputs() recurses into
+# InputDir and processes every image/video it finds, so just point InputDir
+# at the folder containing your captures.
 $Sweep = [ordered]@{
-    InputDir        = "assets/lab3"
+    InputDir        = "input/lab3_dormitory_input"
     SceneName       = "dormitory"
     OutputRoot      = "outputs/lab3"
     Methods         = @("sfm", "3dgs", "nerf")
@@ -27,9 +26,10 @@ $Sweep = [ordered]@{
     Qualitative     = $true
     Lpips           = $true
     Force           = $false
+    DryRun          = $false
 }
 
-$RunSummary = @()
+$script:RunSummary = @()
 
 function Format-FpsTag {
     param([double]$Fps)
@@ -95,12 +95,15 @@ function Invoke-Lab3SweepRun {
         throw "lab3 failed for scene=$sceneTag fps=$Fps"
     }
 
-    $latestRun = Get-ChildItem $Cfg.OutputRoot -Directory |
-        Where-Object { $_.Name -match ("^\d{{8}}_\d{{6}}_{0}$" -f [regex]::Escape($sceneTag)) } |
-        Sort-Object LastWriteTime |
-        Select-Object -Last 1
+    $latestRun = $null
+    if (Test-Path $Cfg.OutputRoot) {
+        $latestRun = Get-ChildItem $Cfg.OutputRoot -Directory |
+            Where-Object { $_.Name -match ("^\d{{8}}_\d{{6}}_{0}$" -f [regex]::Escape($sceneTag)) } |
+            Sort-Object LastWriteTime |
+            Select-Object -Last 1
+    }
 
-    $RunSummary += [pscustomobject]@{
+    $script:RunSummary += [pscustomobject]@{
         scene_name = $sceneTag
         fps = $Fps
         run_dir = if ($latestRun) { $latestRun.FullName } else { "" }
@@ -112,11 +115,12 @@ Write-Host "Running lab3 full reconstruction sweep sequentially."
 Write-Host ("InputDir: " + $Sweep.InputDir)
 Write-Host ("Base scene: " + $Sweep.SceneName)
 Write-Host ("FPS list: " + (($Sweep.FpsList | ForEach-Object { $_.ToString([System.Globalization.CultureInfo]::InvariantCulture) }) -join ", "))
+if ($Sweep.DryRun) { Write-Host "DRY RUN - lab3 will print commands without training." }
 
 foreach ($fps in $Sweep.FpsList) {
-    Invoke-Lab3SweepRun -Cfg $Sweep -Fps $fps -DryRunMode $DryRun
+    Invoke-Lab3SweepRun -Cfg $Sweep -Fps $fps -DryRunMode $Sweep.DryRun
 }
 
 Write-Host ""
 Write-Host "Sweep finished."
-$RunSummary | Format-Table -AutoSize
+$script:RunSummary | Format-Table -AutoSize
