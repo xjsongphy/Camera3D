@@ -71,47 +71,41 @@ def maybe_poisson_mesh(points_ply: Path, out_ply: Path) -> Path | None:
         print(f"[lab3.geometry] open3d unavailable ({exc}); skipping Poisson mesh.")
         return None
     pcd = o3d.io.read_point_cloud(str(points_ply))
+    if not pcd.has_points():
+        print(f"[lab3.geometry] empty/unreadable point cloud {points_ply}; skipping Poisson mesh.")
+        return None
     pcd.estimate_normals()
-    mesh, _ = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(pcd, depth=9)
+    try:
+        mesh, _ = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(pcd, depth=9)
+    except RuntimeError as exc:
+        print(f"[lab3.geometry] Poisson reconstruction failed ({exc}); skipping mesh.")
+        return None
     out_ply.parent.mkdir(parents=True, exist_ok=True)
     o3d.io.write_triangle_mesh(str(out_ply), mesh)
     return out_ply
 
 
-def stage_geometry(context: Any, reconstructor_configs: dict[str, Any]) -> dict[str, list[Path]]:
-    """Copy each method's geometry artifacts under ``<run>/geometry/<method>/``."""
+def stage_exported_geometry(context: Any, method: str) -> list[Path]:
+    """Stage geometry files already exported inside one method result tree."""
+    method_dir: Path = context.run_dir / "results" / method
+    destination: Path = context.run_dir / "geometry" / method
+    collected: list[Path] = []
+    for suffix in ("*.ply", "*.obj", "*.glb"):
+        for path in method_dir.rglob(suffix):
+            collected.append(copy_geometry(path, destination, path.name))
+    return collected
+
+
+def stage_geometry(context: Any, reconstructors: Sequence[Any]) -> dict[str, list[Path]]:
+    """Ask every reconstructor to stage its own geometric representation."""
     if getattr(context, "dry_run", False):
-        return {method: [] for method in reconstructor_configs}
+        return {reconstructor.name: [] for reconstructor in reconstructors}
 
-    geometry_root: Path = context.run_dir / "geometry"
     staged: dict[str, list[Path]] = {}
-    results: Path = context.run_dir / "results"
-
-    for method, cfg in reconstructor_configs.items():
-        method_dir = results / method
-        dest = geometry_root / method
-        collected: list[Path] = []
-
-        if method == "3dgs":
-            pc = find_3dgs_pointcloud(method_dir)
-            if pc is not None:
-                collected.append(copy_geometry(pc, dest, "gaussians.ply"))
-        elif method == "sfm":
-            dense = find_sfm_dense(method_dir)
-            if dense is not None:
-                collected.append(copy_geometry(dense, dest, "dense.ply"))
-                mesh_path = maybe_poisson_mesh(dense, dest / "poisson_mesh.ply")
-                if mesh_path is not None:
-                    collected.append(mesh_path)
-        elif method == "nerf":
-            # nerfstudio geometry export (mesh/pointcloud) is best-effort and
-            # produced via ns-export by the user; stage anything already present.
-            for suffix in ("*.ply", "*.obj", "*.glb"):
-                for path in method_dir.rglob(suffix):
-                    collected.append(copy_geometry(path, dest, path.name))
-
+    for reconstructor in reconstructors:
+        collected = reconstructor.stage_geometry(context)
         if collected:
-            staged[method] = collected
+            staged[reconstructor.name] = collected
 
     return staged
 

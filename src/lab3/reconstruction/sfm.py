@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from lab3.common import Lab3Error, require_tool, run_cmd, monitored_block, timed_block
-from lab3.reconstruction.base import ReconstructionContext
+from lab3.reconstruction.base import ReconstructionContext, Reconstructor, ViewerTarget
 
 
 @dataclass(frozen=True)
@@ -18,9 +18,11 @@ class SfMConfig:
 
 
 @dataclass(frozen=True)
-class SfMReconstructor:
+class SfMReconstructor(Reconstructor):
     config: SfMConfig
     name: str = "sfm"
+    shared_pose_priority: int = 0
+    writes_shared_poses: bool = True
 
     def run(self, context: ReconstructionContext) -> None:
         if self.config.matcher not in {"sequential", "exhaustive"}:
@@ -144,3 +146,36 @@ class SfMReconstructor:
                 dry_run=context.dry_run,
                 log_path=logs / "sfm_stereo_fusion.log" if logs else None,
             )
+
+    def evaluate(self, context: ReconstructionContext, eval_config, eval_dir: Path):
+        from lab3.evaluate import geometry_only_row
+
+        return geometry_only_row(
+            self.name,
+            self.config,
+            context.timings,
+            context.peaks,
+            train_timing_key="sfm_mapper",
+            train_peak_key="sfm_patch_match_stereo",
+        )
+
+    def stage_geometry(self, context: ReconstructionContext) -> list[Path]:
+        from lab3.geometry import copy_geometry, find_sfm_dense, maybe_poisson_mesh
+
+        dense = find_sfm_dense(context.run_dir / "results" / self.name)
+        if dense is None:
+            return []
+        destination = context.run_dir / "geometry" / self.name
+        collected = [copy_geometry(dense, destination, "dense.ply")]
+        mesh = maybe_poisson_mesh(dense, destination / "poisson_mesh.ply")
+        if mesh is not None:
+            collected.append(mesh)
+        return collected
+
+    def viewer_targets(self, run_dir: Path) -> list[ViewerTarget]:
+        candidates = [
+            run_dir / "geometry" / self.name / "dense.ply",
+            run_dir / "geometry" / self.name / "poisson_mesh.ply",
+            run_dir / "results" / self.name / "dense" / "fused.ply",
+        ]
+        return [ViewerTarget(self.name, "geometry", path) for path in candidates if path.exists()]

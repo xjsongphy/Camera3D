@@ -23,6 +23,8 @@ from pathlib import Path
 from typing import Iterable
 
 from lab3.common import run_cmd
+from lab3.reconstruction import RECONSTRUCTIONS, create_default_reconstructor
+from lab3.reconstruction.base import ViewerTarget
 
 
 @dataclass(frozen=True)
@@ -33,31 +35,19 @@ class ViewerConfig:
 
 
 def find_viewer_targets(run_dir: Path, methods: Iterable[str]) -> dict[str, list[Path]]:
-    """Locate each method's viewable artifact: geometry files + nerf config.yml."""
-    methods = set(methods)
-    geometry = run_dir / "geometry"
-    results = run_dir / "results"
-    targets: dict[str, list[Path]] = {}
+    """Locate each method's viewable artifacts through its lifecycle adapter."""
+    reconstructors = [create_default_reconstructor(method) for method in methods]
+    return {
+        reconstructor.name: [target.path for target in reconstructor.viewer_targets(run_dir)]
+        for reconstructor in reconstructors
+    }
 
-    if "sfm" in methods:
-        candidates = [
-            geometry / "sfm" / "dense.ply",
-            geometry / "sfm" / "poisson_mesh.ply",
-            results / "sfm" / "dense" / "fused.ply",
-        ]
-        targets["sfm"] = [c for c in candidates if c.exists()]
 
-    if "3dgs" in methods:
-        candidates: list[Path] = [geometry / "3dgs" / "gaussians.ply"]
-        candidates += sorted((results / "3dgs" / "point_cloud").glob("iteration_*/point_cloud.ply"))
-        targets["3dgs"] = [c for c in candidates if c.exists()]
-
-    if "nerf" in methods:
-        train_root = results / "nerf" / "train"
-        configs = sorted(train_root.rglob("config.yml")) if train_root.exists() else []
-        targets["nerf"] = configs[-1:] if configs else []
-
-    return targets
+def _viewer_target_records(run_dir: Path, methods: Iterable[str]) -> list[ViewerTarget]:
+    records: list[ViewerTarget] = []
+    for method in methods:
+        records.extend(create_default_reconstructor(method).viewer_targets(run_dir))
+    return records
 
 
 def build_nerfstudio_viewer_command(viewer_bin: str, config_path: Path) -> list[str]:
@@ -99,7 +89,7 @@ def open3d_viewer(paths: Iterable[Path], *, title: str = "lab3") -> None:
 
 def view_run_dir(
     run_dir: Path,
-    methods: Iterable[str] = ("sfm", "3dgs", "nerf"),
+    methods: Iterable[str] = tuple(RECONSTRUCTIONS),
     *,
     nerfstudio_viewer: bool = True,
     dry_run: bool = False,
@@ -110,20 +100,18 @@ def view_run_dir(
         print(f"[lab3.visualization] run directory not found: {run_dir}")
         return
 
-    targets = find_viewer_targets(run_dir, methods)
-
-    geometry_paths: list[Path] = []
-    for method in ("sfm", "3dgs"):
-        geometry_paths.extend(targets.get(method, []))
+    target_records = _viewer_target_records(run_dir, methods)
+    geometry_paths = [target.path for target in target_records if target.kind == "geometry"]
     if geometry_paths:
         print(f"[lab3.visualization] Open3D geometry viewer: {geometry_paths}")
         if not dry_run:
             open3d_viewer(geometry_paths, title=f"lab3 geometry: {run_dir.name}")
-    elif any(m in methods for m in ("sfm", "3dgs")):
+    elif not target_records:
         print("[lab3.visualization] no staged geometry found; run `lab3` with geometry stage on first.")
 
-    if nerfstudio_viewer and "nerf" in methods and targets.get("nerf"):
-        config_path = targets["nerf"][0]
+    nerfstudio_target = next((target for target in target_records if target.kind == "nerfstudio"), None)
+    if nerfstudio_viewer and nerfstudio_target is not None:
+        config_path = nerfstudio_target.path
         cmd = build_nerfstudio_viewer_command(nerf_viewer_bin, config_path)
         print("$", " ".join(cmd))
         if not dry_run:
@@ -134,5 +122,3 @@ def view_run_dir(
                 )
             else:
                 run_cmd(cmd)  # opens web viewer; blocks until the user closes it
-    elif nerfstudio_viewer and "nerf" in methods:
-        print("[lab3.visualization] no nerfstudio config.yml found under results/nerf/train.")

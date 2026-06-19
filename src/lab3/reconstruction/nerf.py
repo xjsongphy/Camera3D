@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from lab3.common import require_tool, run_cmd, monitored_block, timed_block
-from lab3.reconstruction.base import ReconstructionContext
+from lab3.reconstruction.base import ReconstructionContext, Reconstructor, ViewerTarget
 from lab3.training_artifacts import export_training_scalar_artifacts
 
 
@@ -25,7 +25,7 @@ class NeRFConfig:
 
 
 @dataclass(frozen=True)
-class NeRFReconstructor:
+class NeRFReconstructor(Reconstructor):
     config: NeRFConfig
     name: str = "nerf"
 
@@ -103,3 +103,36 @@ class NeRFReconstructor:
             )
         if logs is not None and not context.dry_run:
             export_training_scalar_artifacts("nerf", train_dir, logs)
+
+    def evaluate(self, context: ReconstructionContext, eval_config, eval_dir: Path):
+        from lab3.evaluate import evaluate_nerfstudio
+
+        return evaluate_nerfstudio(
+            self.name,
+            context,
+            eval_config,
+            self.config,
+            context.timings,
+            context.peaks,
+            eval_dir,
+            held_out="nerfstudio native eval split",
+            notes="held-out split differs from 3dgs; see report discussion",
+            train_timing_key="nerf_train",
+            train_peak_key="nerf_train",
+        )
+
+    def stage_geometry(self, context: ReconstructionContext) -> list[Path]:
+        from lab3.geometry import stage_exported_geometry
+
+        return stage_exported_geometry(context, self.name)
+
+    def qualitative_render_dir(self, run_dir: Path) -> Path:
+        return run_dir / "results" / self.name / "renders"
+
+    def viewer_targets(self, run_dir: Path) -> list[ViewerTarget]:
+        train_root = run_dir / "results" / self.name / "train"
+        configs = sorted(train_root.rglob("config.yml")) if train_root.exists() else []
+        return [ViewerTarget(self.name, "nerfstudio", path) for path in configs[-1:]]
+
+    def with_shared_poses(self, shared_dir: Path) -> Reconstructor:
+        return replace(self, config=replace(self.config, colmap_model=shared_dir / "sparse" / "0"))

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from lab3.common import Lab3Error, require_tool, run_cmd, monitored_block, timed_block
-from lab3.reconstruction.base import ReconstructionContext
+from lab3.reconstruction.base import ReconstructionContext, Reconstructor, ViewerTarget
 from lab3.training_artifacts import export_training_scalar_artifacts
 
 
@@ -27,7 +27,7 @@ class DGSConfig:
 
 
 @dataclass(frozen=True)
-class DGSReconstructor:
+class DGSReconstructor(Reconstructor):
     config: DGSConfig
     name: str = "3dgs"
 
@@ -113,6 +113,36 @@ class DGSReconstructor:
             )
         if logs is not None and not context.dry_run:
             export_training_scalar_artifacts("3dgs", output_dir, logs)
+
+    def evaluate(self, context: ReconstructionContext, eval_config, eval_dir: Path):
+        from lab3.evaluate import evaluate_3dgs
+
+        return evaluate_3dgs(
+            context, eval_config, self.config, context.timings, context.peaks, eval_dir
+        )
+
+    def stage_geometry(self, context: ReconstructionContext) -> list[Path]:
+        from lab3.geometry import copy_geometry, find_3dgs_pointcloud
+
+        point_cloud = find_3dgs_pointcloud(context.run_dir / "results" / self.name)
+        if point_cloud is None:
+            return []
+        return [copy_geometry(point_cloud, context.run_dir / "geometry" / self.name, "gaussians.ply")]
+
+    def qualitative_render_dir(self, run_dir: Path) -> Path:
+        test_dir = run_dir / "results" / self.name / "test"
+        matches = sorted(test_dir.glob("ours_*")) if test_dir.is_dir() else []
+        return matches[-1] if matches else run_dir / "results" / self.name
+
+    def viewer_targets(self, run_dir: Path) -> list[ViewerTarget]:
+        candidates = [run_dir / "geometry" / self.name / "gaussians.ply"]
+        candidates += sorted(
+            (run_dir / "results" / self.name / "point_cloud").glob("iteration_*/point_cloud.ply")
+        )
+        return [ViewerTarget(self.name, "geometry", path) for path in candidates if path.exists()]
+
+    def with_shared_poses(self, shared_dir: Path) -> Reconstructor:
+        return replace(self, config=replace(self.config, colmap_source=shared_dir))
 
 
 def _save_iterations(total_iterations: int | None, save_every: int | None) -> list[int]:

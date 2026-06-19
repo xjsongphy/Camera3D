@@ -12,6 +12,7 @@ from lab3.pipeline import (
     normalize_method,
     run_pipeline,
 )
+from lab3.reconstruction import METHOD_ALIASES, RECONSTRUCTIONS
 from lab3.visualization import view_run_dir
 
 
@@ -21,10 +22,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--input-dir", type=Path, help="directory containing images and/or videos")
     parser.add_argument("--scene-name", help="scene name used in the output directory name")
     parser.add_argument("--output-root", type=Path, default=None, help="output root, default outputs/lab3")
-    parser.add_argument("--methods", nargs="+", choices=["sfm", "3dgs", "dgs", "nerf"], help="methods to run")
+    parser.add_argument(
+        "--methods",
+        nargs="+",
+        choices=[*RECONSTRUCTIONS, *METHOD_ALIASES],
+        help="methods to run",
+    )
     parser.add_argument("--fps", type=float, help="frame extraction fps for videos")
     parser.add_argument("--test-ratio", type=float, help="held-out list ratio written to prepared/test.txt")
     parser.add_argument("--image-limit", type=int, help="optional maximum prepared image count")
+    parser.add_argument(
+        "--blur-threshold",
+        type=float,
+        help="drop images/frames whose Laplacian-variance sharpness score falls below this threshold",
+    )
     parser.add_argument("--ffmpeg-bin", help="ffmpeg executable")
     parser.add_argument("--colmap-bin", help="COLMAP executable")
     parser.add_argument(
@@ -36,6 +47,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dgs-save-every", type=int, help="save 3DGS model every N iterations")
     parser.add_argument("--nerf-iterations", type=int, help="nerfstudio training iterations")
     parser.add_argument("--nerf-save-every", type=int, help="save nerfstudio checkpoint every N iterations")
+    parser.add_argument("--neus-iterations", type=int, help="NeuS/NeuS-facto training iterations")
+    parser.add_argument("--neus-save-every", type=int, help="save NeuS checkpoint every N iterations")
     parser.add_argument("--timestamp", help="fixed timestamp tag for reproducible output paths")
     parser.add_argument("--force", action="store_true", help="overwrite prepared and method outputs")
     parser.add_argument("--dry-run", action="store_true", help="print commands and write configs where possible")
@@ -106,7 +119,7 @@ def main() -> None:
             methods = (
                 tuple(normalize_method(m) for m in args.methods)
                 if args.methods
-                else ("sfm", "3dgs", "nerf")
+                else tuple(RECONSTRUCTIONS)
             )
             view_run_dir(
                 args.view_run.resolve(),
@@ -134,6 +147,7 @@ def _build_config(args: argparse.Namespace) -> Lab3PipelineConfig:
         "fps": args.fps,
         "test_ratio": args.test_ratio,
         "image_limit": args.image_limit,
+        "blur_threshold": args.blur_threshold,
         "ffmpeg_bin": args.ffmpeg_bin,
         "timestamp": args.timestamp,
         "force": True if args.force else None,
@@ -186,6 +200,23 @@ def _build_config(args: argparse.Namespace) -> Lab3PipelineConfig:
                         "save_every": args.nerf_save_every
                         if args.nerf_save_every is not None
                         else cfg.nerf.save_every,
+                    }
+                ),
+            }
+        )
+    if args.neus_iterations is not None or args.neus_save_every is not None:
+        cfg = Lab3PipelineConfig(
+            **{
+                **cfg.__dict__,
+                "neus": cfg.neus.__class__(
+                    **{
+                        **cfg.neus.__dict__,
+                        "max_num_iterations": args.neus_iterations
+                        if args.neus_iterations is not None
+                        else cfg.neus.max_num_iterations,
+                        "save_every": args.neus_save_every
+                        if args.neus_save_every is not None
+                        else cfg.neus.save_every,
                     }
                 ),
             }

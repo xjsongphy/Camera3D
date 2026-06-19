@@ -15,13 +15,13 @@ from __future__ import annotations
 
 import csv
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-from lab3.common import Lab3Error, run_cmd, timed_block
+from lab3.common import run_cmd, timed_block
 from lab3.metrics import compute_image_metrics
-from lab3.reconstruction.base import ReconstructionContext
+from lab3.reconstruction.base import ReconstructionContext, Reconstructor
 
 METRIC_COLUMNS = [
     "method",
@@ -39,16 +39,11 @@ METRIC_COLUMNS = [
     "notes",
 ]
 
-# Stage label whose GPU-memory peak represents each method's training/MVS peak.
-TRAIN_PEAK_KEY = {"3dgs": "3dgs_train", "nerf": "nerf_train", "sfm": "sfm_patch_match_stereo"}
-
-
 @dataclass(frozen=True)
 class EvaluateConfig:
     enabled: bool = True
     eval_size: tuple[int, int] | None = None  # (height, width); None = native
     lpips: bool = True
-    rgb_methods: tuple[str, ...] = ("3dgs", "nerf")
 
 
 # --------------------------------------------------------------------------- #
@@ -178,45 +173,25 @@ def write_metrics_csv(rows: Sequence[dict[str, Any]], path: Path) -> None:
 # --------------------------------------------------------------------------- #
 def evaluate_run(
     context: ReconstructionContext,
-    prepared_root: Path,
-    test_list: Path,
     eval_cfg: EvaluateConfig,
-    reconstructor_configs: dict[str, Any],
-    timings: dict[str, float],
-    gpu_peaks: dict[str, float] | None = None,
+    reconstructors: Sequence[Reconstructor],
 ) -> list[dict[str, Any]]:
     """Render + score every RGB method; write ``metrics.csv``. Dry-run aware."""
     rows: list[dict[str, Any]] = []
-    held_out_names = _read_lines(test_list)
     eval_dir = context.run_dir / "results" / "_eval"
     if not context.dry_run:
         eval_dir.mkdir(parents=True, exist_ok=True)
-    gpu_peaks = gpu_peaks if gpu_peaks is not None else {}
-
-    for method in eval_cfg.rgb_methods:
-        if method == "3dgs":
-            rows.append(
-                _evaluate_3dgs(
-                    context, eval_cfg, reconstructor_configs.get("3dgs"), timings, gpu_peaks, eval_dir
-                )
-            )
-        elif method == "nerf":
-            rows.append(
-                _evaluate_nerf(
-                    context, eval_cfg, reconstructor_configs.get("nerf"), timings, gpu_peaks, eval_dir
-                )
-            )
-
-    # SfM is geometry-only for RGB metrics; include a row noting N/A.
-    if "sfm" in reconstructor_configs:
-        rows.append(_geometry_only_row("sfm", reconstructor_configs["sfm"], timings, gpu_peaks))
+    for reconstructor in reconstructors:
+        row = reconstructor.evaluate(context, eval_cfg, eval_dir)
+        if row is not None:
+            rows.append(row)
 
     csv_path = context.run_dir / "metrics.csv"
     write_metrics_csv(rows, csv_path)
     return rows
 
 
-def _evaluate_3dgs(
+def evaluate_3dgs(
     context: ReconstructionContext,
     eval_cfg: EvaluateConfig,
     dgs_cfg: Any,
@@ -267,7 +242,7 @@ def _evaluate_3dgs(
         held_out="every-8th (train.py --eval)",
         train_time_sec=timings.get("3dgs_train"),
         iterations=_config_iterations(dgs_cfg),
-        gpu_mem_peak_gb=gpu_peaks.get(TRAIN_PEAK_KEY["3dgs"]),
+        gpu_mem_peak_gb=gpu_peaks.get("3dgs_train"),
         render_fps=fps,
         model_size_mb=model_size,
         gpu=gpu_summary(),
@@ -276,40 +251,46 @@ def _evaluate_3dgs(
     )
 
 
-def _evaluate_nerf(
+def evaluate_nerfstudio(
+    method: str,
     context: ReconstructionContext,
     eval_cfg: EvaluateConfig,
     nerf_cfg: Any,
     timings: dict[str, float],
     gpu_peaks: dict[str, float],
     eval_dir: Path,
+    *,
+    held_out: str,
+    notes: str,
+    train_timing_key: str,
+    train_peak_key: str,
 ) -> dict[str, Any]:
     train_bin = getattr(nerf_cfg, "train_bin", "ns-train") if nerf_cfg else "ns-train"
-    config_path = _find_nerf_config(context.run_dir / "results" / "nerf" / "train")
-    out_json = eval_dir / "nerf_eval.json"
+    config_path = _find_nerf_config(context.run_dir / "results" / method / "train")
+    out_json = eval_dir / f"{method}_eval.json"
     logs = context.run_dir / "logs"
 
     # nerfstudio's ns-eval computes PSNR/SSIM/LPIPS on its native eval split.
     eval_bin = train_bin.replace("ns-train", "ns-eval") if train_bin == "ns-train" else "ns-eval"
     eval_cmd = build_nerf_eval_command(eval_bin, config_path or Path("config.yml"), out_json)
-    with timed_block("nerf_eval", timings):
+    with timed_block(f"{method}_eval", timings):
         run_cmd(
             eval_cmd,
             dry_run=context.dry_run,
-            log_path=logs / "nerf_eval.log" if logs else None,
+            log_path=logs / f"{method}_eval.log" if logs else None,
         )
 
     # Render the eval split so qualitative panels can include nerfstudio.
-    render_dir = context.run_dir / "results" / "nerf" / "renders"
+    render_dir = context.run_dir / "results" / method / "renders"
     render_bin = train_bin.replace("ns-train", "ns-render") if train_bin == "ns-train" else "ns-render"
     render_cmd = build_nerf_render_command(
         render_bin, config_path or Path("config.yml"), render_dir, "test"
     )
-    with timed_block("nerf_render", timings):
+    with timed_block(f"{method}_render", timings):
         run_cmd(
             render_cmd,
             dry_run=context.dry_run,
-            log_path=logs / "nerf_render.log" if logs else None,
+            log_path=logs / f"{method}_render.log" if logs else None,
         )
 
     metrics = (
@@ -317,30 +298,35 @@ def _evaluate_nerf(
         if (not context.dry_run and out_json.exists())
         else {"psnr": float("nan"), "ssim": float("nan"), "lpips": None}
     )
-    render_elapsed = timings.get("nerf_eval", 0.0)
+    render_elapsed = timings.get(f"{method}_eval", 0.0)
     # ns-eval timing includes eval-image rendering; treat n as unknown -> no fps.
     fps = _fps(metrics.get("n"), render_elapsed) if metrics.get("n") else float("nan")
-    model_size = model_size_mb(_nerf_model_files(context.run_dir / "results" / "nerf")) if not context.dry_run else float("nan")
+    model_size = model_size_mb(_nerf_model_files(context.run_dir / "results" / method)) if not context.dry_run else float("nan")
 
     return _row(
-        "nerf",
+        method,
         metrics,
         metric_source="nerfstudio ns-eval",
-        held_out="nerfstudio native eval split",
-        train_time_sec=timings.get("nerf_train"),
+        held_out=held_out,
+        train_time_sec=timings.get(train_timing_key),
         iterations=_config_iterations(nerf_cfg, key="max_num_iterations"),
-        gpu_mem_peak_gb=gpu_peaks.get(TRAIN_PEAK_KEY["nerf"]),
+        gpu_mem_peak_gb=gpu_peaks.get(train_peak_key),
         render_fps=fps,
         model_size_mb=model_size,
         gpu=gpu_summary(),
-        notes="held-out split differs from 3dgs; see report discussion",
+        notes=notes,
     )
 
 
-def _geometry_only_row(
-    method: str, cfg: Any, timings: dict[str, float], gpu_peaks: dict[str, float]
+def geometry_only_row(
+    method: str,
+    cfg: Any,
+    timings: dict[str, float],
+    gpu_peaks: dict[str, float],
+    *,
+    train_timing_key: str,
+    train_peak_key: str,
 ) -> dict[str, Any]:
-    train_key = f"{method}_mapper"
     iterations = _config_iterations(cfg)
     return {
         "method": method,
@@ -349,9 +335,9 @@ def _geometry_only_row(
         "lpips": "N/A",
         "metric_source": "geometry-only",
         "held_out": "n/a",
-        "train_time_sec": _fmt(timings.get(train_key)),
+        "train_time_sec": _fmt(timings.get(train_timing_key)),
         "iterations": "" if iterations is None else str(iterations),
-        "gpu_mem_peak_gb": _fmt(gpu_peaks.get(TRAIN_PEAK_KEY.get(method, ""))),
+        "gpu_mem_peak_gb": _fmt(gpu_peaks.get(train_peak_key)),
         "render_fps": "N/A",
         "model_size_mb": "N/A",
         "gpu": gpu_summary(),
@@ -442,12 +428,6 @@ def _fps(n: int | None, elapsed: float) -> float:
     if not n or elapsed <= 0:
         return float("nan")
     return n / elapsed
-
-
-def _read_lines(path: Path) -> list[str]:
-    if not path.exists():
-        return []
-    return [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
 def _fmt(value: Any) -> str:

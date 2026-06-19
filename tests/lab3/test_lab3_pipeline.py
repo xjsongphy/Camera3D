@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 
-from lab3.extract import discover_inputs, split_train_test
+import numpy as np
+from PIL import Image
+
+from lab3.extract import ExtractionConfig, discover_inputs, prepare_dataset, split_train_test
 from lab3.pipeline import config_from_dict, normalize_method
 
 
@@ -69,6 +73,50 @@ def test_config_from_dict_defaults_dgs_repo_to_relative_checkout() -> None:
     assert cfg.dgs.repo_dir == Path("gaussian-splatting")
 
 
+def test_config_from_dict_reads_blur_threshold() -> None:
+    cfg = config_from_dict(
+        {
+            "input_dir": "data/scene",
+            "scene_name": "desk",
+            "blur_threshold": 120.5,
+        }
+    )
+
+    assert cfg.blur_threshold == 120.5
+
+
+def test_prepare_dataset_filters_blurry_images(tmp_path: Path) -> None:
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "prepared"
+    input_dir.mkdir()
+
+    sharp = np.zeros((32, 32), dtype=np.uint8)
+    sharp[:, ::2] = 255
+    blurry = np.full((32, 32), 127, dtype=np.uint8)
+
+    Image.fromarray(sharp, mode="L").save(input_dir / "sharp.png")
+    Image.fromarray(blurry, mode="L").save(input_dir / "blurry.png")
+
+    prepared = prepare_dataset(
+        ExtractionConfig(
+            input_dir=input_dir,
+            output_dir=output_dir,
+            blur_threshold=100.0,
+            test_ratio=0.0,
+        )
+    )
+
+    assert prepared.image_count == 1
+    assert prepared.blurry_rejected_count == 1
+    assert [path.name for path in prepared.images_dir.iterdir()] == ["img_000002.png"]
+
+    with prepared.manifest_path.open("r", encoding="utf-8", newline="") as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 1
+    assert rows[0]["source_path"].endswith("sharp.png")
+    assert rows[0]["blur_score"] != ""
+
+
 def test_normalize_method_rejects_unknown() -> None:
     try:
         normalize_method("mesh")
@@ -76,3 +124,24 @@ def test_normalize_method_rejects_unknown() -> None:
         assert "Unsupported method" in str(exc)
     else:
         raise AssertionError("normalize_method should reject unsupported methods")
+
+
+def test_config_from_dict_parses_neus() -> None:
+    cfg = config_from_dict(
+        {
+            "input_dir": "data/scene",
+            "methods": ["sfm", "neus"],
+            "reconstruction": {
+                "neus": {
+                    "method": "neus",
+                    "max_num_iterations": 1234,
+                    "mesh_resolution": 1024,
+                }
+            },
+        }
+    )
+
+    assert cfg.methods == ("sfm", "neus")
+    assert cfg.neus.method == "neus"
+    assert cfg.neus.max_num_iterations == 1234
+    assert cfg.neus.mesh_resolution == 1024

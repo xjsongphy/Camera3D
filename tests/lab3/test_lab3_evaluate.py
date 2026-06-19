@@ -8,7 +8,6 @@ import pytest
 
 from lab3.evaluate import (
     METRIC_COLUMNS,
-    TRAIN_PEAK_KEY,
     EvaluateConfig,
     build_3dgs_metrics_command,
     build_3dgs_render_command,
@@ -51,7 +50,7 @@ def test_build_nerf_render_command_requests_rgb_dataset(tmp_path: Path) -> None:
     cmd = build_nerf_render_command("ns-render", tmp_path / "config.yml", tmp_path / "renders", "test")
     assert cmd[0] == "ns-render"
     assert "dataset" in cmd
-    assert "--split-mode" in cmd
+    assert "--split" in cmd
     assert "test" in cmd
     assert "rgb" in cmd
 
@@ -167,18 +166,11 @@ def test_gpu_summary_returns_string_without_raising() -> None:
 def test_evaluate_config_defaults_enable_evaluation() -> None:
     cfg = EvaluateConfig()
     assert cfg.enabled is True
-    assert "3dgs" in cfg.rgb_methods and "nerf" in cfg.rgb_methods
 
 
 def test_metric_columns_include_iterations_and_gpu_peak() -> None:
     assert "iterations" in METRIC_COLUMNS
     assert "gpu_mem_peak_gb" in METRIC_COLUMNS
-
-
-def test_train_peak_key_maps_each_method_to_training_label() -> None:
-    assert TRAIN_PEAK_KEY["3dgs"] == "3dgs_train"
-    assert TRAIN_PEAK_KEY["nerf"] == "nerf_train"
-    assert TRAIN_PEAK_KEY["sfm"] == "sfm_patch_match_stereo"
 
 
 def test_config_iterations_reads_dgs_iterations() -> None:
@@ -196,11 +188,18 @@ def test_config_iterations_reads_nerf_max_num_iterations() -> None:
 
 
 def test_geometry_only_row_carries_iterations_and_peak() -> None:
-    from lab3.evaluate import _geometry_only_row
+    from lab3.evaluate import geometry_only_row
 
     cfg = SimpleNamespace(iterations=None)
     peaks = {"sfm_patch_match_stereo": 3.25}
-    row = _geometry_only_row("sfm", cfg, {"sfm_mapper": 12.0}, peaks)
+    row = geometry_only_row(
+        "sfm",
+        cfg,
+        {"sfm_mapper": 12.0},
+        peaks,
+        train_timing_key="sfm_mapper",
+        train_peak_key="sfm_patch_match_stereo",
+    )
     assert row["method"] == "sfm"
     assert row["iterations"] == ""  # SfM has no training iterations
     assert row["gpu_mem_peak_gb"] == "3.2500"

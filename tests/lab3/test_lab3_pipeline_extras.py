@@ -5,8 +5,7 @@ from pathlib import Path
 
 from lab3.pipeline import (
     Lab3PipelineConfig,
-    _order_methods,
-    _resolve_shared_configs,
+    _build_reconstructors,
     config_from_dict,
     run_pipeline,
 )
@@ -52,42 +51,52 @@ def test_resolve_shared_configs_injects_when_sharing(tmp_path: Path) -> None:
     cfg = config_from_dict(
         {
             "input_dir": str(tmp_path),
-            "methods": ["sfm", "3dgs", "nerf"],
+            "methods": ["sfm", "3dgs", "nerf", "neus"],
             "share_poses": True,
         }
     )
     shared = tmp_path / "prepared"
 
-    _, dgs_cfg, nerf_cfg = _resolve_shared_configs(cfg, shared)
+    reconstructors = _build_reconstructors(cfg, shared)
+    configs = {reconstructor.name: reconstructor.config for reconstructor in reconstructors}
 
-    assert dgs_cfg.colmap_source == shared
-    assert nerf_cfg.colmap_model == shared / "sparse" / "0"
+    assert configs["3dgs"].colmap_source == shared
+    assert configs["nerf"].colmap_model == shared / "sparse" / "0"
+    assert configs["neus"].colmap_model == shared / "sparse" / "0"
 
 
 def test_resolve_shared_configs_leaves_them_empty_when_not_sharing(tmp_path: Path) -> None:
     cfg = config_from_dict(
         {
             "input_dir": str(tmp_path),
-            "methods": ["sfm", "3dgs", "nerf"],
+            "methods": ["sfm", "3dgs", "nerf", "neus"],
             "share_poses": False,
         }
     )
 
-    _, dgs_cfg, nerf_cfg = _resolve_shared_configs(cfg, tmp_path / "prepared")
+    reconstructors = _build_reconstructors(cfg, tmp_path / "prepared")
+    configs = {reconstructor.name: reconstructor.config for reconstructor in reconstructors}
 
-    assert dgs_cfg.colmap_source is None
-    assert nerf_cfg.colmap_model is None
+    assert configs["3dgs"].colmap_source is None
+    assert configs["nerf"].colmap_model is None
+    assert configs["neus"].colmap_model is None
 
 
 def test_order_methods_runs_sfm_first_when_sharing() -> None:
-    ordered = _order_methods(("3dgs", "nerf", "sfm"), share_poses=True)
-    assert ordered[0] == "sfm"
-    assert set(ordered) == {"sfm", "3dgs", "nerf"}
+    cfg = config_from_dict(
+        {"input_dir": "data/scene", "methods": ["3dgs", "nerf", "sfm"], "share_poses": True}
+    )
+    ordered = _build_reconstructors(cfg, Path("prepared"))
+    assert ordered[0].name == "sfm"
+    assert {reconstructor.name for reconstructor in ordered} == {"sfm", "3dgs", "nerf"}
 
 
 def test_order_methods_preserves_order_when_not_sharing() -> None:
-    ordered = _order_methods(("3dgs", "nerf", "sfm"), share_poses=False)
-    assert ordered == ["3dgs", "nerf", "sfm"]
+    cfg = config_from_dict(
+        {"input_dir": "data/scene", "methods": ["3dgs", "nerf", "sfm"], "share_poses": False}
+    )
+    ordered = _build_reconstructors(cfg, Path("prepared"))
+    assert [reconstructor.name for reconstructor in ordered] == ["3dgs", "nerf", "sfm"]
 
 
 def test_dry_run_pipeline_writes_configs_and_metrics_skeleton(tmp_path: Path) -> None:

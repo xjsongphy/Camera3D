@@ -5,6 +5,9 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
+from PIL import Image
+
 from lab3.common import IMAGE_SUFFIXES, VIDEO_SUFFIXES, Lab3Error, copy_file, require_tool, run_cmd, slugify
 
 
@@ -14,6 +17,7 @@ class ExtractionConfig:
     output_dir: Path
     fps: float = 2.0
     image_limit: int | None = None
+    blur_threshold: float | None = None
     test_ratio: float = 0.1
     ffmpeg_bin: str = "ffmpeg"
     force: bool = False
@@ -31,11 +35,14 @@ class PreparedDataset:
     video_count: int
     train_count: int
     test_count: int
+    blurry_rejected_count: int = 0
 
 
 def prepare_dataset(cfg: ExtractionConfig) -> PreparedDataset:
     if cfg.fps <= 0:
         raise Lab3Error(f"fps must be positive, got {cfg.fps}")
+    if cfg.blur_threshold is not None and cfg.blur_threshold < 0:
+        raise Lab3Error(f"blur_threshold must be non-negative, got {cfg.blur_threshold}")
     if not 0.0 <= cfg.test_ratio < 1.0:
         raise Lab3Error(f"test_ratio must be in [0, 1), got {cfg.test_ratio}")
     if not cfg.input_dir.exists():
@@ -61,10 +68,15 @@ def prepare_dataset(cfg: ExtractionConfig) -> PreparedDataset:
 
     manifest_rows: list[dict[str, str]] = []
     copied_names: list[str] = []
+    blurry_rejected_count = 0
 
     for index, image_path in enumerate(images, start=1):
         if cfg.image_limit is not None and len(copied_names) >= cfg.image_limit:
             break
+        blur_score = compute_blur_score(image_path) if cfg.blur_threshold is not None else None
+        if blur_score is not None and blur_score < cfg.blur_threshold:
+            blurry_rejected_count += 1
+            continue
         image_name = f"img_{index:06d}{image_path.suffix.lower()}"
         if not cfg.dry_run:
             copy_file(image_path, images_dir / image_name, overwrite=cfg.force)
@@ -75,6 +87,7 @@ def prepare_dataset(cfg: ExtractionConfig) -> PreparedDataset:
                 "source_type": "image",
                 "source_path": str(image_path),
                 "source_time_sec": "",
+                "blur_score": "" if blur_score is None else f"{blur_score:.6f}",
             }
         )
 
@@ -99,6 +112,11 @@ def prepare_dataset(cfg: ExtractionConfig) -> PreparedDataset:
             continue
         extracted = sorted(images_dir.glob(f"{frame_prefix}_*.jpg"))
         for frame_index, frame_path in enumerate(extracted):
+            blur_score = compute_blur_score(frame_path) if cfg.blur_threshold is not None else None
+            if blur_score is not None and blur_score < cfg.blur_threshold:
+                blurry_rejected_count += 1
+                frame_path.unlink(missing_ok=True)
+                continue
             if cfg.image_limit is not None and len(copied_names) >= cfg.image_limit:
                 frame_path.unlink(missing_ok=True)
                 continue
@@ -109,6 +127,7 @@ def prepare_dataset(cfg: ExtractionConfig) -> PreparedDataset:
                     "source_type": "video",
                     "source_path": str(video_path),
                     "source_time_sec": f"{frame_index / cfg.fps:.9f}",
+                    "blur_score": "" if blur_score is None else f"{blur_score:.6f}",
                 }
             )
 
@@ -132,6 +151,7 @@ def prepare_dataset(cfg: ExtractionConfig) -> PreparedDataset:
         video_count=len(videos),
         train_count=len(train_names),
         test_count=len(test_names),
+        blurry_rejected_count=blurry_rejected_count,
     )
 
 
@@ -157,7 +177,7 @@ def split_train_test(image_names: list[str], test_ratio: float) -> tuple[list[st
 
 
 def _write_manifest(path: Path, rows: list[dict[str, str]]) -> None:
-    fieldnames = ["image_name", "source_type", "source_path", "source_time_sec"]
+    fieldnames = ["image_name", "source_type", "source_path", "source_time_sec", "blur_score"]
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -171,3 +191,18 @@ def _write_lines(path: Path, values: list[str]) -> None:
         for value in values:
             f.write(f"{value}\n")
 
+
+def compute_blur_score(path: Path) -> float:
+    with Image.open(path) as image:
+        gray = np.asarray(image.convert("L"), dtype=np.float32)
+    if gray.shape[0] < 3 or gray.shape[1] < 3:
+        return 0.0
+    center = gray[1:-1, 1:-1]
+    laplacian = (
+        gray[:-2, 1:-1]
+        + gray[2:, 1:-1]
+        + gray[1:-1, :-2]
+        + gray[1:-1, 2:]
+        - 4.0 * center
+    )
+    return float(np.var(laplacian))

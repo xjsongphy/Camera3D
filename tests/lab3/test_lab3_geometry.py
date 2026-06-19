@@ -4,6 +4,8 @@ import csv
 from pathlib import Path
 from types import SimpleNamespace
 
+from lab3.reconstruction import DGSConfig, DGSReconstructor, SfMConfig, SfMReconstructor
+
 import numpy as np
 import pytest
 
@@ -70,9 +72,9 @@ def test_stage_geometry_collects_3dgs_and_sfm(tmp_path: Path) -> None:
     (results / "sfm" / "dense" / "fused.ply").write_bytes(b"sfm")
 
     context = SimpleNamespace(run_dir=run_dir, dry_run=False)
-    configs = {"3dgs": SimpleNamespace(repo_dir=None), "sfm": SimpleNamespace(dense=True)}
+    reconstructors = [DGSReconstructor(DGSConfig(repo_dir=None)), SfMReconstructor(SfMConfig(dense=True))]
 
-    staged = stage_geometry(context, configs)
+    staged = stage_geometry(context, reconstructors)
 
     assert (run_dir / "geometry" / "3dgs" / "gaussians.ply").exists()
     assert (run_dir / "geometry" / "sfm" / "dense.ply").exists()
@@ -82,9 +84,9 @@ def test_stage_geometry_collects_3dgs_and_sfm(tmp_path: Path) -> None:
 def test_stage_geometry_dry_run_skips_copy(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     context = SimpleNamespace(run_dir=run_dir, dry_run=True)
-    configs = {"3dgs": SimpleNamespace(repo_dir=None)}
+    reconstructors = [DGSReconstructor(DGSConfig(repo_dir=None))]
 
-    staged = stage_geometry(context, configs)
+    staged = stage_geometry(context, reconstructors)
 
     assert not (run_dir / "geometry").exists() or staged == {"3dgs": []}
 
