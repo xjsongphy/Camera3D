@@ -2,10 +2,11 @@
   "input_dir": "docs/lab1/assets/videos",
   "scene_name": "lab1_sample",
   "output_root": "outputs/lab3",
-  "methods": ["sfm", "3dgs", "nerf"],
+  "methods": ["sfm", "3dgs", "nerf", "neus"],
   "fps": 2.0,
   "test_ratio": 0.1,
   "image_limit": null,
+  "blur_threshold": null,
   "ffmpeg_bin": "ffmpeg",
   "share_poses": true,
   "evaluate": true,
@@ -42,6 +43,17 @@
       "downscale_factor": null,
       "skip_process_data": false,
       "colmap_model": null
+    },
+    "neus": {
+      "train_bin": "ns-train",
+      "method": "neus-facto",
+      "max_num_iterations": 20001,
+      "save_every": 2000,
+      "save_only_latest_checkpoint": false,
+      "colmap_model": null,
+      "scene_scale": 2.0,
+      "export_mesh": true,
+      "mesh_resolution": 512
     }
   }
 }

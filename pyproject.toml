@@ -83,6 +83,24 @@ simple-knn = { path = "gaussian-splatting/submodules/simple-knn" }
 fused-ssim = { path = "gaussian-splatting/submodules/fused-ssim" }
 
 [tool.uv.extra-build-dependencies]
+# CUDA submodules of gaussian-splatting import torch at build time
+# (setup.py -> torch.utils.cpp_extension). Inject the cu124 torch into
+# their isolated build environments (cross-platform, mirrors tinycudann).
+diff-gaussian-rasterization = [
+  "setuptools",
+  "torch @ https://download.pytorch.org/whl/cu124/torch-2.5.1%2Bcu124-cp312-cp312-win_amd64.whl ; sys_platform == 'win32'",
+  "torch @ https://download.pytorch.org/whl/cu124/torch-2.5.1%2Bcu124-cp312-cp312-linux_x86_64.whl ; sys_platform == 'linux'",
+]
+simple-knn = [
+  "setuptools",
+  "torch @ https://download.pytorch.org/whl/cu124/torch-2.5.1%2Bcu124-cp312-cp312-win_amd64.whl ; sys_platform == 'win32'",
+  "torch @ https://download.pytorch.org/whl/cu124/torch-2.5.1%2Bcu124-cp312-cp312-linux_x86_64.whl ; sys_platform == 'linux'",
+]
+fused-ssim = [
+  "setuptools",
+  "torch @ https://download.pytorch.org/whl/cu124/torch-2.5.1%2Bcu124-cp312-cp312-win_amd64.whl ; sys_platform == 'win32'",
+  "torch @ https://download.pytorch.org/whl/cu124/torch-2.5.1%2Bcu124-cp312-cp312-linux_x86_64.whl ; sys_platform == 'linux'",
+]
 tinycudann = [
   "setuptools==70.2.0",
   # Windows
@@ -92,12 +110,13 @@ tinycudann = [
 ]
 
 [tool.uv.extra-build-variables]
-# Windows build variables for tinycudann
-tinycudann = { DISTUTILS_USE_SDK = "1", MSSdk = "1", CUDA_HOME = "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.4", CUDA_PATH = "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.4", TORCH_CUDA_ARCH_LIST = "8.9", INCLUDE = "C:\\Program Files (x86)\\Microsoft Visual Studio\\18\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\include;C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.22621.0\\ucrt;C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.22621.0\\shared;C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.22621.0\\um;C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.22621.0\\winrt;C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.22621.0\\cppwinrt", LIB = "C:\\Program Files (x86)\\Microsoft Visual Studio\\18\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\lib\\x64;C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.22621.0\\ucrt\\x64;C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.22621.0\\um\\x64", PATH = "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.4\\bin;C:\\Program Files (x86)\\Microsoft Visual Studio\\18\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\HostX64\\x64;C:\\Program Files (x86)\\Windows Kits\\10\\bin\\10.0.22621.0\\x64;C:\\Windows\\System32;C:\\Windows" }
+# Keep project-level build variables machine-agnostic. CUDA toolchain locations
+# should come from the user's shell environment rather than being hardcoded here.
+tinycudann = { TORCH_CUDA_ARCH_LIST = "8.9" }
 
-# Linux: build variables are machine-specific (CUDA/nvcc paths) and uv does not support
-# per-platform values in this table. On Linux, export them in your shell before `uv sync`:
-#   export CUDA_HOME=/usr/local/cuda-12.4 TORCH_CUDA_ARCH_LIST=8.9   (and ensure nvcc is on PATH)
+# CUDA/nvcc paths are host-specific. Ensure `nvcc` is on PATH (for example via
+# `/usr/local/cuda/bin`) and export `CUDA_HOME` in your shell only if autodiscovery
+# is not enough for your setup.
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/lab1", "src/lab2", "src/lab3"]

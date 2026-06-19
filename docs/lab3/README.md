@@ -34,18 +34,18 @@ uv sync --group lab3 --extra cu124
 uv run lab3 --config configs/lab3/default.json --methods sfm --dry-run
 ```
 
-### 完整三方法（需先装好 lab3 依赖，并在当前目录准备 `./gaussian-splatting` 或手动传 `--dgs-repo`）
+### 完整四方法（需先装好 lab3 依赖，并在当前目录准备 `./gaussian-splatting` 或手动传 `--dgs-repo`）
 
 ```bash
 # Linux/macOS
 uv run lab3 --input-dir path/to/captured_scene --scene-name my_scene \
-  --methods sfm 3dgs nerf --dgs-repo /path/to/gaussian-splatting --fps 2
+  --methods sfm 3dgs nerf neus --dgs-repo /path/to/gaussian-splatting --fps 2
 
 # Windows PowerShell
 uv run lab3 `
   --input-dir path\to\captured_scene `
   --scene-name my_scene `
-  --methods sfm 3dgs nerf `
+  --methods sfm 3dgs nerf neus `
   --dgs-repo D:\path\to\gaussian-splatting `
   --fps 2
 ```
@@ -56,6 +56,13 @@ uv run lab3 `
 uv run lab3 --run-dir outputs/lab3/<timestamp>_my_scene
 ```
 
+### NeuS 数据与方法
+
+`neus` 是独立重建方法，默认调用 nerfstudio 1.1.5 的 `neus-facto`；如需原版可在
+`reconstruction.neus.method` 中改为 `neus`。流水线复用 SfM 的 COLMAP TXT 模型，自动生成
+SDFStudio 所需的 `meta_data.json` 并归一化场景，因此应同时启用 `sfm` 和 `share_poses`。
+默认不使用单目深度/法线先验（`has_mono_prior=false`），训练完成后自动从 SDF 零水平集导出 mesh。
+
 ### 常用开关
 
 | 开关 | 作用 |
@@ -65,7 +72,7 @@ uv run lab3 --run-dir outputs/lab3/<timestamp>_my_scene
 | `--no-lpips` | 跳过 LPIPS，只算 PSNR/SSIM |
 | `--eval-size H W` | 统一缩放到该分辨率再算指标（公平） |
 | `--test-ratio 0.1` | held-out 比例（写 `prepared/test.txt`） |
-| `--dgs-iterations 7000` / `--nerf-iterations 30000` | 训练迭代数 |
+| `--dgs-iterations 7000` / `--nerf-iterations 30000` / `--neus-iterations 20001` | 训练迭代数 |
 | `--timestamp <tag>` | 固定输出目录后缀，便于复现 |
 
 ### 批处理脚本
@@ -113,9 +120,11 @@ uv run lab3 --view-run outputs/lab3/<ts>_<scene> --methods sfm 3dgs --no-nerfstu
 
 - `configs/`：`run_config.json`、`prepared_dataset.json`
 - `prepared/`：`images/`、`sparse/0/`（共享 COLMAP）、`manifest.csv`、`train.txt`、`test.txt`
-- `results/{sfm,3dgs,nerf}/`：各方法训练/渲染产物
+- `blur_threshold`（可选）：对输入图片/视频抽帧计算 Laplacian variance 清晰度分数，低于阈值的模糊图会被自动跳过；保留下来的分数写进 `prepared/manifest.csv`
+- 阈值不确定时，可先跑 `./scripts/lab3/inspect_blur_scores.sh <input-dir>` 查看输入图片的清晰度分布和建议阈值
+- `results/{sfm,3dgs,nerf,neus}/`：各方法训练/渲染产物；NeuS mesh 位于 `results/neus/mesh/sdf_mesh.ply`
 - `qualitative/comparison_*.png`：GT vs 方法渲染 vs 误差图（≥3 视角）
-- `geometry/{sfm,3dgs,nerf}/`：点云/mesh/Gaussian `.ply` 汇总
+- `geometry/{sfm,3dgs,nerf,neus}/`：点云/mesh/Gaussian `.ply` 汇总
 - `geometry_metrics.csv`：各方法点云 vs COLMAP dense proxy 的 Chamfer / F-score
 - `logs/<method>_<step>.log`：每步外部命令日志
 - `logs/*_train_scalars.csv`：从 TensorBoard `tfevents` 导出的训练标量长表（tag / step / value / wall_time）

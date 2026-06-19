@@ -3,28 +3,18 @@ $ErrorActionPreference = "Stop"
 $RootDir = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 Set-Location $RootDir
 
-# All parameters live in this block; edit a value and run the script directly.
-# No command-line args, no JSON config. discover_inputs() recurses into
-# InputDir and processes every image/video it finds, so just point InputDir
-# at the folder containing your captures.
+# Sweep launcher.
+# Keep the main experiment settings in ConfigPath; this script only points at
+# a concrete input directory and overrides the fps/scene tag per run.
 $Sweep = [ordered]@{
+    ConfigPath      = "configs/lab3/extra.json"
     InputDir        = "input/lab3_dormitory_input"
     SceneName       = "dormitory"
-    OutputRoot      = "outputs/lab3"
-    Methods         = @("sfm", "3dgs", "nerf")
     FpsList         = @(2.0, 5.0)
-    TestRatio       = 0.1
+    OutputRoot      = ""
+    Methods         = @()
     ImageLimit      = $null
-    FfmpegBin       = "ffmpeg"
-    ColmapBin       = "colmap"
-    DgsRepo         = "gaussian-splatting"
-    DgsIterations   = 15000
-    NerfIterations  = 60000
-    SharePoses      = $true
-    Evaluate        = $true
-    Geometry        = $true
-    Qualitative     = $true
-    Lpips           = $true
+    BlurThreshold   = $null
     Force           = $false
     DryRun          = $false
 }
@@ -46,30 +36,27 @@ function Build-Lab3Args {
 
     $sceneTag = "{0}_fps{1}" -f $Cfg.SceneName, (Format-FpsTag $Fps)
     $argsList = @(
+        "--config", $Cfg.ConfigPath,
         "--input-dir", $Cfg.InputDir,
-        "--scene-name", $sceneTag,
-        "--output-root", $Cfg.OutputRoot,
-        "--methods"
+        "--scene-name", $sceneTag
     )
-    $argsList += $Cfg.Methods
     $argsList += @(
-        "--fps", $Fps.ToString([System.Globalization.CultureInfo]::InvariantCulture),
-        "--test-ratio", $Cfg.TestRatio.ToString([System.Globalization.CultureInfo]::InvariantCulture),
-        "--ffmpeg-bin", $Cfg.FfmpegBin,
-        "--colmap-bin", $Cfg.ColmapBin,
-        "--dgs-repo", $Cfg.DgsRepo,
-        "--dgs-iterations", "$($Cfg.DgsIterations)",
-        "--nerf-iterations", "$($Cfg.NerfIterations)"
+        "--fps", $Fps.ToString([System.Globalization.CultureInfo]::InvariantCulture)
     )
 
+    if (-not [string]::IsNullOrWhiteSpace($Cfg.OutputRoot)) {
+        $argsList += @("--output-root", $Cfg.OutputRoot)
+    }
+    if ($Cfg.Methods.Count -gt 0) {
+        $argsList += "--methods"
+        $argsList += $Cfg.Methods
+    }
     if ($null -ne $Cfg.ImageLimit) {
         $argsList += @("--image-limit", "$($Cfg.ImageLimit)")
     }
-    if ($Cfg.SharePoses) { $argsList += "--share-poses" } else { $argsList += "--no-share-poses" }
-    if ($Cfg.Evaluate) { $argsList += "--evaluate" } else { $argsList += "--no-evaluate" }
-    if ($Cfg.Geometry) { $argsList += "--geometry" } else { $argsList += "--no-geometry" }
-    if ($Cfg.Qualitative) { $argsList += "--qualitative" } else { $argsList += "--no-qualitative" }
-    if ($Cfg.Lpips) { $argsList += "--lpips" } else { $argsList += "--no-lpips" }
+    if ($null -ne $Cfg.BlurThreshold) {
+        $argsList += @("--blur-threshold", "$($Cfg.BlurThreshold)")
+    }
     if ($Cfg.Force) { $argsList += "--force" }
     if ($DryRunMode) { $argsList += "--dry-run" }
 
@@ -96,8 +83,9 @@ function Invoke-Lab3SweepRun {
     }
 
     $latestRun = $null
-    if (Test-Path $Cfg.OutputRoot) {
-        $latestRun = Get-ChildItem $Cfg.OutputRoot -Directory |
+    $outputRoot = if ([string]::IsNullOrWhiteSpace($Cfg.OutputRoot)) { "outputs/lab3" } else { $Cfg.OutputRoot }
+    if (Test-Path $outputRoot) {
+        $latestRun = Get-ChildItem $outputRoot -Directory |
             Where-Object { $_.Name -match ("^\d{{8}}_\d{{6}}_{0}$" -f [regex]::Escape($sceneTag)) } |
             Sort-Object LastWriteTime |
             Select-Object -Last 1
@@ -112,9 +100,11 @@ function Invoke-Lab3SweepRun {
 }
 
 Write-Host "Running lab3 full reconstruction sweep sequentially."
+Write-Host ("Config: " + $Sweep.ConfigPath)
 Write-Host ("InputDir: " + $Sweep.InputDir)
 Write-Host ("Base scene: " + $Sweep.SceneName)
 Write-Host ("FPS list: " + (($Sweep.FpsList | ForEach-Object { $_.ToString([System.Globalization.CultureInfo]::InvariantCulture) }) -join ", "))
+if ($null -ne $Sweep.BlurThreshold) { Write-Host ("Blur threshold: " + $Sweep.BlurThreshold) }
 if ($Sweep.DryRun) { Write-Host "DRY RUN - lab3 will print commands without training." }
 
 foreach ($fps in $Sweep.FpsList) {
