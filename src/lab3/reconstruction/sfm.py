@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -106,9 +108,13 @@ class SfMReconstructor(Reconstructor):
                 log_path=context.run_dir / "logs" / "sfm_mapper.log" if context.run_dir else None,
             )
 
+        if not context.dry_run:
+            model_dir = _canonicalize_best_sparse_model(self.config.colmap_bin, sparse_root)
+        else:
+            model_dir = sparse_root / "0"
+
         # mapper writes binary cameras.bin/images.bin/points3D.bin (what 3DGS and
         # nerfstudio expect); also export a human-readable TXT copy for debugging.
-        model_dir = sparse_root / "0"
         with timed_block("sfm_model_converter", context.timings):
             run_cmd(
                 [
@@ -203,3 +209,47 @@ class SfMReconstructor(Reconstructor):
 def _find_dense(method_dir: Path) -> Path | None:
     fused = method_dir / "dense" / "fused.ply"
     return fused if fused.exists() else None
+
+
+def _canonicalize_best_sparse_model(colmap_bin: str, sparse_root: Path) -> Path:
+    """Pick the largest registered COLMAP model and expose it canonically as sparse/0."""
+    candidates = sorted(path for path in sparse_root.iterdir() if path.is_dir())
+    if not candidates:
+        raise Lab3Error(f"COLMAP mapper produced no sparse models under {sparse_root}")
+
+    scored: list[tuple[int, int, Path]] = []
+    for path in candidates:
+        registered, points = _analyze_sparse_model(colmap_bin, path)
+        scored.append((registered, points, path))
+    best_registered, _, best_path = max(scored, key=lambda item: (item[0], item[1], -int(item[2].name)))
+    if best_registered <= 0:
+        raise Lab3Error(f"COLMAP mapper produced no registered images under {sparse_root}")
+
+    canonical = sparse_root / "0"
+    if best_path.resolve() != canonical.resolve():
+        replacement = sparse_root / "_best_model_tmp"
+        if replacement.exists():
+            shutil.rmtree(replacement)
+        shutil.copytree(best_path, replacement)
+        shutil.rmtree(canonical)
+        replacement.rename(canonical)
+    return canonical
+
+
+def _analyze_sparse_model(colmap_bin: str, model_dir: Path) -> tuple[int, int]:
+    result = subprocess.run(
+        [colmap_bin, "model_analyzer", "--path", str(model_dir)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    registered = _extract_model_stat(result.stdout + result.stderr, "Registered images")
+    points = _extract_model_stat(result.stdout + result.stderr, "Points")
+    return registered, points
+
+
+def _extract_model_stat(text: str, label: str) -> int:
+    match = re.search(rf"{re.escape(label)}:\s*(\d+)", text)
+    if match is None:
+        raise Lab3Error(f"Unable to parse '{label}' from COLMAP model_analyzer output")
+    return int(match.group(1))
