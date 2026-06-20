@@ -31,6 +31,8 @@ class Lab3PipelineConfig:
     test_ratio: float = 0.1
     image_limit: int | None = None
     blur_threshold: float | None = None
+    crop_ratio: float = 1.0
+    image_size: tuple[int, int] | None = None
     ffmpeg_bin: str = "ffmpeg"
     force: bool = False
     dry_run: bool = False
@@ -42,7 +44,7 @@ class Lab3PipelineConfig:
     evaluate: bool = True
     geometry: bool = True
     qualitative: bool = True
-    eval_size: tuple[int, int] | None = None
+    eval_size: tuple[int, int] | None = (900, 1600)
     lpips: bool = True
     native_crosscheck: bool = False
     reconstruction: dict[str, Any] = field(default_factory=default_reconstruction_configs)
@@ -77,6 +79,8 @@ def run_pipeline(cfg: Lab3PipelineConfig) -> Path:
             fps=cfg.fps,
             image_limit=cfg.image_limit,
             blur_threshold=cfg.blur_threshold,
+            crop_ratio=cfg.crop_ratio,
+            image_size=cfg.image_size,
             test_ratio=cfg.test_ratio,
             ffmpeg_bin=cfg.ffmpeg_bin,
             force=cfg.force,
@@ -297,6 +301,8 @@ def config_from_dict(data: dict[str, Any]) -> Lab3PipelineConfig:
         test_ratio=float(data.get("test_ratio", 0.1)),
         image_limit=_optional_int(data.get("image_limit")),
         blur_threshold=_optional_float(data.get("blur_threshold")),
+        crop_ratio=float(data.get("crop_ratio", 1.0)),
+        image_size=_parse_size(data.get("image_size"), "image_size"),
         ffmpeg_bin=str(data.get("ffmpeg_bin", "ffmpeg")),
         force=bool(data.get("force", False)),
         dry_run=bool(data.get("dry_run", False)),
@@ -305,7 +311,7 @@ def config_from_dict(data: dict[str, Any]) -> Lab3PipelineConfig:
         evaluate=bool(data.get("evaluate", True)),
         geometry=bool(data.get("geometry", True)),
         qualitative=bool(data.get("qualitative", True)),
-        eval_size=_parse_eval_size(data.get("eval_size")),
+        eval_size=_parse_eval_size(data.get("eval_size", (900, 1600))),
         lpips=bool(data.get("lpips", True)),
         native_crosscheck=bool(data.get("native_crosscheck", False)),
         reconstruction=parse_reconstruction_configs(merged_reconstruction),
@@ -324,12 +330,16 @@ def _optional_float(value: Any) -> float | None:
     return float(value)
 
 
-def _parse_eval_size(value: Any) -> tuple[int, int] | None:
+def _parse_size(value: Any, field: str) -> tuple[int, int] | None:
     if value in (None, ""):
         return None
     if isinstance(value, (list, tuple)) and len(value) == 2:
         return (int(value[0]), int(value[1]))
-    raise Lab3Error(f"eval_size must be a [height, width] pair, got {value!r}")
+    raise Lab3Error(f"{field} must be a [height, width] pair, got {value!r}")
+
+
+def _parse_eval_size(value: Any) -> tuple[int, int] | None:
+    return _parse_size(value, "eval_size")
 
 
 def _read_test_names(test_list: Path) -> list[str]:

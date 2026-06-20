@@ -8,16 +8,30 @@ cd "${ROOT_DIR}"
 # Sweep launcher for Linux.
 # Keep the main experiment settings in CONFIG_PATH; this script only points at
 # a concrete input directory and overrides the fps/scene tag per run.
-CONFIG_PATH="configs/lab3/extra.json"
-INPUT_DIR="input/lab3_dormitory_input"
-SCENE_NAME="dormitory"
-FPS_LIST=("2" "4" "8")
-OUTPUT_ROOT=""
+CONFIG_PATH="${CONFIG_PATH:-configs/lab3/extra.json}"
+INPUT_DIR="${INPUT_DIR:-input/lab3_dormitory_input}"
+SCENE_NAME="${SCENE_NAME:-dormitory}"
+read -r -a FPS_LIST <<< "${FPS_VALUES:-4 8}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-}"
 METHODS=()
-IMAGE_LIMIT=""
-BLUR_THRESHOLD=""
-FORCE=0
-DRY_RUN=0
+DEFAULT_METHODS=(sfm nerf neus 3dgs)
+IMAGE_LIMIT="${IMAGE_LIMIT:-}"
+BLUR_THRESHOLD="${BLUR_THRESHOLD:-10.0}"
+FORCE="${FORCE:-0}"
+DRY_RUN="${DRY_RUN:-0}"
+
+if [[ -n "${METHODS_VALUES:-}" ]]; then
+    read -r -a METHODS <<< "${METHODS_VALUES}"
+fi
+
+if [[ "${FORCE}" != "0" && "${FORCE}" != "1" ]]; then
+    echo "FORCE must be 0 or 1" >&2
+    exit 2
+fi
+if [[ "${DRY_RUN}" != "0" && "${DRY_RUN}" != "1" ]]; then
+    echo "DRY_RUN must be 0 or 1" >&2
+    exit 2
+fi
 
 RUN_SUMMARY=()
 
@@ -47,6 +61,9 @@ build_lab3_args() {
     if (( ${#METHODS[@]} > 0 )); then
         args+=("--methods")
         args+=("${METHODS[@]}")
+    else
+        args+=("--methods")
+        args+=("${DEFAULT_METHODS[@]}")
     fi
     if [[ -n "${IMAGE_LIMIT}" ]]; then
         args+=("--image-limit" "${IMAGE_LIMIT}")
@@ -113,6 +130,11 @@ echo "Config: ${CONFIG_PATH}"
 echo "InputDir: ${INPUT_DIR}"
 echo "Base scene: ${SCENE_NAME}"
 echo "FPS list: ${FPS_LIST[*]}"
+if (( ${#METHODS[@]} > 0 )); then
+    echo "Methods: ${METHODS[*]}"
+else
+    echo "Methods: ${DEFAULT_METHODS[*]} (default order)"
+fi
 if [[ -n "${BLUR_THRESHOLD}" ]]; then
     echo "Blur threshold: ${BLUR_THRESHOLD}"
 fi
@@ -120,7 +142,8 @@ if [[ "${DRY_RUN}" -eq 1 ]]; then
     echo "DRY RUN - lab3 will print commands without training."
 fi
 
-for fps in "${FPS_LIST[@]}"; do
+for idx in "${!FPS_LIST[@]}"; do
+    fps="${FPS_LIST[$idx]}"
     invoke_lab3_sweep_run "${fps}" "${DRY_RUN}"
 done
 

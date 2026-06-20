@@ -41,6 +41,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         help="drop images/frames whose Laplacian-variance sharpness score falls below this threshold",
     )
+    parser.add_argument(
+        "--crop-ratio",
+        type=float,
+        help="center-crop this fraction of both image axes before reconstruction",
+    )
+    parser.add_argument(
+        "--image-size",
+        nargs=2,
+        type=int,
+        metavar=("HEIGHT", "WIDTH"),
+        help="resize prepared images after cropping",
+    )
     parser.add_argument("--ffmpeg-bin", help="ffmpeg executable")
     add_reconstruction_cli_arguments(parser)
     parser.add_argument("--timestamp", help="fixed timestamp tag for reproducible output paths")
@@ -148,6 +160,8 @@ def _build_config(args: argparse.Namespace) -> Lab3PipelineConfig:
         "test_ratio": args.test_ratio,
         "image_limit": args.image_limit,
         "blur_threshold": args.blur_threshold,
+        "crop_ratio": args.crop_ratio,
+        "image_size": tuple(args.image_size) if args.image_size else None,
         "ffmpeg_bin": args.ffmpeg_bin,
         "timestamp": args.timestamp,
         "force": True if args.force else None,

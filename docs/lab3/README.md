@@ -73,7 +73,15 @@ SDFStudio 所需的 `meta_data.json` 并归一化场景，因此应同时启用 
 | `--native-crosscheck` | 额外运行 3DGS/nerfstudio 原生指标作交叉校验；会重复部分计算，默认关闭 |
 | `--eval-size H W` | 统一缩放到该分辨率再算指标（公平） |
 | `--test-ratio 0.1` | held-out 比例（写 `prepared/test.txt`） |
+| `--crop-ratio 0.8` | 从图像中心保留宽、高各 80%，去除广角边缘畸变 |
+| `--image-size 900 1600` | 中心裁剪后统一缩放到 1600×900 |
+
+`reconstruction.nerf.num_downscales` 默认是 `0`：统一预处理已输出 1600×900，因而不再额外保存未使用的 1/2、1/4、1/8 图像金字塔。
+
+3DGS、NeRF、NeuS 均使用显式 `save_iterations` 列表，而不是固定保存间隔。3DGS 的这些节点也会作为 `test_iterations`，在日志中记录每个快照对应的 train/test PSNR，便于报告绘制收敛曲线。
+| `--eval-size 900 1600` | 将各方法 GT/渲染统一到 1600×900 后计算公平指标（不改变训练分辨率） |
 | `--dgs-iterations 7000` / `--nerf-iterations 30000` / `--neus-iterations 20001` | 训练迭代数 |
+| `--dgs-camera-cache-size 4` | 3DGS 图像留在 CPU，每次只缓存指定数量到 GPU；块内用尽才切换。显存紧张可降到 2 |
 | `--timestamp <tag>` | 固定输出目录后缀，便于复现 |
 
 ### 批处理脚本

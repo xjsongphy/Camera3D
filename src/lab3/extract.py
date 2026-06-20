@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageOps
 
 from lab3.common import IMAGE_SUFFIXES, VIDEO_SUFFIXES, Lab3Error, copy_file, require_tool, run_cmd, slugify
 
@@ -18,6 +18,8 @@ class ExtractionConfig:
     fps: float = 2.0
     image_limit: int | None = None
     blur_threshold: float | None = None
+    crop_ratio: float = 1.0
+    image_size: tuple[int, int] | None = None
     test_ratio: float = 0.1
     ffmpeg_bin: str = "ffmpeg"
     force: bool = False
@@ -45,6 +47,10 @@ def prepare_dataset(cfg: ExtractionConfig) -> PreparedDataset:
         raise Lab3Error(f"fps must be positive, got {cfg.fps}")
     if cfg.blur_threshold is not None and cfg.blur_threshold < 0:
         raise Lab3Error(f"blur_threshold must be non-negative, got {cfg.blur_threshold}")
+    if not 0.0 < cfg.crop_ratio <= 1.0:
+        raise Lab3Error(f"crop_ratio must be in (0, 1], got {cfg.crop_ratio}")
+    if cfg.image_size is not None and any(value <= 0 for value in cfg.image_size):
+        raise Lab3Error(f"image_size values must be positive, got {cfg.image_size}")
     if not 0.0 <= cfg.test_ratio < 1.0:
         raise Lab3Error(f"test_ratio must be in [0, 1), got {cfg.test_ratio}")
     if not cfg.input_dir.exists():
@@ -75,13 +81,19 @@ def prepare_dataset(cfg: ExtractionConfig) -> PreparedDataset:
     for index, image_path in enumerate(images, start=1):
         if cfg.image_limit is not None and len(copied_names) >= cfg.image_limit:
             break
-        blur_score = compute_blur_score(image_path) if cfg.blur_threshold is not None else None
-        if blur_score is not None and blur_score < cfg.blur_threshold:
-            blurry_rejected_count += 1
-            continue
+        blur_score = None
         image_name = f"img_{index:06d}{image_path.suffix.lower()}"
         if not cfg.dry_run:
-            copy_file(image_path, images_dir / image_name, overwrite=cfg.force)
+            destination = images_dir / image_name
+            if cfg.crop_ratio == 1.0 and cfg.image_size is None:
+                copy_file(image_path, destination, overwrite=cfg.force)
+            else:
+                center_crop_and_resize(image_path, destination, cfg.crop_ratio, cfg.image_size)
+            blur_score = compute_blur_score(destination) if cfg.blur_threshold is not None else None
+            if blur_score is not None and blur_score < cfg.blur_threshold:
+                blurry_rejected_count += 1
+                destination.unlink(missing_ok=True)
+                continue
         copied_names.append(image_name)
         manifest_rows.append(
             {
@@ -96,6 +108,14 @@ def prepare_dataset(cfg: ExtractionConfig) -> PreparedDataset:
     for video_index, video_path in enumerate(videos, start=1):
         frame_prefix = f"vid_{video_index:03d}_{slugify(video_path.stem)}"
         pattern = images_dir / f"{frame_prefix}_%06d.jpg"
+        video_filter = [f"fps={cfg.fps}"]
+        if cfg.crop_ratio < 1.0:
+            video_filter.append(
+                f"crop=trunc(iw*{cfg.crop_ratio}/2)*2:trunc(ih*{cfg.crop_ratio}/2)*2"
+            )
+        if cfg.image_size is not None:
+            height, width = cfg.image_size
+            video_filter.append(f"scale={width}:{height}:flags=lanczos")
         run_cmd(
             [
                 cfg.ffmpeg_bin,
@@ -103,7 +123,7 @@ def prepare_dataset(cfg: ExtractionConfig) -> PreparedDataset:
                 "-i",
                 str(video_path),
                 "-vf",
-                f"fps={cfg.fps}",
+                ",".join(video_filter),
                 "-q:v",
                 "2",
                 str(pattern),
@@ -210,3 +230,28 @@ def compute_blur_score(path: Path) -> float:
         - 4.0 * center
     )
     return float(np.var(laplacian))
+
+
+def center_crop_and_resize(
+    source: Path,
+    destination: Path,
+    crop_ratio: float,
+    image_size: tuple[int, int] | None,
+) -> None:
+    """Center-crop both axes by ``crop_ratio``, then resize to (height, width)."""
+    with Image.open(source) as opened:
+        image = ImageOps.exif_transpose(opened)
+        width, height = image.size
+        crop_width = max(1, round(width * crop_ratio))
+        crop_height = max(1, round(height * crop_ratio))
+        left = (width - crop_width) // 2
+        top = (height - crop_height) // 2
+        image = image.crop((left, top, left + crop_width, top + crop_height))
+        if image_size is not None:
+            target_height, target_width = image_size
+            image = image.resize((target_width, target_height), Image.Resampling.LANCZOS)
+        if destination.suffix.lower() in {".jpg", ".jpeg"}:
+            image = image.convert("RGB")
+            image.save(destination, quality=95)
+        else:
+            image.save(destination)
