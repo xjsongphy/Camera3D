@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import argparse
+import importlib
 import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -11,8 +12,16 @@ import numpy as np
 import yaml
 
 from lab3.common import Lab3Error, monitored_block, require_tool, run_cmd, timed_block
+from lab3.evaluate import config_iterations, metrics_row, model_size_mb
 from lab3.reconstruction.base import ReconstructionContext, Reconstructor, ViewerTarget
-from lab3.reconstruction.nerfstudio import evaluate_nerfstudio, latest_config, train_monitor_command
+from lab3.reconstruction.nerfstudio import (
+    evaluate_nerfstudio,
+    latest_config,
+    model_files,
+    scheduled_train_command,
+    train_monitor_command,
+    validate_save_iterations,
+)
 from lab3.training_artifacts import export_training_scalar_artifacts
 
 
@@ -23,8 +32,8 @@ class NeuSConfig:
     train_bin: str = "ns-train"
     method: str = "neus-facto"
     max_num_iterations: int | None = 20001
-    save_every: int | None = 2000
-    save_only_latest_checkpoint: bool = False
+    save_iterations: tuple[int, ...] = (2000, 5000, 10000, 20000)
+    train_num_rays_per_batch: int | None = None
     colmap_model: Path | None = None
     scene_scale: float = 2.0
     export_mesh: bool = True
@@ -36,8 +45,8 @@ def config_from_dict(values: dict) -> NeuSConfig:
         train_bin=str(values.get("train_bin", "ns-train")),
         method=str(values.get("method", "neus-facto")),
         max_num_iterations=_optional_int(values.get("max_num_iterations", 20001)),
-        save_every=_optional_int(values.get("save_every", 2000)),
-        save_only_latest_checkpoint=bool(values.get("save_only_latest_checkpoint", False)),
+        save_iterations=tuple(int(step) for step in values.get("save_iterations", (2000, 5000, 10000, 20000))),
+        train_num_rays_per_batch=_optional_int(values.get("train_num_rays_per_batch")),
         colmap_model=(
             None if values.get("colmap_model") in (None, "")
             else Path(str(values["colmap_model"]))
@@ -50,14 +59,27 @@ def config_from_dict(values: dict) -> NeuSConfig:
 
 def add_cli_arguments(parser) -> None:
     parser.add_argument("--neus-iterations", type=int, help="NeuS/NeuS-facto training iterations")
-    parser.add_argument("--neus-save-every", type=int, help="save NeuS checkpoint every N iterations")
+    parser.add_argument("--neus-save-iterations", nargs="+", type=int, help="explicit NeuS checkpoint iterations")
+    parser.add_argument(
+        "--neus-train-rays-per-batch",
+        type=int,
+        help="override NeuS train_num_rays_per_batch",
+    )
+    parser.add_argument(
+        "--neus-export-mesh",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="export NeuS mesh after training (default: on)",
+    )
 
 
 def cli_overrides(arguments) -> dict:
     return {
         key: value for key, value in {
             "max_num_iterations": arguments.neus_iterations,
-            "save_every": arguments.neus_save_every,
+            "save_iterations": arguments.neus_save_iterations,
+            "train_num_rays_per_batch": arguments.neus_train_rays_per_batch,
+            "export_mesh": arguments.neus_export_mesh,
         }.items() if value is not None
     }
 
@@ -125,14 +147,24 @@ class NeuSReconstructor(Reconstructor):
         ]
         if self.config.max_num_iterations is not None:
             train_cmd.extend(["--max-num-iterations", str(self.config.max_num_iterations)])
-        if self.config.save_every is not None:
-            train_cmd.extend(["--steps-per-save", str(self.config.save_every)])
-        train_cmd.extend(
-            ["--save-only-latest-checkpoint", str(self.config.save_only_latest_checkpoint)]
+        if self.config.train_num_rays_per_batch is not None:
+            if self.config.train_num_rays_per_batch <= 0:
+                raise Lab3Error("NeuS train_num_rays_per_batch must be positive")
+            train_cmd.extend(
+                [
+                    "--pipeline.datamanager.train-num-rays-per-batch",
+                    str(self.config.train_num_rays_per_batch),
+                ]
+            )
+        save_iterations = validate_save_iterations(
+            self.config.max_num_iterations, self.config.save_iterations
         )
+        train_cmd.extend(["--save-only-latest-checkpoint", "False"])
         train_cmd.extend(
             ["sdfstudio-data", "--data", str(train_dataset_dir), "--auto-orient", "False"]
         )
+        if save_iterations:
+            train_cmd = scheduled_train_command(train_cmd, save_iterations)
         wrapped_cmd = train_monitor_command(train_cmd, logs / "neus_train.log")
         with monitored_block(
             "neus_train", context.timings, context.peaks, enabled=not context.dry_run
@@ -180,15 +212,35 @@ class NeuSReconstructor(Reconstructor):
                 evaluation_config,
             )
 
-        return evaluate_nerfstudio(
-            self.name,
-            context,
-            eval_config,
-            self.config,
-            eval_dir,
-            notes="NeuS trains on train-only metadata and evaluates with a held-out config in the same coordinates",
-            config_path=evaluation_config if not context.dry_run else None,
-        )
+        try:
+            return evaluate_nerfstudio(
+                self.name,
+                context,
+                eval_config,
+                self.config,
+                eval_dir,
+                notes="NeuS trains on train-only metadata and evaluates with a held-out config in the same coordinates",
+                config_path=evaluation_config if not context.dry_run else None,
+            )
+        except Lab3Error as exc:
+            return metrics_row(
+                self.name,
+                {"psnr": "N/A", "ssim": "N/A", "lpips": "N/A"},
+                metric_source="geometry-only",
+                held_out="render skipped",
+                train_time_sec=context.timings.get("neus_train"),
+                iterations=config_iterations(self.config, "max_num_iterations"),
+                gpu_mem_peak_gb=context.peaks.get("neus_train"),
+                render_fps=float("nan"),
+                model_size_mb=(
+                    model_size_mb(model_files(context.run_dir / "results" / self.name))
+                    if not context.dry_run else float("nan")
+                ),
+                notes=(
+                    "NeuS training and mesh export completed, but held-out RGB rendering was skipped: "
+                    f"{exc}"
+                ),
+            ) | {"psnr": "N/A", "ssim": "N/A", "lpips": "N/A", "render_fps": "N/A"}
 
     def stage_geometry(self, context: ReconstructionContext) -> list[Path]:
         from lab3.geometry import stage_exported_geometry
@@ -403,9 +455,7 @@ def _export_mesh(argv: list[str]) -> None:
     if args.resolution < 512 or args.resolution % 512 != 0:
         raise SystemExit("resolution must be a positive multiple of 512")
 
-    from nerfstudio.exporter.marching_cubes import generate_mesh_with_multires_marching_cubes
-    from nerfstudio.fields.sdf_field import SDFField
-    from nerfstudio.utils.eval_utils import eval_setup
+    generate_mesh_with_multires_marching_cubes, SDFField, eval_setup = _load_nerfstudio_export_modules()
 
     _, pipeline, _, _ = eval_setup(args.load_config, test_mode="inference")
     field = getattr(pipeline.model, "field", None)
@@ -423,6 +473,36 @@ def _export_mesh(argv: list[str]) -> None:
     args.output_path.parent.mkdir(parents=True, exist_ok=True)
     mesh.export(args.output_path)
     print(f"NeuS mesh: {args.output_path}")
+
+
+def _load_nerfstudio_export_modules():
+    """Import nerfstudio exporter modules even when this script is named ``neus.py``.
+
+    Executing this file directly prepends its directory to ``sys.path``. If a
+    local shadow module named ``nerfstudio`` is already present in
+    ``sys.modules``, importing installed nerfstudio packages can fail with
+    ``'nerfstudio' is not a package``. Temporarily remove the helper directory
+    and clear only the shadowed module entry.
+    """
+    helper_dir = str(Path(__file__).resolve().parent)
+    original_path = list(sys.path)
+    try:
+        sys.path[:] = [entry for entry in sys.path if Path(entry or ".").resolve() != Path(helper_dir)]
+        shadow = sys.modules.get("nerfstudio")
+        if shadow is not None:
+            shadow_file = getattr(shadow, "__file__", None)
+            if shadow_file and Path(shadow_file).resolve() == Path(__file__).resolve():
+                sys.modules.pop("nerfstudio", None)
+        marching_cubes = importlib.import_module("nerfstudio.exporter.marching_cubes")
+        sdf_field = importlib.import_module("nerfstudio.fields.sdf_field")
+        eval_utils = importlib.import_module("nerfstudio.utils.eval_utils")
+        return (
+            marching_cubes.generate_mesh_with_multires_marching_cubes,
+            sdf_field.SDFField,
+            eval_utils.eval_setup,
+        )
+    finally:
+        sys.path[:] = original_path
 
 
 def main() -> None:

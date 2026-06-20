@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import re
 import subprocess
 import sys
@@ -10,7 +11,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 
-from lab3.common import run_cmd, timed_block
+from lab3.common import Lab3Error, run_cmd, timed_block
 from lab3.evaluate import (
     config_iterations,
     metrics_row,
@@ -27,6 +28,34 @@ def train_monitor_command(command: list[str], log_path: Path) -> list[str]:
         sys.executable, str(Path(__file__).resolve()), "train-monitor",
         "--log-path", str(log_path), "--", *command,
     ]
+
+
+def scheduled_train_command(command: list[str], save_iterations: tuple[int, ...]) -> list[str]:
+    """Run ns-train with explicit checkpoint steps via a local adapter."""
+    if not command or Path(command[0]).name != "ns-train":
+        raise Lab3Error("Explicit save_iterations currently require train_bin='ns-train'")
+    return [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "train-scheduled",
+        "--save-iterations",
+        *[str(step) for step in save_iterations],
+        "--",
+        *command[1:],
+    ]
+
+
+def validate_save_iterations(
+    max_iterations: int | None, save_iterations: tuple[int, ...]
+) -> tuple[int, ...]:
+    nodes = tuple(sorted(set(save_iterations)))
+    if any(node <= 0 for node in nodes):
+        raise Lab3Error("Nerfstudio save_iterations must contain only positive integers")
+    if max_iterations is not None and any(node > max_iterations for node in nodes):
+        raise Lab3Error(
+            f"Nerfstudio save_iterations cannot exceed max_num_iterations={max_iterations}: {nodes}"
+        )
+    return nodes
 
 
 def evaluate_nerfstudio(
@@ -99,9 +128,12 @@ def latest_config(train_dir: Path) -> Path | None:
 
 
 def model_files(method_dir: Path) -> list[Path]:
+    """Return the latest model artifact, excluding report-only snapshots."""
     files: list[Path] = []
     for suffix in ("*.pt", "*.ckpt", "*.safetensors"):
-        files.extend(method_dir.rglob(suffix))
+        matches = sorted(method_dir.rglob(suffix))
+        if matches:
+            files.append(matches[-1])
     return files
 
 
@@ -176,6 +208,65 @@ def _run_train_monitor(argv: list[str]) -> None:
         )
 
 
+def _run_scheduled_train(argv: list[str]) -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--save-iterations", nargs="+", type=int, required=True)
+    parser.add_argument("cmd", nargs=argparse.REMAINDER)
+    args = parser.parse_args(argv)
+    forwarded = args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd
+    if not forwarded:
+        raise SystemExit("train-scheduled requires ns-train arguments after '--'")
+
+    # Trainer calls its imported step_check for logging, evaluation and saving.
+    # A unique sentinel changes only the checkpoint branch; all other schedules
+    # retain Nerfstudio's native behavior.
+    sentinel = -2_147_483_647
+    scheduled = set(args.save_iterations)
+    trainer_module, entrypoint = _load_nerfstudio_train_entrypoint()
+
+    native_step_check = trainer_module.step_check
+    native_trainer_init = trainer_module.Trainer.__init__
+
+    def explicit_step_check(step: int, step_size: int, run_at_zero: bool = False) -> bool:
+        if step_size == sentinel:
+            return step in scheduled
+        return native_step_check(step, step_size, run_at_zero=run_at_zero)
+
+    trainer_module.step_check = explicit_step_check
+
+    def scheduled_trainer_init(self, config, *init_args, **init_kwargs):
+        config.steps_per_save = sentinel
+        native_trainer_init(self, config, *init_args, **init_kwargs)
+
+    trainer_module.Trainer.__init__ = scheduled_trainer_init
+    sys.argv = ["ns-train", *forwarded]
+    entrypoint()
+
+
+def _load_nerfstudio_train_entrypoint():
+    """Import nerfstudio even when this helper file is named ``nerfstudio.py``.
+
+    When Python executes this file directly, its directory is inserted at the
+    front of ``sys.path``. A later ``import nerfstudio`` can then resolve back to
+    this file instead of the installed package, producing ``'nerfstudio' is not a
+    package``. Temporarily remove that directory and clear the shadow module.
+    """
+    helper_dir = str(Path(__file__).resolve().parent)
+    original_path = list(sys.path)
+    try:
+        sys.path[:] = [entry for entry in sys.path if Path(entry or ".").resolve() != Path(helper_dir)]
+        shadow = sys.modules.get("nerfstudio")
+        if shadow is not None:
+            shadow_file = getattr(shadow, "__file__", None)
+            if shadow_file and Path(shadow_file).resolve() == Path(__file__).resolve():
+                sys.modules.pop("nerfstudio", None)
+        trainer_module = importlib.import_module("nerfstudio.engine.trainer")
+        entrypoint = importlib.import_module("nerfstudio.scripts.train").entrypoint
+        return trainer_module, entrypoint
+    finally:
+        sys.path[:] = original_path
+
+
 def _safe_write(text: str) -> None:
     try:
         print(text, end="")
@@ -185,9 +276,14 @@ def _safe_write(text: str) -> None:
 
 
 def main() -> None:
-    if len(sys.argv) < 2 or sys.argv[1] != "train-monitor":
-        raise SystemExit("usage: nerfstudio.py train-monitor ...")
-    _run_train_monitor(sys.argv[2:])
+    if len(sys.argv) < 2:
+        raise SystemExit("usage: nerfstudio.py {train-monitor|train-scheduled} ...")
+    if sys.argv[1] == "train-monitor":
+        _run_train_monitor(sys.argv[2:])
+    elif sys.argv[1] == "train-scheduled":
+        _run_scheduled_train(sys.argv[2:])
+    else:
+        raise SystemExit("usage: nerfstudio.py {train-monitor|train-scheduled} ...")
 
 
 if __name__ == "__main__":

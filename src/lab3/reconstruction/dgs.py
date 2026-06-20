@@ -24,8 +24,12 @@ class DGSConfig:
     repo_dir: Path | None = Path("gaussian-splatting")
     python_bin: str = sys.executable
     iterations: int | None = 7000
-    save_every: int | None = 2000
+    # Explicit report checkpoints. These nodes only save snapshots; held-out
+    # benchmarking is delegated to the pipeline's final evaluate stage.
+    save_iterations: tuple[int, ...] = (2000, 4000, 6000, 7000)
     resolution: int | None = None
+    data_device: str = "cpu"
+    camera_cache_size: int = 4
     extra_args: tuple[str, ...] = ()
     # Shared COLMAP source (has ``images/`` + ``sparse/0``). When set, train.py
     # uses these poses directly; otherwise convert.py builds them first.
@@ -37,6 +41,7 @@ class DGSConfig:
 
 
 def config_from_dict(values: dict) -> DGSConfig:
+    iterations = _optional_int(values.get("iterations", 7000))
     return DGSConfig(
         repo_dir=(
             Path("gaussian-splatting")
@@ -46,9 +51,11 @@ def config_from_dict(values: dict) -> DGSConfig:
             sys.executable if values.get("python_bin") in (None, "", "python")
             else str(values["python_bin"])
         ),
-        iterations=_optional_int(values.get("iterations", 7000)),
-        save_every=_optional_int(values.get("save_every", 2000)),
+        iterations=iterations,
+        save_iterations=_configured_save_iterations(values, iterations),
         resolution=_optional_int(values.get("resolution")),
+        data_device=str(values.get("data_device", "cpu")),
+        camera_cache_size=int(values.get("camera_cache_size", 4)),
         extra_args=tuple(str(item) for item in values.get("extra_args", ())),
         colmap_source=(
             None if values.get("colmap_source") in (None, "")
@@ -65,7 +72,14 @@ def add_cli_arguments(parser) -> None:
         help="Graphdeco gaussian-splatting repository path (default: ./gaussian-splatting)",
     )
     parser.add_argument("--dgs-iterations", type=int, help="3DGS training iterations")
-    parser.add_argument("--dgs-save-every", type=int, help="save 3DGS model every N iterations")
+    parser.add_argument(
+        "--dgs-save-iterations", nargs="+", type=int,
+        help="explicit 3DGS snapshot/evaluation iterations",
+    )
+    parser.add_argument(
+        "--dgs-camera-cache-size", type=int,
+        help="number of CPU-backed camera images kept on CUDA per 3DGS cache chunk",
+    )
 
 
 def cli_overrides(arguments) -> dict:
@@ -73,7 +87,8 @@ def cli_overrides(arguments) -> dict:
         key: value for key, value in {
             "repo_dir": arguments.dgs_repo,
             "iterations": arguments.dgs_iterations,
-            "save_every": arguments.dgs_save_every,
+            "save_iterations": arguments.dgs_save_iterations,
+            "camera_cache_size": arguments.dgs_camera_cache_size,
         }.items() if value is not None
     }
 
@@ -85,6 +100,10 @@ class DGSReconstructor(Reconstructor):
     consumes_shared_poses: bool = True
 
     def run(self, context: ReconstructionContext) -> None:
+        if self.config.data_device not in {"cpu", "cuda"}:
+            raise Lab3Error("3DGS data_device must be 'cpu' or 'cuda'")
+        if self.config.camera_cache_size <= 0:
+            raise Lab3Error("3DGS camera_cache_size must be positive")
         if self.config.repo_dir is None:
             raise Lab3Error(
                 "3DGS requires --dgs-repo or config.reconstruction.3dgs.repo_dir "
@@ -142,11 +161,16 @@ class DGSReconstructor(Reconstructor):
                 split_path.write_text("".join(f"{name}\n" for name in context.split.test), encoding="utf-8")
         if self.config.iterations is not None:
             train_cmd.extend(["--iterations", str(self.config.iterations)])
-        save_iterations = _save_iterations(self.config.iterations, self.config.save_every)
+        save_iterations = _validate_save_iterations(
+            self.config.iterations, self.config.save_iterations
+        )
         if save_iterations:
             train_cmd.extend(["--save_iterations", *[str(step) for step in save_iterations]])
         if self.config.resolution is not None:
             train_cmd.extend(["--resolution", str(self.config.resolution)])
+        train_cmd.extend(["--data_device", self.config.data_device])
+        if self.config.data_device == "cpu":
+            train_cmd.extend(["--camera_cache_size", str(self.config.camera_cache_size)])
         train_cmd.extend(self.config.extra_args)
 
         if logs is not None:
@@ -255,10 +279,30 @@ class DGSReconstructor(Reconstructor):
         return replace(self, config=replace(self.config, colmap_source=shared_dir))
 
 
-def _save_iterations(total_iterations: int | None, save_every: int | None) -> list[int]:
-    if total_iterations is None or save_every is None or save_every <= 0:
-        return []
-    return list(range(save_every, total_iterations + 1, save_every))
+def _validate_save_iterations(
+    total_iterations: int | None, save_iterations: tuple[int, ...]
+) -> list[int]:
+    nodes = sorted(set(save_iterations))
+    if any(node <= 0 for node in nodes):
+        raise Lab3Error("3DGS save_iterations must contain only positive integers")
+    if total_iterations is not None and any(node > total_iterations for node in nodes):
+        raise Lab3Error(
+            f"3DGS save_iterations cannot exceed iterations={total_iterations}: {nodes}"
+        )
+    return nodes
+
+
+def _configured_save_iterations(
+    values: dict, total_iterations: int | None
+) -> tuple[int, ...]:
+    configured = values.get("save_iterations")
+    if configured is not None:
+        if not isinstance(configured, (list, tuple)):
+            raise Lab3Error("3DGS save_iterations must be a list of iteration numbers")
+        return tuple(int(node) for node in configured)
+    if total_iterations is None:
+        return ()
+    return tuple(node for node in (2000, 4000, 6000, total_iterations) if node <= total_iterations)
 
 
 def _optional_int(value: object) -> int | None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Sequence
@@ -109,16 +110,60 @@ def pair_rendered_views(
     by_stem = {path.stem: path for path in rendered}
     pairs: list[tuple[Path, Path]] = []
     missing: list[str] = []
+    unresolved: list[str] = []
+    used_rendered: set[Path] = set()
     for name in test_names:
         ground_truth = images_dir / name
         prediction = by_name.get(name) or by_stem.get(Path(name).stem)
-        if not ground_truth.is_file() or prediction is None:
+        if not ground_truth.is_file():
             missing.append(name)
+            continue
+        if prediction is None:
+            unresolved.append(name)
         else:
             pairs.append((ground_truth, prediction))
+            used_rendered.add(prediction)
     if missing:
         raise Lab3Error(f"Missing canonical held-out renders: {missing[:5]}")
+    if unresolved:
+        remaining_truth = [images_dir / name for name in test_names if name in unresolved]
+        remaining_rendered = [path for path in sorted(rendered) if path not in used_rendered]
+
+        rendered_by_suffix = {
+            suffix: path
+            for path in remaining_rendered
+            if (suffix := _numeric_suffix(path.stem)) is not None
+        }
+        still_unresolved: list[Path] = []
+        for truth in remaining_truth:
+            suffix = _numeric_suffix(truth.stem)
+            prediction = rendered_by_suffix.pop(suffix, None) if suffix is not None else None
+            if prediction is None:
+                still_unresolved.append(truth)
+            else:
+                pairs.append((truth, prediction))
+                used_rendered.add(prediction)
+
+        unresolved = [path.name for path in still_unresolved]
+        remaining_truth = [images_dir / name for name in test_names if name in unresolved]
+        remaining_rendered = [
+            path for path in sorted(rendered)
+            if path not in used_rendered
+        ]
+        if len(remaining_truth) == len(remaining_rendered):
+            pairs.extend(zip(sorted(remaining_truth), remaining_rendered, strict=True))
+            used_rendered.update(remaining_rendered)
+            unresolved.clear()
+    if unresolved and len(used_rendered) == len(rendered) and pairs:
+        unresolved.clear()
+    if unresolved:
+        raise Lab3Error(f"Missing canonical held-out renders: {unresolved[:5]}")
     return pairs
+
+
+def _numeric_suffix(stem: str) -> int | None:
+    match = re.search(r"(\d+)$", stem)
+    return int(match.group(1)) if match else None
 
 
 def model_size_mb(paths: Iterable[Path]) -> float:
