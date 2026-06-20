@@ -1,0 +1,69 @@
+{
+  "input_dir": "input/lab3_boya_far",
+  "scene_name": "boya_far",
+  "output_root": "outputs/lab3",
+  "methods": ["sfm", "3dgs", "nerf", "neus"],
+  "fps": 2.0,
+  "test_ratio": 0.1,
+  "image_limit": null,
+  "blur_threshold": null,
+  "crop_ratio": 1.0,
+  "image_size": [1200, 1600],
+  "ffmpeg_bin": "ffmpeg",
+  "share_poses": true,
+  "evaluate": true,
+  "geometry": true,
+  "qualitative": true,
+  "eval_size": [1200, 1600],
+  "lpips": true,
+  "native_crosscheck": false,
+  "reconstruction": {
+    "sfm": {
+      "colmap_bin": "colmap",
+      "matcher": "sequential",
+      "feature_extractor": "superpoint_aachen",
+      "feature_matcher": "superpoint+lightglue",
+      "python_bin": "python",
+      "pair_overlap": 10,
+      "quadratic_overlap": true,
+      "camera_model": "PINHOLE",
+      "single_camera": true,
+      "dense": false
+    },
+    "3dgs": {
+      "repo_dir": "gaussian-splatting",
+      "python_bin": "python",
+      "iterations": 40000,
+      "save_iterations": [],
+      "resolution": 1600,
+      "data_device": "cpu",
+      "camera_cache_size": 8,
+      "extra_args": [],
+      "colmap_source": null,
+      "colmap_bin": "colmap",
+      "eval_split": true
+    },
+    "nerf": {
+      "process_bin": "ns-process-data",
+      "train_bin": "ns-train",
+      "method": "nerfacto",
+      "max_num_iterations": 40000,
+      "save_iterations": [],
+      "train_num_rays_per_batch": 8192,
+      "num_downscales": 0,
+      "skip_process_data": false,
+      "colmap_model": null
+    },
+    "neus": {
+      "train_bin": "ns-train",
+      "method": "neus-facto",
+      "max_num_iterations": 40001,
+      "save_iterations": [2000, 5000, 10000, 20000, 40000],
+      "train_num_rays_per_batch": 4096,
+      "colmap_model": null,
+      "scene_scale": 2.0,
+      "export_mesh": true,
+      "mesh_resolution": 512
+    }
+  }
+}

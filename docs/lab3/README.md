@@ -19,6 +19,12 @@ uv sync --group lab3 --extra cu124
 - `colmap`（SfM、共享位姿、dense；CUDA 版用于 MVS）
 - `ffmpeg`（视频抽帧）
 
+可选学习式 SfM 依赖（仅当 `reconstruction.sfm.feature_extractor` / `feature_matcher` 显式切到 HLOC 预设时需要）：
+
+- `hloc`
+- `pycolmap`
+- `torch`
+
 外部代码库（完整训练/评测需要）：
 
 - `nerfstudio`：已随 `uv sync --group lab3 --extra cpu|cu124` 安装（提供 `ns-process-data`/`ns-train`/`ns-eval`/`ns-render`）
@@ -75,6 +81,8 @@ SDFStudio 所需的 `meta_data.json` 并归一化场景，因此应同时启用 
 | `--test-ratio 0.1` | held-out 比例（写 `prepared/test.txt`） |
 | `--crop-ratio 0.8` | 从图像中心保留宽、高各 80%，去除广角边缘畸变 |
 | `--image-size 900 1600` | 中心裁剪后统一缩放到 1600×900 |
+| `--sfm-feature-extractor superpoint_aachen` | 可选切换 SfM 局部特征提取器；默认仍是 `sift` |
+| `--sfm-feature-matcher superpoint+lightglue` | 可选切换 SfM 学习式匹配器；默认仍走当前 COLMAP 匹配流程 |
 
 `reconstruction.nerf.num_downscales` 默认是 `0`：统一预处理已输出 1600×900，因而不再额外保存未使用的 1/2、1/4、1/8 图像金字塔。
 
@@ -165,3 +173,29 @@ uv run lab3 --view-run outputs/lab3/<ts>_<scene> --methods sfm 3dgs --no-nerfstu
 - **几何指标**：以 COLMAP dense 点云为 **proxy 而非真值**，比较前双方下采样到 4096 点（`downsample_cap`）；F-score 阈值取 proxy bbox 对角线的 0.5% / 1%，尺度无关。`.ply` 加载需 Open3D，缺失则跳过并写说明行。
 - **公平性**：默认四方法共享唯一一套全视角 COLMAP 位姿；相机位姿估计可读取全部图片，但 3DGS、NeRF、NeuS 的模型训练只消费 `prepared/train.txt`，并统一在 `prepared/test.txt` 上评测。3DGS adapter 通过其已有的 `sparse/0/test.txt` 能力读取 manifest，NeRF 使用 transforms 显式 split，NeuS 使用同一归一化坐标下的 train/test 元数据。`share_poses=true` 却缺少 SfM 会提前失败，避免静默重复 COLMAP。SfM 为显式点云，RGB 新视角 PSNR 标 `N/A`。
 - **分层**：`pipeline` 只遍历 reconstruction registry 并调用统一生命周期（训练、评测、几何、viewer）；命令、split 适配、输出查找和进程入口均由对应 adapter 持有。配置也按 registry 存储和解析，新增方法不需要在 pipeline 增加方法分支。
+
+## 学习式 SfM 提取器 / 匹配器
+
+默认仍是当前流程：`feature_extractor=sift` + `matcher=sequential|exhaustive`，因此老配置无需改动。
+
+如需切到学习式特征，可在 `reconstruction.sfm` 中显式指定，例如：
+
+```json
+{
+  "feature_extractor": "superpoint_aachen",
+  "feature_matcher": "superpoint+lightglue"
+}
+```
+
+当前支持的 HLOC 预设：
+
+- 提取器：`superpoint_aachen`、`superpoint_max`、`superpoint_inloc`、`disk`、`aliked-n16`
+- 匹配器：`superpoint+lightglue`、`disk+lightglue`、`aliked+lightglue`、`superglue`、`superglue-fast`、`NN-mutual`、`adalam`
+
+经验上可优先尝试：
+
+- `superpoint_aachen + superpoint+lightglue`：最稳妥，适合作为学习式默认候选
+- `disk + disk+lightglue`：纹理较丰富时通常也很强
+- `aliked-n16 + aliked+lightglue`：弱纹理或光照变化更大时值得试
+
+此外也支持 `feature_extractor=sift_dsp`，它仍属于经典 SIFT 路线，但会启用 DSP-SIFT 相关增强选项，通常比 plain SIFT 更容易拿到更多匹配。
