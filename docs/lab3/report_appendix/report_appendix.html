@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lab 3 附录 · 寝室多表示三维重建与评测</title>
+<link rel="stylesheet" href="report.css">
+</head>
+<body>
+<p class="meta"><a href="../report.html">返回主报告</a></p>
+<h1>Lab 3 附录</h1>
+<div class="callout">附录已从主报告拆分出来，正文中的附录链接会跳转到这一页。</div>
+<h2 id="appendix">9 附录</h2>
+
+<h3 id="app-captures">9.1 数据采集与划分</h3>
+<p class="small">对应正文 §2。</p>
+<table>
+<thead><tr><th>fps</th><th>训练图</th><th>测试图</th><th>总计</th><th>分辨率</th><th>run 目录</th></tr></thead>
+<tbody>
+<tr><td>2</td><td>278</td><td>30</td><td>308</td><td>900×1600</td><td><code>20260620_160035_dormitory_fps2</code></td></tr>
+<tr><td>4</td><td>554</td><td>61</td><td>615</td><td>900×1600</td><td><code>20260620_200014_dormitory_fps4</code></td></tr>
+<tr><td>8</td><td>1107</td><td>123</td><td>1230</td><td>900×1600</td><td><code>20260621_110244_dormitory_fps8</code></td></tr>
+</tbody>
+</table>
+
+<h3 id="app-tools">9.2 调用的工具与库</h3>
+<p class="small">对应正文 §3.1。</p>
+<table>
+<thead><tr><th>用途</th><th>调用的工具 / 库</th></tr></thead>
+<tbody>
+<tr><td>SfM / MVS 位姿与点云</td><td>COLMAP（系统二进制，CUDA）</td></tr>
+<tr><td>NeRF / NeuS 训练与渲染</td><td>nerfstudio（<code>nerfacto</code>、<code>neus-facto</code>；CLI <code>ns-process-data</code>/<code>ns-train</code>/<code>ns-render</code>/<code>ns-eval</code>）</td></tr>
+<tr><td>3DGS 训练与渲染</td><td>GraphDeco <code>gaussian-splatting</code>（<code>train.py</code>/<code>render.py</code> + 子模块 <code>diff-gaussian-rasterization</code>、<code>simple-knn</code>、<code>fused-ssim</code>）</td></tr>
+<tr><td>哈希编码后端</td><td><code>tiny-cuda-nn</code></td></tr>
+<tr><td>可选 SfM 特征</td><td><code>hloc</code>（ALIKED+LightGlue 等）、<code>pycolmap</code></td></tr>
+<tr><td>几何处理 / 可视化</td><td>Open3D</td></tr>
+<tr><td>指标与出图</td><td>NumPy、Pillow、matplotlib、<code>lpips</code></td></tr>
+<tr><td>视频抽帧</td><td>FFmpeg（系统二进制）</td></tr>
+</tbody>
+</table>
+
+<h3 id="app-fps">9.3 跨 FPS 指标表</h3>
+<p class="small">对应正文 §5.1。</p>
+<table>
+<thead><tr><th>fps（训练图）</th><th>3DGS PSNR ↑</th><th>3DGS SSIM ↑</th><th>3DGS LPIPS ↓</th><th>NeRF PSNR ↑</th><th>NeRF SSIM ↑</th><th>NeRF LPIPS ↓</th><th>NeuS PSNR ↑</th><th>NeuS SSIM ↑</th><th>NeuS LPIPS ↓</th></tr></thead>
+<tbody>
+<tr><td>2（278）</td><td>25.79</td><td>0.835</td><td>0.368</td><td>20.65</td><td>0.749</td><td>0.452</td><td>13.30</td><td>0.660</td><td>0.634</td></tr>
+<tr><td>4（554）</td><td><strong>27.70</strong></td><td><strong>0.868</strong></td><td>0.353</td><td>18.47</td><td>0.688</td><td>0.506</td><td>N/A</td><td>N/A</td><td>N/A</td></tr>
+<tr><td>8（1107）</td><td><span style="color:var(--accent2);font-weight:700">18.03</span></td><td>0.722</td><td>0.562</td><td><span style="color:var(--accent2);font-weight:700">12.23</span></td><td>0.597</td><td>0.709</td><td>N/A</td><td>N/A</td><td>N/A</td></tr>
+</tbody>
+</table>
+
+<h3 id="app-fps4">9.4 fps4 方法对比完整表</h3>
+<p class="small">对应正文 §5.2。正文只保留图和主要结论。</p>
+<table>
+<thead><tr><th>方法</th><th>PSNR ↑</th><th>SSIM ↑</th><th>LPIPS ↓</th><th>训练 (s)</th><th>渲染 FPS *</th><th>模型 (MB)</th><th>峰值显存 (GB)</th></tr></thead>
+<tbody>
+<tr><td>COLMAP 点云</td><td>N/A</td><td>N/A</td><td>N/A</td><td>942.5 (mapper)</td><td>N/A</td><td>—</td><td>—</td></tr>
+<tr><td>3DGS</td><td>27.70</td><td>0.868</td><td>0.353</td><td>3032.0</td><td>0.170</td><td>1341</td><td>8.82</td></tr>
+<tr><td>NeRF</td><td>18.47</td><td>0.688</td><td>0.506</td><td>3016.2</td><td>0.700</td><td>168</td><td>13.73</td></tr>
+<tr><td>NeuS</td><td>N/A</td><td>N/A</td><td>N/A</td><td>3263.1</td><td>—</td><td>169</td><td>7.11</td></tr>
+</tbody>
+</table>
+<p class=”small”>* 渲染 FPS 含磁盘 I/O，不代表纯推理速度（见 §4）。NeuS 在 fps4 未取得渲染 FPS；其在 fps2 的渲染速度为 0.04 FPS（约 25 s/帧），是四种方法中最慢的（3DGS 0.08、NeRF 0.70）。三种神经表示均采用同一 40 000 步训练预算。跨 fps 的 PSNR/SSIM/LPIPS 与训练时间见图 1、图 2、图 4。</p>
+
+<h3 id="app-iter">9.5 3DGS 迭代步数数值表</h3>
+<p class="small">对应正文 §5.4。</p>
+<table>
+<thead><tr><th>迭代步数</th><th>7000</th><th>30000</th><th>40000（最终渲染评测）</th></tr></thead>
+<tbody>
+<tr><td>held-out PSNR (dB)</td><td>24.09</td><td>27.53</td><td>27.70</td></tr>
+</tbody>
+</table>
+
+<h3 id="todolist">9.6 TODO 清单</h3>
+<div class="todo">已用 <code>render_neus_heldout.py</code> 完成 fps2 NeuS 的重渲（PSNR 13.30 dB、SSIM 0.660、LPIPS 0.634）。</div>
+<div class="todo">用 SIBR viewer 单独测量 3DGS 真实推理 FPS（当前 <code>render_fps</code> 含磁盘 I/O，偏低，不代表实时能力）。</div>
+<div class="todo">为 fps2 补定性对比图：其 3DGS 只保存了 16 张 eval-split 渲染、无法按抽帧序号与 GT 配对，需先用 <code>render.py</code> 重渲 fps2 的完整测试集后再生成面板。</div>
+<div class="todo">若需更完整的迭代定性对比，可离线重渲 3DGS 的 7k/30k checkpoint 与 NeuS 的多步 mesh；当前正文已以曲线与数值表支撑收敛结论。</div>
+<div class="todo">提交包附 <code>uv pip freeze</code> 与相机轨迹截图（COLMAP <code>model_converter</code> 导出）。</div>
+
+<hr>
+<p class="small">报告由 <code>docs/lab3/report.html</code> 渲染；所有定量图与训练曲线由嵌入页内的 Chart.js 实时绘制（数据来自 <code>outputs/lab3/.../{metrics.csv,timings.json,logs/*_train_loss_curve.csv}</code>），定性图与点云由 <code>scripts/lab3/build_report_assets.py</code> 生成，运行结果图像位于 <code>docs/lab3/report_assets/</code>。</p>
+
+</body>
+</html>
