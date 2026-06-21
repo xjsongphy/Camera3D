@@ -6,6 +6,21 @@ from itertools import combinations
 from pathlib import Path
 
 
+def _format_optional_dependency_error(exc: ModuleNotFoundError, component: str, preset: str) -> str:
+    missing = exc.name or "unknown module"
+    if missing == "SuperGluePretrainedNetwork":
+        return (
+            f"HLOC {component} preset '{preset}' requires the optional SuperGluePretrainedNetwork code, "
+            "which is not installed in the current environment. "
+            "Use a self-contained preset such as 'aliked-n16' with 'aliked+lightglue' or "
+            "'disk' with 'disk+lightglue', or install the missing dependency explicitly."
+        )
+    return (
+        f"HLOC {component} preset '{preset}' requires optional dependency '{missing}', "
+        "which is not installed in the current environment."
+    )
+
+
 def _image_names(images_dir: Path) -> list[str]:
     return sorted(
         path.name
@@ -95,18 +110,24 @@ def _run_build_sfm(argv: list[str]) -> None:
             f"Unknown HLOC matcher preset '{args.matcher}'. "
             f"Available presets: {sorted(match_features.confs)}"
         ) from exc
-    feature_path = extract_features.main(
-        feature_conf,
-        args.images,
-        args.work_dir,
-        image_list=names,
-    )
-    match_path = match_features.main(
-        matcher_conf,
-        pairs_path,
-        feature_conf["output"],
-        args.work_dir,
-    )
+    try:
+        feature_path = extract_features.main(
+            feature_conf,
+            args.images,
+            args.work_dir,
+            image_list=names,
+        )
+    except ModuleNotFoundError as exc:
+        raise SystemExit(_format_optional_dependency_error(exc, "extractor", args.extractor)) from exc
+    try:
+        match_path = match_features.main(
+            matcher_conf,
+            pairs_path,
+            feature_conf["output"],
+            args.work_dir,
+        )
+    except ModuleNotFoundError as exc:
+        raise SystemExit(_format_optional_dependency_error(exc, "matcher", args.matcher)) from exc
 
     camera_mode = (
         pycolmap.CameraMode.SINGLE

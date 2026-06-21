@@ -20,6 +20,10 @@ records/
 # Generated outputs
 outputs/
 output/
+tmp/
+
+# Sync temp files
+.syncthing.*
 
 # YOLO / Ultralytics local artifacts
 /yolo*.pt

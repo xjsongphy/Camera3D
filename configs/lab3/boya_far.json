@@ -21,8 +21,8 @@
     "sfm": {
       "colmap_bin": "colmap",
       "matcher": "sequential",
-      "feature_extractor": "superpoint_aachen",
-      "feature_matcher": "superpoint+lightglue",
+      "feature_extractor": "aliked-n16",
+      "feature_matcher": "aliked+lightglue",
       "python_bin": "python",
       "pair_overlap": 10,
       "quadratic_overlap": true,

@@ -18,6 +18,8 @@ lab3 = [
   "pillow>=10.4.0",
   "lpips>=0.1.0",
   "nerfstudio>=1.1.5",
+  "pycolmap>=3.11.0",
+  "hloc @ git+https://github.com/cvg/Hierarchical-Localization.git",
   "tinycudann @ git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch",
   # Local gaussian-splatting submodules — paths resolved via [tool.uv.sources]
   "diff-gaussian-rasterization",
