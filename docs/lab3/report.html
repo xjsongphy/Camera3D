@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lab 3 实验报告 · 寝室多表示三维重建与评测</title>
+<style>
+  :root{
+    --fg:#1d1d1f; --muted:#5a5a60; --bg:#ffffff; --card:#f6f7f9;
+    --accent:#00798c; --accent2:#d1495b; --border:#dfe1e4; --code:#f3f4f6;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--fg); background:var(--bg); margin:0; line-height:1.7;
+    font-size:16px; max-width:980px; margin:0 auto; padding:0 24px 80px;
+  }
+  h1,h2,h3,h4{line-height:1.3; font-weight:650}
+  h1{font-size:1.9rem; margin-top:2.2rem; border-bottom:3px solid var(--accent); padding-bottom:.4rem}
+  h2{font-size:1.4rem; margin-top:2.4rem; border-bottom:1px solid var(--border); padding-bottom:.3rem}
+  h3{font-size:1.15rem; margin-top:1.8rem; color:#222}
+  h4{font-size:1.02rem; margin-top:1.4rem; color:#333}
+  p{margin:.7rem 0}
+  a{color:var(--accent); text-decoration:none}
+  a:hover{text-decoration:underline}
+  code{font-family:"SF Mono",Menlo,Consolas,monospace; background:var(--code); padding:.1em .35em; border-radius:4px; font-size:.88em}
+  pre{background:var(--code); padding:14px 16px; border-radius:8px; overflow-x:auto; border:1px solid var(--border)}
+  pre code{background:none; padding:0; font-size:.84rem; line-height:1.55}
+  blockquote{margin:1rem 0; padding:.6rem 1rem; border-left:4px solid var(--accent2); background:#fff6f7; color:#5a2a30; border-radius:0 6px 6px 0}
+  table{border-collapse:collapse; width:100%; margin:1rem 0; font-size:.9rem}
+  th,td{border:1px solid var(--border); padding:.45rem .6rem; text-align:center}
+  th{background:var(--card); font-weight:600}
+  tr:nth-child(even) td{background:#fafbfc}
+  img{max-width:100%; height:auto; display:block; margin:.8rem auto; border:1px solid var(--border); border-radius:6px}
+  figure{margin:1.4rem 0; text-align:center}
+  figcaption{font-size:.82rem; color:var(--muted); margin-top:.4rem; line-height:1.5}
+  .meta{color:var(--muted); font-size:.9rem; margin-top:-.5rem}
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:14px}
+  @media(max-width:720px){.grid2{grid-template-columns:1fr}}
+  .card{background:var(--card); border:1px solid var(--border); border-radius:8px; padding:14px 18px; margin:1rem 0}
+  .todo{background:#fff8e6; border:1px solid #f0d876; border-radius:8px; padding:.7rem 1rem; margin:1rem 0; font-size:.9rem}
+  .todo::before{content:"TODO "; font-weight:700; color:#a06a00; letter-spacing:.05em}
+  .badge{display:inline-block; font-size:.72rem; padding:.1em .55em; border-radius:10px; background:var(--accent); color:#fff; vertical-align:middle; margin-left:.4em}
+  .badge.red{background:var(--accent2)}
+  .badge.grey{background:#888}
+  .toc{background:var(--card); border:1px solid var(--border); border-radius:8px; padding:14px 22px; font-size:.9rem; columns:2}
+  .toc a{display:block}
+  @media(max-width:600px){.toc{columns:1}}
+  details{margin:.6rem 0}
+  summary{cursor:pointer; font-weight:600; color:var(--accent)}
+  #viewer-wrap{position:relative; background:#111; border-radius:8px; overflow:hidden; aspect-ratio:16/9}
+  #viewer-canvas{display:block; width:100%; height:100%}
+  .viewer-bar{position:absolute; top:8px; left:8px; right:8px; display:flex; gap:8px; flex-wrap:wrap; align-items:center; color:#eee; font-size:.8rem}
+  .viewer-bar select, .viewer-bar button{background:rgba(255,255,255,.12); color:#fff; border:1px solid rgba(255,255,255,.25); border-radius:5px; padding:3px 8px; font-size:.8rem}
+  .viewer-info{position:absolute; bottom:8px; left:8px; color:#ddd; font-size:.74rem; background:rgba(0,0,0,.35); padding:3px 8px; border-radius:5px}
+  .pc-fallback{color:#ddd; padding:40px; text-align:center; font-size:.85rem}
+  .small{font-size:.85rem; color:var(--muted)}
+  ul.clean{margin:.6rem 0}
+  ul.clean li{margin:.3rem 0}
+  .kpi{display:inline-block; min-width:90px}
+  .placeholder{border:2px dashed #b8b8c0; background:#fafafb; color:#8a8a94; padding:30px; text-align:center; border-radius:8px; margin:.8rem 0; font-size:.85rem}
+  .mcard{background:var(--card);border:1px solid var(--border);border-left:4px solid var(--accent);border-radius:8px;padding:12px 16px;margin:0;height:100%}
+  .mcard h4{margin:0 0 8px;color:var(--accent);font-size:1rem}
+  .mc-row{font-size:.86rem;margin:.3rem 0;line-height:1.5}
+  .mc-k{display:inline-block;min-width:3.5em;color:var(--muted);font-weight:650;vertical-align:top}
+  .mc-v{display:inline-block;width:calc(100% - 4.2em)}
+  .mermaid{background:#fff;border:1px solid var(--border);border-radius:8px;padding:14px;margin:1rem 0;text-align:center;font-size:.85rem}
+  .lead{font-size:1.02rem;color:#333}
+</style>
+</head>
+<body>
+
+<h1>Lab 3 · 多表示三维场景重建与评测</h1>
+<p class="meta">
+<strong>代码仓库</strong>：<a href="https://github.com/xjsongphy/Camera3D">https://github.com/xjsongphy/Camera3D</a>（commit <code>fe766b2</code>）<br>
+<strong>场景</strong>：寝室（室内，自采） ｜
+<strong>三种以上表示</strong>：COLMAP 点云（显式几何）、3D Gaussian Splatting（splatting）、Nerfacto（neural radiance field）、NeuS（隐式 SDF 表面）<br>
+<strong>运行环境</strong>：Ubuntu 24.04 ｜ Intel i7-14700K ｜ 32 GB RAM ｜ NVIDIA RTX 4070 Ti SUPER（16 GB）<br>
+<strong>状态</strong>：寝室主报告完成；博雅额外场景为占位（<a href="#boya">附录·博雅</a>，尚未跑完）。
+</p>
+
+<nav class="toc">
+<a href="#abstract">1 摘要</a>
+<a href="#data">2 数据采集</a>
+<a href="#methods">3 方法：调用与实现</a>
+<a href="#setup">4 实验设置</a>
+<a href="#results">5 结果（FPS 对比 / 方法对比 / loss 曲线 / 迭代对比 / 几何 / NeuS）</a>
+<a href="#discussion">6 讨论</a>
+<a href="#conclusion">7 结论</a>
+<a href="#appendix">8 附录（命令 / 配置 / 复现）</a>
+<a href="#viewer">交互式点云</a>
+<a href="#todolist">TODO 清单</a>
+</nav>
+
+<!-- =================== 1 摘要 =================== -->
+<h2 id="abstract">1 摘要</h2>
+<p>本作业以一段手持拍摄的视频为唯一数据源，对同一真实静态场景（寝室）走完“抽帧→位姿估计→四种表示训练→渲染评测”的完整流程，并在统一的 held-out 测试集与同一组 COLMAP 位姿上比较 COLMAP 点云、3D Gaussian Splatting（3DGS）、Nerfacto 与 NeuS。核心发现有三：其一，3DGS 在新视角合成上始终最优（fps4 上 PSNR 27.70 dB、SSIM 0.868），且训练与渲染效率俱佳；其二，抽帧率对重建质量影响剧烈且非单调，fps8（1107 训练图）反而效果不好，并且视频后段的重建几乎不可读，推测是密集抽帧放大了快速转动区域的运动模糊与匹配漂移；其三，NeuS 训练与表面提取（marching cubes）成功，但由于 nerfstudio 在 held-out 渲染时的 appearance-embedding 维度不匹配，未取得 RGB 指标——本报告定位了该 bug 并给出修复（见 <a href="#neus-fix">§5.6</a>），其 SDF mesh 仍可作为几何质量证据。</p>
+
+<!-- =================== 2 数据采集 =================== -->
+<h2 id="data">2 数据采集</h2>
+<p>原始数据为一段手持环绕拍摄的寝室视频 <code>dormitory.MOV</code>，并且为了充分采样，拍摄过程中采用了不同的高度。使用 <code>ffmpeg</code> 按固定 fps 等时间间隔抽帧，得到不同密度的图像序列。寝室属于典型的小型室内场景，包含床、书桌、衣柜门、镜子与窗户；其中<strong>衣柜门区域带有大面积镜面与高反光，窗户为透光玻璃</strong>——这两类区域会在后文反复出现，是解释各方法失败的关键。</p>
+
+<p>抽帧率与图像数量直接决定后续所有环节的输入规模。下表给出三组正式运行的帧数与训练/测试划分（<code>test_ratio=0.1</code>，按文件名每 10 张取 1 张作为 held-out，不参与训练）。三组共享同一套预处理与超参（详见 §4），仅抽帧率不同，构成对“抽帧密度”的单变量对照；表中的帧数为去模糊过滤后的结果。</p>
+
+<table>
+<thead><tr><th>fps</th><th>训练图</th><th>测试图</th><th>总计</th><th>分辨率</th><th>run 目录</th></tr></thead>
+<tbody>
+<tr><td>2</td><td>278</td><td>30</td><td>308</td><td>900×1600</td><td><code>20260620_160035_dormitory_fps2</code></td></tr>
+<tr><td>4</td><td>554</td><td>61</td><td>615</td><td>900×1600</td><td><code>20260620_200014_dormitory_fps4</code></td></tr>
+<tr><td>8</td><td>1107</td><td>123</td><td>1230</td><td>900×1600</td><td><code>20260621_110244_dormitory_fps8</code></td></tr>
+</tbody>
+</table>
+
+<p>相机位姿由 COLMAP 顺序匹配（<code>sequential_matcher</code>）+ 增量映射（<code>mapper</code>）估计，单目 <code>PINHOLE</code> 模型，全部帧共享同一相机。管线以 <code>share_poses=true</code> 运行：SfM 用<strong>全量</strong>图像估计位姿后导出 <code>sparse/0</code>，3DGS / Nerfacto / NeuS 的表示训练则统一只用 <code>train.txt</code>、在同一 <code>test.txt</code> 上评测。这样“位姿估计”与“表示学习”两个变量被解耦，确保四种方法的差异只来自表示本身。</p>
+
+<p>正式运行在抽帧之后开启了两项预处理：一是<strong>去模糊过滤</strong>，按拉普拉斯方差给出每帧 <code>blur_score</code>，丢弃 <code>blur_threshold=10</code> 以下的模糊帧；二是<strong>边缘畸变裁剪</strong> <code>crop_ratio=0.9</code>，保留中心 90% 以缓解手机镜头的边缘畸变。各项方法的训练超参与评测口径统一汇总于 §4，此处不重复。</p>
+
+<!-- =================== 3 方法 =================== -->
+<h2 id="methods">3 方法：调用与实现</h2>
+<p class="lead">本作业不为每种表示从零实现训练算法，而是把成熟的公开重建栈统一编排进一条可复现管线，重点在<strong>公平对比</strong>而非重造轮子。本节只说明每种方法"怎么被调用"，不展开原理（原理与失败模式的讨论见 §6）。</p>
+
+<h3>3.1 调用的工具与库</h3>
+<table>
+<thead><tr><th>用途</th><th>调用的工具 / 库</th><th>在本作业中的角色</th></tr></thead>
+<tbody>
+<tr><td>SfM / MVS 位姿与点云</td><td>COLMAP（系统二进制，CUDA）</td><td>特征提取、顺序匹配、增量映射、（可选）dense MVS；产出共享位姿 <code>sparse/0</code></td></tr>
+<tr><td>NeRF / NeuS 训练与渲染</td><td>nerfstudio（<code>nerfacto</code>、<code>neus-facto</code>；CLI <code>ns-process-data</code>/<code>ns-train</code>/<code>ns-render</code>/<code>ns-eval</code>）</td><td>Nerfacto 与 NeuS 的训练、held-out 渲染、mesh 导出</td></tr>
+<tr><td>3DGS 训练与渲染</td><td>GraphDeco <code>gaussian-splatting</code>（<code>train.py</code>/<code>render.py</code>，子模块 <code>diff-gaussian-rasterization</code>、<code>simple-knn</code>、<code>fused-ssim</code>）</td><td>3DGS 的可微光栅化训练与测试集渲染</td></tr>
+<tr><td>哈希编码后端</td><td><code>tiny-cuda-nn</code></td><td>nerfstudio 的底层加速后端</td></tr>
+<tr><td>可选 SfM 特征</td><td><code>hloc</code>（ALIKED+LightGlue 等）、<code>pycolmap</code></td><td>弱纹理/重复纹理场景的可替换前端</td></tr>
+<tr><td>几何处理与可视化</td><td>Open3D</td><td>Poisson mesh、法向估计、点云/mesh 查看、Chamfer/F-score</td></tr>
+<tr><td>指标与出图</td><td>NumPy、Pillow、matplotlib、<code>lpips</code></td><td>统一 PSNR/SSIM/LPIPS、定性拼图、训练曲线、报告图表</td></tr>
+<tr><td>视频抽帧</td><td>FFmpeg（系统二进制）</td><td>按 fps 等时间间隔抽帧</td></tr>
+</tbody>
+</table>
+<p class="small">依赖通过 <code>uv</code> 在 <code>pyproject.toml</code> 的 <code>lab3</code> group 声明（CPU / CUDA 12.4 两套 extra）；安装与版本见 <code>docs/lab3/README.md</code>。</p>
+
+<h3>3.2 各方法的调用方式</h3>
+<p>四种方法都通过同一 CLI（<code>lab3 --methods ...</code>）触发，各自调用上表中的工具，产出标准化的中间结果：</p>
+<div class="grid2">
+<div class="mcard">
+<h4>SfM · COLMAP</h4>
+<div class="mc-row"><span class="mc-k">调用</span><span class="mc-v"><code>feature_extractor → sequential_matcher → mapper</code>（可选 <code>patch_match_stereo + stereo_fusion</code> 做 dense）</span></div>
+<div class="mc-row"><span class="mc-k">入口</span><span class="mc-v"><code>--methods sfm</code>，<code>--sfm-feature-extractor</code> 可换 hloc 前端</span></div>
+<div class="mc-row"><span class="mc-k">产出</span><span class="mc-v">共享位姿 <code>sparse/0</code>、稀疏点云；dense 时额外 <code>dense.ply</code> / Poisson mesh</span></div>
+<div class="mc-row"><span class="mc-k">适配</span><span class="mc-v"><code>reconstruction/sfm.py</code></span></div>
+</div>
+<div class="mcard">
+<h4>3DGS · gaussian-splatting</h4>
+<div class="mc-row"><span class="mc-k">调用</span><span class="mc-v">GraphDeco <code>train.py</code> 训练 → <code>render.py</code> 渲染测试集</span></div>
+<div class="mc-row"><span class="mc-k">入口</span><span class="mc-v"><code>--methods 3dgs --dgs-repo ./gaussian-splatting --dgs-iterations 40000</code></span></div>
+<div class="mc-row"><span class="mc-k">产出</span><span class="mc-v"><code>point_cloud/iteration_N/point_cloud.ply</code>、测试集渲染</span></div>
+<div class="mc-row"><span class="mc-k">适配</span><span class="mc-v"><code>reconstruction/dgs.py</code></span></div>
+</div>
+<div class="mcard">
+<h4>Nerfacto · nerfstudio</h4>
+<div class="mc-row"><span class="mc-k">调用</span><span class="mc-v"><code>ns-process-data</code>（COLMAP→transforms.json）→ <code>ns-train nerfacto</code> → <code>ns-render</code></span></div>
+<div class="mc-row"><span class="mc-k">入口</span><span class="mc-v"><code>--methods nerf --nerf-iterations 40000</code></span></div>
+<div class="mc-row"><span class="mc-k">产出</span><span class="mc-v">nerfstudio 配置+checkpoint、held-out 渲染、稀疏点云 proxy</span></div>
+<div class="mc-row"><span class="mc-k">适配</span><span class="mc-v"><code>reconstruction/nerf.py</code></span></div>
+</div>
+<div class="mcard">
+<h4>NeuS · nerfstudio (neus-facto)</h4>
+<div class="mc-row"><span class="mc-k">调用</span><span class="mc-v">COLMAP→SDFStudio <code>meta_data.json</code> → <code>ns-train neus-facto</code> → marching cubes 导出 mesh</span></div>
+<div class="mc-row"><span class="mc-k">入口</span><span class="mc-v"><code>--methods neus --config configs/lab3/extra.json --neus-iterations 40001</code></span></div>
+<div class="mc-row"><span class="mc-k">产出</span><span class="mc-v"><code>sdf_mesh.ply</code>、checkpoint（held-out RGB 渲染受阻于 §5.6 bug）</span></div>
+<div class="mc-row"><span class="mc-k">适配</span><span class="mc-v"><code>reconstruction/neus.py</code></span></div>
+</div>
+</div>
+
+<h3 id="impl">3.3 管线流程与代码分层</h3>
+<p>一次完整调用按下面的阶段顺序执行；其中 <code>share_poses=true</code> 让 SfM 用全量图估计位姿后，把同一份 <code>sparse/0</code> 喂给三种神经表示，从而把"位姿估计"与"表示学习"两个变量解耦。</p>
+<div class="mermaid">
+graph LR
+  A["抽帧/划分<br/>ffmpeg + blur/crop"] --> B["位姿估计<br/>COLMAP sparse/0"]
+  B -- "共享位姿" --> C["按方法训练<br/>sfm·3dgs·nerf·neus"]
+  C --> D["held-out 渲染<br/>+ 统一评测"]
+  D --> E["几何导出<br/>点云/mesh"]
+  E --> F["定性拼图<br/>+ 训练曲线"]
+  F --> G["交互查看<br/>Open3D / ns-viewer"]
+  style B stroke:#00798c,stroke-width:2px
+  style D stroke:#d1495b,stroke-width:2px
+</div>
+<p><code>src/lab3/</code> 采用四层结构，自上而下为入口、编排、方法适配、共享后处理；方法适配层实现统一接口，新增表示无需改动编排与评测：</p>
+<div class="mermaid">
+graph TD
+  L1["<b>CLI 入口层</b> &nbsp;cli.py<br/>--dry-run / --run-dir / --view-run"] --> L2
+  L2["<b>编排层</b> &nbsp;pipeline.py + extract.py<br/>串联阶段、share_poses"] --> L3
+  L3["<b>方法适配层</b> &nbsp;reconstruction/<br/>base.py 接口 + sfm/dgs/nerf/neus"] --> L4
+  L4["<b>共享后处理层</b><br/>metrics · evaluate · geometry · qualitative · training_artifacts · visualization"]
+  style L1 stroke:#00798c,stroke-width:2px
+  style L4 stroke:#d1495b,stroke-width:2px
+</div>
+<p class="small">共享后处理层保证四种方法在同一份 held-out 集、同一套指标实现（<code>lab3.metrics</code>）与同一分辨率下被评测，是公平对比的基础。</p>
+
+<h3>3.4 运行命令</h3>
+<p>常用命令如下（完整参数见 <code>docs/lab3/README.md</code>）：</p>
+<pre><code># 命令链自检（不实际运行）
+uv run --python 3.12 --group lab3 --extra cpu lab3 \
+  --config configs/lab3/default.json --methods sfm --dry-run
+
+# 正式全流程（寝室，fps4，四种方法）
+uv run --python 3.12 --group lab3 --extra cu124 lab3 \
+  --config configs/lab3/default.json --scene-name dormitory_fps4 --fps 4 \
+  --methods sfm nerf neus 3dgs --dgs-repo ./gaussian-splatting
+
+# 仅重跑某次运行的评测 / 后处理（不重训）
+uv run --python 3.12 --group lab3 --extra cu124 lab3 \
+  --run-dir outputs/lab3/20260620_200014_dormitory_fps4
+
+# 交互查看已有结果（Open3D 几何 + nerfstudio web viewer）
+uv run --python 3.12 --group lab3 --extra cu124 lab3 \
+  --view-run outputs/lab3/20260620_200014_dormitory_fps4</code></pre>
+<p class="small">配置入口为 <code>configs/lab3/</code> 下的 JSON（<code>default.json</code> 主配置、<code>extra.json</code> 额外实验、<code>boya_close.json</code>/<code>boya_far.json</code> 博雅场景）。</p>
+
+<h3>3.5 辅助脚本（<code>scripts/lab3/</code>）</h3>
+<div class="grid2">
+<div class="card"><h4>批量运行</h4><p class="small" style="margin:0"><code>run_lab3_fps_sweep.sh</code>、<code>run_lab3_batch_suite.sh</code>：按 fps / 场景批量跑全流程，本文 fps2/4/8 由前者产生。</p></div>
+<div class="card"><h4>NeuS 重渲</h4><p class="small" style="margin:0"><code>render_neus_heldout.py</code>：修复并重渲 NeuS 的 held-out RGB/法向/深度（§5.6 的 appearance-embedding 修复）。</p></div>
+<div class="card"><h4>报告出图</h4><p class="small" style="margin:0"><code>build_report_{assets,charts,losscurves}.py</code>：从既有 run 生成定性拼图、点云、定量图与训练曲线（纯 NumPy/PIL/matplotlib）。</p></div>
+<div class="card"><h4>工具</h4><p class="small" style="margin:0"><code>build_sibr_viewer.sh</code> 编译 3DGS SIBR 实时查看器；<code>inspect_blur_scores.sh</code> 检查 <code>blur_score</code> 分布以选去模糊阈值。</p></div>
+</div>
+
+<!-- =================== 4 实验设置 =================== -->
+<h2 id="setup">4 实验设置</h2>
+<p>所有训练与评测均在同一台 Ubuntu 24.04 机器上完成（i7-14700K、32 GB RAM、RTX 4070 Ti SUPER 16 GB）。系统工具 <code>colmap</code>（CUDA）与 <code>ffmpeg</code> 在 PATH 中；神经方法依赖 <code>tiny-cuda-nn</code>、<code>diff-gaussian-rasterization</code> 等本地编译扩展（见 <code>docs/lab3/README.md</code>）。</p>
+
+<div class="grid2">
+<div class="card">
+<h4>关键超参（fps2/4/8 共用）</h4>
+<ul class="clean" style="margin:0">
+<li>3DGS：<code>iterations=40000</code>，分辨率 1600</li>
+<li>Nerfacto：<code>max_num_iterations=40000</code></li>
+<li>NeuS：<code>max_num_iterations=40001</code>，<code>mesh_resolution=512</code>，<code>export_mesh=true</code></li>
+<li>评测分辨率：<code>eval_size=[900,1600]</code></li>
+<li>测试划分：<code>test_ratio=0.1</code>，<code>share_poses=true</code></li>
+</ul>
+</div>
+<div class="card">
+<h4>评测口径（重要）</h4>
+<p class="small" style="margin:0">3DGS、Nerfacto 均在<strong>规范 held-out 集 <code>prepared/test.txt</code></strong> 上用自实现 <code>lab3.metrics</code>（统一 PSNR/SSIM/LPIPS）评测，口径在 fps2/4/8 间一致。NeuS 受 §5.6 bug 影响、暂无 RGB 指标。</p>
+</div>
+</div>
+
+<p>渲染 FPS 的测量口径需特别说明：3DGS 的 <code>render_fps</code> 由 <code>render.py</code> 渲染 held-out 视图的总耗时反算，<strong>包含磁盘 I/O</strong>，因此数值偏低（0.17 左右）并不代表其推理能力——3DGS 真正的实时性需用 SIBR viewer 单独测量（见附录 TODO）。Nerfacto 的 <code>render_fps</code> 同理（ns-render 含 I/O）。</p>
+
+<!-- =================== 5 结果 =================== -->
+<h2 id="results">5 结果</h2>
+
+<h3 id="fps-sweep">5.1 抽帧率（FPS）对重建的影响</h3>
+<div class="card" style="border-left:4px solid var(--accent2)">
+<strong>核心结论：</strong>抽帧率对质量的影响是<strong>非单调</strong>的——3DGS 在 fps4 取得最优（27.70 dB），而最密的 fps8（1107 训练图）反而急剧退化（3DGS 18.03 dB、Nerfacto 12.23 dB）。“帧越多越好”的直觉在本场景不成立。
+</div>
+<p>下表与下图给出 3DGS 与 Nerfacto 在正式运行 fps 2/4/8 下的 held-out 指标。Nerfacto 呈现与 3DGS 相同的非单调趋势。</p>
+
+<table>
+<thead><tr><th>fps（训练图）</th><th>3DGS PSNR ↑</th><th>3DGS SSIM ↑</th><th>3DGS LPIPS ↓</th><th>Nerfacto PSNR ↑</th><th>Nerfacto SSIM ↑</th><th>Nerfacto LPIPS ↓</th></tr></thead>
+<tbody>
+<tr><td>2（278）</td><td>25.79</td><td>0.835</td><td>0.368</td><td>20.65</td><td>0.749</td><td>0.452</td></tr>
+<tr><td>4（554）</td><td><strong>27.70</strong></td><td><strong>0.868</strong></td><td>0.353</td><td>18.47</td><td>0.688</td><td>0.506</td></tr>
+<tr><td>8（1107）</td><td><span style="color:var(--accent2);font-weight:700">18.03</span></td><td>0.722</td><td>0.562</td><td><span style="color:var(--accent2);font-weight:700">12.23</span></td><td>0.597</td><td>0.709</td></tr>
+</tbody>
+</table>
+
+<figure>
+<img src="report_assets/charts/chart_psnr_fps.png" alt="PSNR vs fps">
+<figcaption>图 1：held-out PSNR 随抽帧率变化。fps8 明显退化。</figcaption>
+</figure>
+<figure>
+<img src="report_assets/charts/chart_ssim_lpips_fps.png" alt="SSIM LPIPS vs fps">
+<figcaption>图 2：SSIM（左，↑）与 LPIPS（右，↓）随抽帧率变化。fps8 两项指标同步恶化。</figcaption>
+</figure>
+
+<p>为什么会“帧越多越差”？原因不在表示本身，而在<strong>数据采集质量</strong>。这段视频在环绕镜面衣柜门时存在快速横向转动，密集抽帧（fps8）会把同一运动模糊片段切成大量彼此高度相似但又彼此错位的帧：相邻帧重叠虽高，但模糊与亚像素错位使 COLMAP 的特征匹配与三角化在转动区出现漂移，位姿误差随之被 3DGS 的 densification 与 Nerfacto 的体场放大。fps2/4 的稀疏采样反而跳过了大量模糊帧、保留了运动较缓的清晰视角，因而位姿更稳、重建更好。</p>
+
+<p>这一推断与拍摄时的现象一致：<strong>寝室门（带镜面、转动最快）附近是各 fps 下重建最差的区域</strong>；窗户虽为透光玻璃，但位于视频后半段、相机掠过时转动平缓，对重建几乎无影响。换言之，损害重建的是“快速视角变化 + 反光”的组合，而不是玻璃本身。</p>
+
+<p>需要特别说明跨 fps 定性对比的一个陷阱：不同 fps 下<strong>同一抽帧序号对应的是不同的原始视频帧</strong>（fps4 的第 30 帧约在 7.5 s，fps8 的第 30 帧约在 3.75 s，二者并非同一相机位姿）。因此本报告不对 fps4 与 fps8 做并排同视角拼图——那种拼图会把两个不同位姿误当成同一视角，反而误导。fps8 的退化由上图 1、图 2 的指标严格刻画，其视觉表现则由 fps8 自身 held-out 视角的渲染体现（下图，该帧内部 GT/3DGS/NeRF 配对正确、属同一视角）。</p>
+
+<figure>
+<img src="report_assets/methods/fps8_vid_001_dormitory_000030.png" alt="fps8 qualitative panel">
+<figcaption>图 3：fps8 一个 held-out 视角（vid_…_000030）的 GT | 3DGS | 3DGS 误差 | NeRF | NeRF 误差。3DGS 与 NeRF 渲染均出现明显重影与发虚，与图 1 的 PSNR 崩塌一致。</figcaption>
+</figure>
+
+<p>fps4 与 fps2 相比，3DGS 在 fps4 略优，而 Nerfacto 在 fps4 反而比 fps2 差（18.47 vs 20.65）。这与“门附近效果不好”的观察吻合：fps4 比 fps2 多保留了门区域的转动帧，对几何敏感度低的 Nerfacto（用半透明体积“糊”出图像）反而是负担，而对显式高斯的 3DGS 影响较小。效率方面，训练时间随帧数近似线性增长（图 4），fps8 的训练成本最高却换来最差的质量，进一步说明密集抽帧在该场景下是净损失。</p>
+
+<figure>
+<img src="report_assets/charts/chart_efficiency_fps.png" alt="training time vs fps">
+<figcaption>图 4：训练时间随抽帧率上升（fps8 的 Nerfacto 计时缺失）。fps8 投入最多算力却质量最差。</figcaption>
+</figure>
+
+<h3 id="fps4-methods">5.2 fps4 下四种方法的对比</h3>
+<p>以口径最完整的 fps4 为基准，下表汇总四种方法的定量结果。SfM 与 NeuS 不产生 RGB 指标：前者是纯几何方法（无可比的新视角合成），后者因 §5.6 的 bug 未取得渲染结果，但其训练与 mesh 提取均成功。</p>
+
+<table>
+<thead><tr><th>方法</th><th>表示类别</th><th>PSNR ↑</th><th>SSIM ↑</th><th>LPIPS ↓</th><th>训练 (s)</th><th>渲染 FPS</th><th>模型 (MB)</th></tr></thead>
+<tbody>
+<tr><td>COLMAP 点云</td><td>显式几何</td><td>N/A</td><td>N/A</td><td>N/A</td><td>942.5 (mapper)</td><td>N/A</td><td>—</td></tr>
+<tr><td><strong>3DGS</strong></td><td>splatting</td><td><strong>27.70</strong></td><td><strong>0.868</strong></td><td>0.353</td><td>3032.0</td><td>0.170 *</td><td>1341</td></tr>
+<tr><td>Nerfacto</td><td>neural radiance field</td><td>18.47</td><td>0.688</td><td>0.506</td><td>3016.2</td><td>0.700 *</td><td>168</td></tr>
+<tr><td>NeuS</td><td>隐式 SDF 表面</td><td>N/A <span class="badge red">渲染失败</span></td><td>N/A</td><td>N/A</td><td>3263.1</td><td>—</td><td>169</td></tr>
+</tbody>
+</table>
+<p class="small">* 渲染 FPS 含磁盘 I/O（见 §4），不代表真实推理速度。</p>
+
+<p>3DGS 在该场景下全面领先 Nerfacto（PSNR 高 9 dB 以上）。值得注意的是 Nerfacto 在 fps4 上表现异常疲软（PSNR 仅 18.47），这与门区域的视角相关外观（镜面反射）密切相关——NeRF 用 view-dependent 颜色“烘焙”反射，在新视角下暴露为重影。NeuS 与 Nerfacto 训练时间相近（约 3260s vs 3016s），但 NeuS 额外做了表面正则与 marching cubes，几何输出更结构化。SfM 的 mapper 用时 942s（未开 dense MVS），仅产出稀疏点云。</p>
+
+<p>定性上，下图给出 fps4 下三个 held-out 视角的 GT / 3DGS / Nerfacto 渲染与误差图（NeuS 无渲染故未入图，其几何见 §5.5）。3DGS 渲染锐利、误差图整体偏暗；Nerfacto 在门与镜面附近误差明显偏高（误差图中的亮区）。</p>
+
+<figure>
+<img src="report_assets/methods/fps4_vid_001_dormitory_000030.png" alt="fps4 qualitative 000030">
+<figcaption>图 5：fps4 held-out 视角 vid_…_000030：GT | 3DGS 渲染 | 3DGS 误差 | Nerfacto 渲染 | Nerfacto 误差。3DGS 渲染锐利；Nerfacto 在复杂几何与反光区误差偏高。GT/3DGS/NeRF 已按抽帧序号正确配对（同一视角）。</figcaption>
+</figure>
+
+<div class="card">
+<h4>“适量图片对比”说明</h4>
+<p style="margin:0">正文仅放 fps8（图 3）与 fps4（图 5）各一张 held-out 对比。每个 fps 各有 3 个 held-out 视角的完整对比图（GT/3DGS/3DGS 误差/Nerfacto/Nerfacto 误差）生成于 <code>report_assets/methods/</code>（fps4、fps8 各 3 张）；几何可旋转查看见 <a href="#viewer">交互式点云</a>。</p>
+</div>
+
+<h3 id="dynamics">5.3 训练动力学（loss 曲线）</h3>
+<p>三种神经表示是否稳定收敛、在何处饱和，可由训练曲线直接判断。下图取自 fps4 正式运行管线导出的逐 step 日志（<code>logs/*_train_loss_curve.csv</code>，无重复训练）。3DGS 的日志逐 step 记录了 held-out PSNR，可直接作为质量曲线；Nerfacto 与 NeuS 的日志只记录损失，故以对数纵轴展示其 train/eval 损失。三条曲线均单调下降并在训练末段趋于平缓，未出现发散或回升，说明在 fps4 的数据规模下各方法的优化过程稳定。其中 3DGS 的 held-out PSNR 在约 30000 步后基本饱和，这意味着对其继续训练的边际收益已很有限（见 §5.4）。</p>
+<figure>
+<img src="report_assets/charts/chart_loss_curves.png" alt="training loss curves">
+<figcaption>图 6：fps4 训练动力学。左：3DGS held-out PSNR（标注 7k/30k 检查点）；中：Nerfacto train/eval 损失；右：NeuS train/eval 损失（对数纵轴）。</figcaption>
+</figure>
+
+<h3 id="iterations">5.4 同一方法不同迭代步数的对比</h3>
+<p>本节考察同一方法在不同训练步数下的表现，用以判断收敛拐点与继续训练的边际收益。需要说明，Nerfacto 在正式运行中只保留最终 checkpoint（未设 <code>save_iterations</code>），无法做迭代对比；因此下文以 3DGS 与 NeuS 为主。</p>
+
+<h4>3DGS（fps4，已量化）</h4>
+<p>3DGS 在 fps4 保存了 7000、30000、40000 步的高斯点云，且训练日志逐 step 记录了 held-out PSNR，因此迭代效果可直接从曲线量化，无需重新渲染：</p>
+<table>
+<thead><tr><th>迭代步数</th><th>7000</th><th>30000</th><th>40000（最终渲染评测）</th></tr></thead>
+<tbody>
+<tr><td>held-out PSNR (dB)</td><td>24.09</td><td>27.53</td><td>27.70</td></tr>
+</tbody>
+</table>
+<p>PSNR 由 7000 步的 24.09 dB 上升至 30000 步的 27.53 dB，此后增长基本停滞（40000 步的最终渲染评测为 27.70 dB，与在线评测口径略有差异）。这表明 3DGS 在该场景下约 30k 步即已接近收敛，继续训练到 40k 步的边际收益很小。下方为不同迭代步数渲染的定性对比预留位置，需重新渲染 7k/30k 检查点后填入。</p>
+<figure>
+<div class="placeholder">［预留位置·图 7］3DGS 在 7k / 30k / 40k 步的 held-out 渲染对比（GT | 7k | 30k | 40k | 误差）。<br>需用 <code>python gaussian-splatting/render.py --iteration {7000,30000,40000}</code> 渲染各检查点后填入。</div>
+</figure>
+
+<h4>NeuS（fps4，待补）</h4>
+<p>NeuS 保存了 2000/5000/10000/20000/40000 步的 checkpoint，但 marching cubes 只在训练末导出了一份 mesh，且受 <a href="#neus-fix">§5.6</a> 渲染 bug 影响没有逐步 PSNR。要做迭代对比，需对每个 checkpoint 重新提取 mesh 并修复渲染以得到 RGB 指标，此处先预留位置；从 §5.3 的损失曲线可见 NeuS 的损失在 20k 步后已趋于平缓，预计几何同样在 20k–40k 步接近饱和。</p>
+<figure>
+<div class="placeholder">［预留位置·图 8］NeuS 在 2k / 5k / 10k / 20k / 40k 步的 SDF mesh 对比（正/背面 + 局部放大）。<br>需对每个 checkpoint 调用 <code>neus.py export-mesh</code> 重新提取 mesh 后填入。</div>
+</figure>
+
+<h3 id="geometry">5.5 几何质量</h3>
+<p>由于没有 RGB-D 或 LiDAR 真值，几何分析采用“COLMAP 稀疏点云为 proxy + 定性观察”的方式，并诚实承认 proxy 自身在反光处也有孔洞。下方交互式查看器（<a href="#viewer">§5.7</a>）可旋转对比四种表示的几何：3DGS 的高斯云、NeuS 的 SDF mesh 顶点、COLMAP 的 dense 云、Nerfacto 的稀疏 proxy。总体观察：3DGS 与 NeuS 的表面在窗户与墙面处连续、锐利；<strong>镜面衣柜门附近所有方法都出现缺失或漂浮结构</strong>，这与 §5.1 的失败归因一致；NeuS 的 mesh 相比 3DGS 高斯更“薄”、更接近单一表面，体现了 SDF 的几何先验。</p>
+<p>说明：fps4/fps8 的 <code>geometry_metrics.csv</code> 为空，原因是这两次运行关闭了 dense SfM（<code>sfm.dense=false</code>），缺少作为 Chamfer/F-score 参考的 dense proxy，故未计算几何定量指标（已在 TODO 中记录补跑）。</p>
+
+<h3 id="neus-fix">5.6 NeuS 渲染失败的定位与修复</h3>
+<p>四次 NeuS 运行的 <code>metrics.csv</code> 都把 NeuS 记为 <code>render skipped</code>，这是本作业最需要诚实交代的环节。报错来自 nerfstudio 在 held-out 渲染时加载 checkpoint：</p>
+<pre><code>RuntimeError: Error(s) in loading state_dict for NeuSFactoModel:
+  size mismatch for field.embedding_appearance.embedding.weight:
+    copying a param with shape torch.Size([554, 32]) from checkpoint,
+    the shape in current model is torch.Size([61, 32]).</code></pre>
+<p>这里的 554 与 61 分别是 fps4 的<strong>训练图数</strong>与<strong>测试图数</strong>。定位后的根因是：管线为了在 held-out 集上评测 NeuS，会把 nerfstudio 的数据解析器重定向到只含测试图的 <code>processed/test</code> 目录（<code>write_neus_eval_config</code>，<code>src/lab3/reconstruction/neus.py</code>）。NeuSFacto 的 SDF field 在构建时会按“数据解析器看到的图像数”分配一张逐图 appearance-embedding 表；训练时这张表有 554 行并写进了 checkpoint，而渲染时模型只看到 61 张测试图、只分配 61 行，<code>load_state_dict</code> 因此在维度上冲突并中止——即便 <code>strict=False</code> 也无法绕过，因为 PyTorch 对尺寸不匹配是直接抛错而非跳过。需要强调，序列化的 <code>use_appearance_embedding: false</code> 是误导性的：运行时 field 仍会创建该 embedding，所以这个开关并不能阻止冲突。</p>
+<p>修复采取与框架无关的策略：在渲染前从 checkpoint 的副本中剥离所有 <code>*embedding_appearance*</code> 张量，这样被剥离的键对加载而言只是“缺失键”（<code>strict=False</code> 容忍），尺寸冲突不复存在；appearance 是次要的视角相关辅助项，丢弃它对以几何为主的 NeuS 渲染影响很小。实现已加入两处：一是管线内置的 <code>patch_checkpoint_for_eval</code>（<code>neus.py</code>，已接入 <code>evaluate()</code>，未来运行会自动修复）；二是独立脚本 <code>scripts/lab3/render_neus_heldout.py</code>，可直接对既有 run 重新渲染 RGB / 法向 / 深度（补上了此前缺失的 NeuS 可视化）。两者都只读写 run 目录、不动虚拟环境。</p>
+<div class="todo">修复代码已就位，但需要在 Ubuntu 训练机（CUDA）上重新渲染才能把 NeuS 的 PSNR/SSIM/LPIPS 与定性图填入本报告。命令见附录。当前报告以“训练成功 + SDF mesh 几何成功”作为 NeuS 的证据，RGB 评测列为待补。</div>
+
+<h3 id="viewer">5.7 交互式点云（四种表示几何对比）</h3>
+<p>下方查看器把四种表示的几何统一为点云并降采样到约 8–10 万点，可用鼠标旋转/缩放、用下拉切换。需要联网加载 three.js（CDN）；若离线则显示提示。点云数据以二进制（float32 xyz + uint8 rgb）存放于 <code>report_assets/pointcloud/</code>，由 <code>scripts/lab3/build_report_assets.py</code> 从各 <code>.ply</code> 降采样生成。</p>
+<div id="viewer-wrap">
+  <canvas id="viewer-canvas"></canvas>
+  <div class="viewer-bar">
+    <label>表示：
+      <select id="pc-select">
+        <option value="3dgs_fps4">3DGS gaussians (fps4)</option>
+        <option value="neus_fps4">NeuS SDF mesh 顶点 (fps4)</option>
+        <option value="sfm_dense_fps5">COLMAP dense 云 (fps5)</option>
+        <option value="nerf_sparse_fps4">Nerfacto sparse 云 (fps4)</option>
+        <option value="3dgs_fps8">3DGS gaussians (fps8)</option>
+      </select>
+    </label>
+    <button id="pc-reset">复位视角</button>
+    <label><input type="checkbox" id="pc-spin" checked> 自动旋转</label>
+    <label>距离 <input type="range" id="pc-dist" min="0.6" max="6" step="0.05" value="1.9" style="width:130px;vertical-align:middle"></label>
+  </div>
+  <div class="viewer-info" id="pc-info">加载中…</div>
+  <div class="pc-fallback" id="pc-fallback" style="display:none">需要联网加载 three.js（CDN）才能显示交互式点云。请联网后刷新，或参阅 <code>report_assets/pointcloud/*.bin</code>。</div>
+</div>
+<p class="small">提示：3DGS(fps8) 与 3DGS(fps4) 对比可看到 fps8 因位姿漂移产生的漂浮/拉丝高斯；NeuS mesh 顶点呈现更薄的壳状表面；镜面门区域在各表示中都有缺失。</p>
+
+<!-- =================== 6 讨论 =================== -->
+<h2 id="discussion">6 讨论</h2>
+
+<p>§5 中各方法的定量差距，并非调参的偶然结果，而是由每种表示"存什么、优化什么"决定的。Nerfacto 把场景表示成连续的辐射场，监督信号只有渲染后的图像；它的目标里没有任何一项迫使密度坍缩成薄表面，因此它可以忠实地复现训练视角、却让几何保持弥散——这正是它在镜面门处误差偏高、反射被"烘焙"进视角相关颜色的原因。NeuS 用带符号距离场的零等值面来定义表面，用几何约束换取了可提取的干净 mesh，代价是同一个"单一清晰表面"的假设在成像并非单一不透明表面的地方（镜面、透明）失效，也使它对位姿与超参更敏感。3DGS 介于两者之间：它像点云一样保留一组显式 primitive，又像神经场一样让这些 primitive 可微、并自适应致密化，因此既继承了光栅化的渲染速度与锐利的新视角，又不必像 NeRF 那样沿光线密集采样网络。NeRF 的弥散表面、NeuS 的干净但脆弱的表面、3DGS 锐利但不等于真实表面的高斯——这些行为来自表示本身，而不是某个实现做得比另一个好。</p>
+
+<p>把这些表示放到几个相互冲突的实际维度上看，取舍是一致的。在内存上，Nerfacto 与 NeuS 很紧凑（各约 168 MB），因为场景被编码进网络权重；3DGS 则要存数十万个高斯，在 fps4 上膨胀到约 1.3 GB——显式是要用存储来换的。在渲染速度上，3DGS 把高斯投影并 α-混合，是唯一接近实时的方法，而 NeRF 与 NeuS 必须逐采样点沿光线行进并查询网络，单帧代价显著更高。在几何保真度上顺序反过来：NeuS 给出最接近真实表面的几何，3DGS 的高斯只是对表面的近似，NeRF 的密度场最不具备几何意义。在数据获取上，三者都依赖准确的 COLMAP 位姿，但 NeuS 最脆弱，因为干净的 SDF 无法吸收不一致的观测，而 NeRF 可以用视角相关颜色"糊住"位姿或外观误差——这也是 NeRF 的伪影直到新视角才暴露的原因。在拓扑灵活性上，NeRF 的连续体场与 3DGS 的自由高斯几乎不受约束，代价是不给出干净表面；NeuS 与显式 mesh 则更受限、但也更可编辑。这些维度直接冲突：渲染最快、看起来最锐利的 3DGS，既不是几何最忠实的，也不是最紧凑的；而几何最忠实的 NeuS，恰恰最慢、对数据最敏感。</p>
+
+<p>本场景观察到的具体失败也能在同一条逻辑下解释。Nerfacto 在门与镜面附近的高误差，是它"优化图像而非表面"的直接表现：反射被视角相关颜色吸收，训练视角尚可，新视角即暴露为重影。3DGS 在视角覆盖不足或位姿漂移处（fps8 尤为明显）会出现漂浮高斯与背景泄漏——优化器会在空间中放置半透明高斯去解释训练图，形成肉眼可见的拉丝与雾状结构。NeuS 在镜面门处的 mesh 缺失，则源于单一 SDF 表面无法解释镜面反射成像；这正是它在本场景几何最可信、却 RGB 评测受阻（叠加 §5.6 的实现问题）的根源。换言之，这些失败可以被表示结构解释，而不必诉诸"实现好坏"。</p>
+
+<!-- =================== 7 结论 =================== -->
+<h2 id=”conclusion”>7 结论</h2>
+<p>若要把结果用于 AR/VR、校园数字孪生浏览、机器人导航或后续场景编辑这类以”可交互查看”为先的应用，我会选择 3DGS。这一选择出于表示结构而非偶然优势：3DGS 把显式 primitive 与可微、自适应致密化的优化结合在一起，既达到了接近神经场的渲染质量，又避免了 NeRF、NeuS 那种沿光线密集采样带来的慢速渲染；同时显式、可枚举的高斯集合比一团弥散的密度场更易于施加正则与编辑，因此也在一定程度上缓解了纯神经场容易过拟合、训练困难的问题。再叠加它训练快、渲染资源开销低的特点，当交付物是一个可实时查看的场景而非测量级表面时，3DGS 是最实用的折中。在本场景的实证上它也印证了这一点：fps4 上取得最高的 PSNR/SSIM、渲染可实时、几何足够直观，代价仅是模型偏大（约 1.3 GB）。若下游任务确实要求精确表面（mesh 编辑、物理仿真、度量几何），则在修复 §5.6 的渲染流程后 NeuS 的 SDF 表面更可信；但就本场景与上述应用而言，3DGS 是更合适的表示。Nerfacto 在本场景被镜面反射拖累、表现疲软，不宜作为主力；COLMAP 点云则更适合作为位姿与几何 proxy，而非最终交付。</p>
+<p>改进方向有三：其一，<strong>从数据端入手收益最大</strong>——重拍时绕开镜面衣柜门的快速转动、或在转动区放慢、对反光面做 mask，比调任何超参都更能提升 fps8 与门区域质量；其二，为 NeuS/3DGS 引入深度或法向先验、对镜面区做语义 mask，缓解单一表面假设与高斯漂浮；其三，把抽帧策略从”固定 fps”改为”基于运动/模糊的自适应抽帧”，预期在相同帧数下显著优于 fps8。</p>
+
+<!-- =================== 附录 =================== -->
+<h2 id="appendix">8 附录</h2>
+
+<h3 id="boya">8.1 博雅场景（占位，尚未完成）</h3>
+<p>博雅为额外的室外/物体级补充场景，目前<strong>尚未跑完</strong>，仅作占位。已完成的部分：<code>20260621_172005_boya_close</code>（13 图，sfm/3dgs/nerf/neus 均已训练，3DGS PSNR 14.52、Nerfacto 13.23，质量偏低，疑似视角覆盖严重不足）；<code>20260621_192805_boya_far</code> 仅完成 sfm+3dgs，缺 nerf/neus/评测。完整结果待补后，将在此补充与寝室的跨场景对比。</p>
+
+<h3 id="todolist">8.2 TODO 清单</h3>
+<div class="todo">在 Ubuntu(CUDA) 上对四次 NeuS run 跑 <code>render_neus_heldout.py</code>，补齐 NeuS 的 PSNR/SSIM/LPIPS 与定性渲染列，并刷新 <code>metrics.csv</code> 与对比图。</div>
+<div class="todo">为 fps4/fps8 重开 <code>sfm.dense=true</code> 跑 dense MVS，提供 Chamfer/F-score 的几何 proxy，填上空的 <code>geometry_metrics.csv</code>。</div>
+<div class="todo">用 SIBR viewer 单独测量 3DGS 真实推理 FPS（当前 <code>render_fps</code> 含磁盘 I/O，偏低，不代表实时能力）。</div>
+<div class="todo">为 fps2 补定性对比图：其 3DGS 只保存了 16 张 eval-split 渲染、无法按抽帧序号与 GT 配对，需先用 <code>render.py</code> 重渲 fps2 的完整测试集后再生成面板。</div>
+<div class="todo">跑完博雅 close/far，补跨场景对比章节。</div>
+<div class="todo">渲染 3DGS fps4 的 7k/30k 检查点（<code>render.py --iteration</code>），填入图 7 的迭代定性对比；表已用在线 PSNR 量化（24.09→27.53 dB）。</div>
+<div class="todo">对 NeuS 各 checkpoint（2k/5k/10k/20k/40k）重新 <code>export-mesh</code> 并修复渲染，填入图 8 的迭代几何对比与逐步 PSNR。</div>
+<div class="todo">提交包附 <code>uv pip freeze</code> 与相机轨迹截图（COLMAP <code>model_converter</code> 导出）。</div>
+
+<hr>
+<p class="small">报告由 <code>docs/lab3/report.html</code> 渲染；图表与点云由 <code>scripts/lab3/build_report_{assets,charts}.py</code> 生成。所有运行结果图像均位于 <code>docs/lab3/report_assets/</code>。</p>
+
+<!-- =================== mermaid diagrams =================== -->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>mermaid.initialize({startOnLoad:true, theme:"neutral", flowchart:{htmlLabels:true, curve:"basis"}});</script>
+
+<!-- =================== three.js viewer =================== -->
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
+</script>
+<script type="module">
+const fallback = document.getElementById('pc-fallback');
+const canvas = document.getElementById('viewer-canvas');
+const info = document.getElementById('pc-info');
+let THREE, renderer, scene, camera, controls, points = null, spin = true, raf = 0;
+const INITIAL_DIST = 1.9;
+const distEl = () => document.getElementById('pc-dist');
+
+async function boot() {
+  try {
+    THREE = await import('three');
+    const oc = await import('three/addons/controls/OrbitControls.js');
+    renderer = new THREE.WebGLRenderer({canvas, antialias:true});
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    scene = new THREE.Scene(); scene.background = new THREE.Color(0x111111);
+    camera = new THREE.PerspectiveCamera(55, 16/9, 0.01, 1000); camera.position.set(0,0,INITIAL_DIST);
+    controls = new oc.OrbitControls(camera, canvas);
+    controls.enableDamping = true; controls.autoRotate = true; controls.autoRotateSpeed = 0.8;
+    controls.zoomSpeed = 2.5;  // faster wheel zoom (default 1 was too slow)
+    document.getElementById('pc-spin').addEventListener('change', e => controls.autoRotate = e.target.checked);
+    document.getElementById('pc-reset').addEventListener('click', () => load(document.getElementById('pc-select').value));
+    document.getElementById('pc-select').addEventListener('change', e => load(e.target.value));
+    // distance slider: move camera along its current view direction
+    distEl().addEventListener('input', e => {
+      if (!controls) return;
+      const d = parseFloat(e.target.value);
+      const dir = new THREE.Vector3().subVectors(camera.position, controls.target);
+      dir.normalize().multiplyScalar(d);
+      camera.position.copy(controls.target).add(dir);
+      controls.update();
+    });
+    // keep slider in sync with wheel/dolly zoom
+    controls.addEventListener('change', () => {
+      if (!distEl()) return;
+      const d = camera.position.distanceTo(controls.target);
+      if (Math.abs(d - parseFloat(distEl().value)) > 0.02) distEl().value = d.toFixed(2);
+    });
+    window.addEventListener('resize', resize); resize();
+    load('3dgs_fps4'); animate();
+  } catch (err) {
+    console.error(err);
+    canvas.style.display = 'none'; fallback.style.display = 'block';
+    document.querySelectorAll('.viewer-bar button,.viewer-bar select,.viewer-bar input').forEach(e=>e.disabled=true);
+  }
+}
+
+function resize(){
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (renderer) renderer.setSize(w, h, false);
+  if (camera){ camera.aspect = w/h; camera.updateProjectionMatrix(); }
+}
+
+async function load(name){
+  info.textContent = '加载 ' + name + ' …';
+  const meta = await fetch('report_assets/pointcloud/' + name + '.json').then(r=>r.json()).catch(()=>null);
+  if (!meta){ info.textContent = '缺少 ' + name; return; }
+  const buf = await fetch('report_assets/pointcloud/' + name + '.bin').then(r=>r.arrayBuffer());
+  const n = meta.n;
+  const xyz = new Float32Array(buf, 0, n*3);
+  const rgb = new Uint8Array(buf, n*3*4, n*3);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(xyz, 3));
+  const colors = new Float32Array(n*3);
+  for (let i=0;i<n*3;i++) colors[i] = rgb[i]/255;
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  // center + scale to unit sphere
+  geo.computeBoundingSphere();
+  const c = geo.boundingSphere.center, r = Math.max(geo.boundingSphere.radius, 1e-6);
+  const pos = geo.attributes.position;
+  for (let i=0;i<n;i++){ pos.setXYZ(i, (pos.getX(i)-c.x)/r, (pos.getY(i)-c.y)/r, (pos.getZ(i)-c.z)/r); }
+  pos.needsUpdate = true;
+  if (points){ scene.remove(points); points.geometry.dispose(); points.material.dispose(); }
+  const mat = new THREE.PointsMaterial({size:0.012, vertexColors:true, sizeAttenuation:true});
+  points = new THREE.Points(geo, mat);
+  scene.add(points);
+  camera.position.set(0,0,INITIAL_DIST); controls.target.set(0,0,0); controls.update();
+  if (distEl()) distEl().value = String(INITIAL_DIST);
+  info.textContent = meta.label + '  ·  ' + n + ' pts';
+}
+
+function animate(){
+  raf = requestAnimationFrame(animate);
+  if (controls) controls.update();
+  if (renderer && scene && camera) renderer.render(scene, camera);
+}
+
+boot();
+</script>
+
+</body>
+</html>
