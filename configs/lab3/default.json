@@ -45,6 +45,8 @@
       "max_num_iterations": 30000,
       "save_iterations": [],
       "train_num_rays_per_batch": 4096,
+      "train_num_images_to_sample_from": 256,
+      "train_num_times_to_repeat_images": 100,
       "num_downscales": 0,
       "skip_process_data": false,
       "colmap_model": null
@@ -55,6 +57,8 @@
       "max_num_iterations": 20001,
       "save_iterations": [],
       "train_num_rays_per_batch": 2048,
+      "train_num_images_to_sample_from": 256,
+      "train_num_times_to_repeat_images": 100,
       "colmap_model": null,
       "scene_scale": 2.0,
       "export_mesh": true,
