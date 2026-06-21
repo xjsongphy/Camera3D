@@ -86,9 +86,7 @@ def save_qualitative(
         gt = load_image(gt_path, eval_size)
         methods: dict[str, np.ndarray] = {}
         for method, render_dir in method_render_dirs.items():
-            render_path = _find_render(render_dir, name)
-            if render_path is None and index < len(ordered_renders.get(method, [])):
-                render_path = ordered_renders[method][index]
+            render_path = _resolve_render(render_dir, name, index, ordered_renders.get(method, []))
             if render_path is not None:
                 methods[method] = load_image(render_path, eval_size)
         if not methods:
@@ -120,6 +118,37 @@ def _list_render_images(render_dir: Path) -> list[Path]:
     for pattern in ("*.png", "*.jpg", "*.jpeg"):
         paths.extend(sorted(render_dir.rglob(pattern)))
     return sorted(paths)
+
+
+def _resolve_render(
+    render_dir: Path,
+    target_name: str,
+    index: int,
+    ordered: list[Path],
+) -> Path | None:
+    """Resolve one qualitative render, preferring positional bundles when needed.
+
+    Some backends, notably 3DGS, write test renders as ``00000.png``,
+    ``00001.png`` ... where the filename is only the position inside the held-out
+    list, not the canonical image name. Those directories must be indexed by
+    order rather than by stem matching, otherwise ``vid_..._000030.jpg`` would
+    incorrectly resolve to ``00030.png`` instead of the 3rd held-out render.
+    """
+    if _is_positional_render_bundle(render_dir, ordered):
+        return ordered[index] if index < len(ordered) else None
+    return _find_render(render_dir, target_name) or (ordered[index] if index < len(ordered) else None)
+
+
+def _is_positional_render_bundle(render_dir: Path, ordered: list[Path]) -> bool:
+    if not ordered:
+        return False
+    if not all(path.stem.isdigit() for path in ordered):
+        return False
+    gt_dir = render_dir.parent / "gt"
+    if not gt_dir.is_dir():
+        return False
+    gt_images = _list_render_images(gt_dir)
+    return len(gt_images) == len(ordered)
 
 
 def _resize_like(image: np.ndarray, reference: np.ndarray) -> np.ndarray:

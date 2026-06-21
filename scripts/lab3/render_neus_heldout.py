@@ -54,7 +54,6 @@ shared virtual environment.
 from __future__ import annotations
 
 import argparse
-import copy
 import re
 import shutil
 import subprocess
@@ -71,40 +70,35 @@ def _latest_checkpoint(model_dir: Path) -> Path | None:
 
 
 def strip_appearance_embedding(checkpoint_path: Path, output_path: Path) -> Path:
-    """Write a copy of ``checkpoint_path`` without appearance-embedding tensors.
-
-    Imports torch lazily so the script can be imported on machines without the
-    CUDA training stack. Returns the patched checkpoint path.
-    """
+    """Write ``output_path`` without appearance-embedding tensors."""
     import torch  # noqa: PLC0415 -- optional dependency on the authoring host
 
     state = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     pipeline_state = state.get("pipeline", state)
-    pytorch_state = (
-        pipeline_state.get("model", pipeline_state)
-        if isinstance(pipeline_state, dict)
-        else pipeline_state
-    )
-    removed = [
-        key for key in list(pytorch_state.keys()) if EMBEDDING_RE.search(key)
-    ]
+    removed = [key for key in list(pipeline_state.keys()) if EMBEDDING_RE.search(key)]
     for key in removed:
-        pytorch_state.pop(key)
+        pipeline_state.pop(key)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(state, output_path)
     print(f"[neus-fix] stripped {len(removed)} appearance-embedding keys -> {output_path}")
     return output_path
 
 
-def _set_load_dir(eval_config: Path, patched_dir: Path) -> None:
-    """Point an eval config's ``load_dir`` at the patched checkpoint folder."""
-    import yaml  # noqa: PLC0415
+def patch_checkpoint_in_place(model_dir: Path, ckpt: Path, backup_dir: Path) -> Path:
+    """Backup the latest checkpoint, then overwrite it with a sanitized copy.
 
-    text = eval_config.read_text(encoding="utf-8")
-    config = yaml.load(text, Loader=yaml.Loader)
-    config.load_dir = str(patched_dir)
-    config.load_step = None
-    eval_config.write_text(yaml.dump(config), encoding="utf-8")
+    nerfstudio's eval path ignores ``load_dir`` stored in the YAML and rebuilds
+    the checkpoint directory from ``output_dir / experiment_name / method_name /
+    timestamp / nerfstudio_models``. To ensure ``ns-render`` picks up the
+    sanitized checkpoint, we patch the file in-place and keep the untouched
+    original under ``results/neus/patched_models`` for auditability.
+    """
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    backup = backup_dir / ckpt.name
+    if not backup.exists():
+        shutil.copy2(ckpt, backup)
+    strip_appearance_embedding(backup, ckpt)
+    return backup
 
 
 def render_outputs(eval_config: Path, output_root: Path, kinds: list[str]) -> None:
@@ -145,13 +139,7 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"no NeuS checkpoint under {neus_dir / 'train'}")
 
     patched_dir = neus_dir / "patched_models"
-    patched_dir.mkdir(parents=True, exist_ok=True)
-    patched = patched_dir / ckpt.name
-    if not patched.exists():
-        # Keep the original checkpoint intact; copy first so the strip is non-destructive.
-        shutil.copy2(ckpt, patched)
-    strip_appearance_embedding(patched, patched)
-    _set_load_dir(eval_config, patched_dir)
+    patch_checkpoint_in_place(model_dir, ckpt, patched_dir)
 
     kinds = []
     if not args.skip_rgb:

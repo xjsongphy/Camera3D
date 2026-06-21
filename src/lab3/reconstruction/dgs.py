@@ -267,7 +267,7 @@ class DGSReconstructor(Reconstructor):
     def qualitative_render_dir(self, run_dir: Path) -> Path:
         test_dir = run_dir / "results" / self.name / "test"
         matches = sorted(test_dir.glob("ours_*")) if test_dir.is_dir() else []
-        return matches[-1] if matches else run_dir / "results" / self.name
+        return matches[-1] / "renders" if matches else run_dir / "results" / self.name
 
     def viewer_targets(self, run_dir: Path) -> list[ViewerTarget]:
         candidates = [run_dir / "geometry" / self.name / "gaussians.ply"]

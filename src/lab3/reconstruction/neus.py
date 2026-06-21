@@ -252,6 +252,9 @@ class NeuSReconstructor(Reconstructor):
             patch_checkpoint_for_eval(context.run_dir / "results" / self.name)
 
         try:
+            test_names = _registered_eval_names(
+                context.run_dir / "results" / self.name / "processed" / "test" / "meta_data.json"
+            )
             return evaluate_nerfstudio(
                 self.name,
                 context,
@@ -260,6 +263,7 @@ class NeuSReconstructor(Reconstructor):
                 eval_dir,
                 notes="NeuS trains on train-only metadata and evaluates with a held-out config in the same coordinates",
                 config_path=evaluation_config if not context.dry_run else None,
+                test_names=test_names if not context.dry_run else None,
             )
         except Lab3Error as exc:
             return metrics_row(
@@ -403,9 +407,12 @@ def patch_checkpoint_for_eval(neus_result_dir: Path) -> tuple[Path, Path] | None
     model then loads cleanly (the stripped keys become missing/ignored) and the
     minor view-dependent appearance aid is simply not restored.
 
-    The original checkpoint is left untouched; a patched copy is written next to
-    it and the eval config is repointed at the patched directory. Returns the
-    (patched_checkpoint, eval_config) pair, or ``None`` if no checkpoint exists.
+    nerfstudio's eval path recomputes ``load_dir`` from the training metadata
+    and ignores a manually edited ``eval_config.load_dir``. To make the fix
+    effective for both ``ns-render`` and ``lab3 --run-dir``, we therefore back
+    up the original checkpoint under ``patched_models/`` and overwrite the
+    training checkpoint in-place with the sanitized state dict. Returns the
+    (backup_checkpoint, eval_config) pair, or ``None`` if no checkpoint exists.
     """
     import torch  # local import: torch is a heavy training-only dependency
 
@@ -416,28 +423,18 @@ def patch_checkpoint_for_eval(neus_result_dir: Path) -> tuple[Path, Path] | None
     ckpt = ckpts[-1]
     patched_dir = neus_result_dir / "patched_models"
     patched_dir.mkdir(parents=True, exist_ok=True)
-    patched = patched_dir / ckpt.name
-    # Copy first so the strip never mutates the original checkpoint on disk.
-    if not patched.exists():
+    backup = patched_dir / ckpt.name
+    if not backup.exists():
         import shutil
-        shutil.copy2(ckpt, patched)
-    state = torch.load(patched, map_location="cpu", weights_only=False)
+        shutil.copy2(ckpt, backup)
+    state = torch.load(backup, map_location="cpu", weights_only=False)
     pipeline_state = state.get("pipeline", state)
-    model_state = (
-        pipeline_state.get("model", pipeline_state)
-        if isinstance(pipeline_state, dict) else pipeline_state
-    )
-    for key in [k for k in list(model_state.keys()) if "embedding_appearance" in k]:
-        model_state.pop(key)
-    torch.save(state, patched)
+    for key in [k for k in list(pipeline_state.keys()) if "embedding_appearance" in k]:
+        pipeline_state.pop(key)
+    torch.save(state, ckpt)
 
     eval_config = neus_result_dir / "eval_config.yml"
-    if eval_config.is_file():
-        config = yaml.load(eval_config.read_text(encoding="utf-8"), Loader=yaml.Loader)
-        config.load_dir = str(patched_dir)
-        config.load_step = None
-        eval_config.write_text(yaml.dump(config), encoding="utf-8")
-    return patched, eval_config
+    return backup, eval_config
 
 
 def write_neus_eval_config(training_config: Path, test_data_dir: Path, output_path: Path) -> Path:
@@ -487,6 +484,27 @@ def _optional_int(value: object) -> int | None:
 def _validate_cache_setting(name: str, value: int) -> None:
     if value != -1 and value <= 0:
         raise Lab3Error(f"NeuS {name} must be -1 or a positive integer")
+
+
+def _registered_eval_names(meta_data_path: Path) -> tuple[str, ...]:
+    if not meta_data_path.is_file():
+        raise Lab3Error(f"NeuS test metadata is missing: {meta_data_path}")
+    try:
+        meta = json.loads(meta_data_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise Lab3Error(f"Invalid NeuS test metadata JSON: {meta_data_path}") from exc
+    frames = meta.get("frames")
+    if not isinstance(frames, list) or not frames:
+        raise Lab3Error(f"NeuS test metadata contains no frames: {meta_data_path}")
+    names: list[str] = []
+    for frame in frames:
+        rgb_path = frame.get("rgb_path") if isinstance(frame, dict) else None
+        if not rgb_path:
+            continue
+        names.append(Path(str(rgb_path)).name)
+    if not names:
+        raise Lab3Error(f"NeuS test metadata contains no rgb_path entries: {meta_data_path}")
+    return tuple(names)
 
 
 def _read_images(path: Path) -> list[tuple[str, np.ndarray, int]]:

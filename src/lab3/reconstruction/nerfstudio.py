@@ -9,7 +9,7 @@ import subprocess
 import sys
 from collections import deque
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from lab3.common import Lab3Error, run_cmd, timed_block
 from lab3.evaluate import (
@@ -67,6 +67,7 @@ def evaluate_nerfstudio(
     *,
     notes: str,
     config_path: Path | None = None,
+    test_names: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """Common evaluator used behind NeRF and NeuS's identical interface."""
     train_bin = method_config.train_bin
@@ -94,7 +95,9 @@ def evaluate_nerfstudio(
         run_cmd(render_command, dry_run=context.dry_run, log_path=logs / f"{method}_render.log")
 
     pairs = [] if context.dry_run else pair_rendered_views(
-        context.images_dir, context.split.test, render_dir
+        context.images_dir,
+        tuple(test_names) if test_names is not None else context.split.test,
+        render_dir,
     )
     metrics = (
         compute_image_metrics(

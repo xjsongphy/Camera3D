@@ -3,12 +3,13 @@
 
 Pure numpy + PIL (no nerfstudio / venv). Produces:
   report_assets/cross_fps/grid_<view>.png   GT | 3DGS | NeRF across fps2/4/5/8
-  report_assets/methods/<run>/...           copied qualitative panels
+  report_assets/methods/*.png               GT / render / error images for report.html
   report_assets/pointcloud/*.json           downsampled point clouds for three.js
   report_assets/metrics.json                metrics summary for client-side charts
 
-Pairing follows lab3.evaluate.pair_rendered_views: match a held-out name to a
-render by trailing-numeric-suffix value.
+Pairing for report panels prefers backend-native held-out order when a render
+directory is a positional bundle (e.g. 3DGS writes ``00000.png``, ``00001.png``
+... for the 1st/2nd/... held-out view, not for canonical frame numbers).
 """
 
 from __future__ import annotations
@@ -27,6 +28,8 @@ RUNS = {
     "fps4": "20260620_200014_dormitory_fps4",
     "fps5": "20260619_114307_dormitory_fps5",
     "fps8": "20260621_110244_dormitory_fps8",
+    "boya_close": "20260621_172005_boya_close",
+    "boya_far": "20260621_192805_boya_far",
 }
 FPS_ORDER = ["fps2", "fps4", "fps5", "fps8"]
 THUMB_H = 300  # target row height for montages
@@ -61,6 +64,32 @@ def find_render(render_root: Path, test_name: str) -> Path | None:
         return candidates[0] if candidates else None
     by_val = {num_suffix(p.stem): p for p in candidates if num_suffix(p.stem) is not None}
     return by_val.get(target)
+
+
+def list_render_images(render_root: Path) -> list[Path]:
+    if not render_root.is_dir():
+        return []
+    return sorted(
+        path for path in render_root.rglob("*")
+        if path.is_file() and path.suffix.lower() in {".png", ".jpg", ".jpeg"}
+    )
+
+
+def is_positional_render_bundle(render_root: Path, ordered: list[Path]) -> bool:
+    if not ordered or not all(path.stem.isdigit() for path in ordered):
+        return False
+    gt_dir = render_root.parent / "gt"
+    if not gt_dir.is_dir():
+        return False
+    gt_images = list_render_images(gt_dir)
+    return len(gt_images) == len(ordered)
+
+
+def resolve_render(render_root: Path, test_name: str, index: int) -> Path | None:
+    ordered = list_render_images(render_root)
+    if is_positional_render_bundle(render_root, ordered):
+        return ordered[index] if index < len(ordered) else None
+    return find_render(render_root, test_name) or (ordered[index] if index < len(ordered) else None)
 
 
 def dgs_render_dir(tag: str) -> Path:
@@ -174,35 +203,62 @@ def _error_map_magma(gt: np.ndarray, pred: np.ndarray) -> np.ndarray:
     return (cm.magma(diff / peak)[:, :, :3] * 255).astype(np.uint8)
 
 
-def build_qualitative(tag: str, views: list[str]) -> None:
-    """Correctly-paired GT | 3DGS | err | NeRF | err panel for one fps.
+def save_report_image(path: Path, image: np.ndarray) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.fromarray(image).save(path)
+    print("wrote", path)
 
-    Pairing uses numeric-suffix value (3DGS full-set render index, NeRF frame
-    index), NOT the pipeline's positional fallback which mis-paired 3DGS to the
-    wrong frame. Both 3DGS and NeRF are resolved against the same GT view so the
-    columns show the same scene.
-    """
+
+def build_qualitative(tag: str, views: list[str]) -> None:
+    """Export correctly-paired GT / render / error images for one fps."""
     dest = OUT / "methods"
     dest.mkdir(parents=True, exist_ok=True)
-    for view in views:
+    for idx, view in enumerate(views):
         gt_path = run_dir(tag) / "prepared" / "images" / view
         if not gt_path.exists():
             continue
         gt = load_img(gt_path)
-        dgs = find_render(dgs_render_dir(tag), view)
-        nerf = find_render(nerf_render_dir(tag), view)
+        dgs = resolve_render(dgs_render_dir(tag), view, index=idx)
+        nerf = resolve_render(nerf_render_dir(tag), view, index=idx)
         if dgs is None or nerf is None:
             print(f"skip {tag} {view}: missing render (3dgs={dgs}, nerf={nerf})")
             continue
         dgs_im = load_img(dgs)
         nerf_im = load_img(nerf)
-        tiles = [gt, dgs_im, _error_map_magma(gt, dgs_im), nerf_im, _error_map_magma(gt, nerf_im)]
-        row = hstack_white(tiles, THUMB_H)
-        col_hdr = header_bar(["GT", "3DGS", "3DGS err", "NeRF", "NeRF err"], row.shape[1], 0)
-        final = np.vstack([col_hdr, row])
-        out = dest / f"{tag}_{Path(view).stem}.png"
-        Image.fromarray(final).save(out)
-        print("wrote", out)
+        stem = f"{tag}_{Path(view).stem}"
+        save_report_image(dest / f"{stem}_gt.png", gt)
+        save_report_image(dest / f"{stem}_3dgs.png", dgs_im)
+        save_report_image(dest / f"{stem}_3dgs_err.png", _error_map_magma(gt, dgs_im))
+        save_report_image(dest / f"{stem}_nerf.png", nerf_im)
+        save_report_image(dest / f"{stem}_nerf_err.png", _error_map_magma(gt, nerf_im))
+
+
+def build_3dgs_only_qualitative(tag: str, views: list[str]) -> None:
+    """Export GT / 3DGS / error images for appendix-only scenes such as Boya.
+
+    Uses 3DGS test-set GT images (guaranteed to match renders pixel-perfectly)
+    instead of the original prepared images which may differ in resolution/crop.
+    """
+    dest = OUT / "methods"
+    dest.mkdir(parents=True, exist_ok=True)
+    render_root = dgs_render_dir(tag)
+    gt_dir = render_root.parent / "gt"  # 3DGS test-set GT, paired with renders
+    for idx, view in enumerate(views):
+        # Use 3DGS test GT (same resolution/processing as renders)
+        gt_path = gt_dir / f"{idx:05d}.png"
+        if not gt_path.exists():
+            print(f"skip {tag} {view}: missing gt {gt_path}")
+            continue
+        gt = load_img(gt_path)
+        dgs = render_root / f"{idx:05d}.png"
+        if not dgs.exists():
+            print(f"skip {tag} {view}: missing 3dgs render {dgs}")
+            continue
+        dgs_im = load_img(dgs)
+        stem = f"{tag}_{Path(view).stem}"
+        save_report_image(dest / f"{stem}_gt.png", gt)
+        save_report_image(dest / f"{stem}_3dgs.png", dgs_im)
+        save_report_image(dest / f"{stem}_3dgs_err.png", _error_map_magma(gt, dgs_im))
 
 
 def copy_qualitative() -> None:
@@ -315,32 +371,32 @@ def build_pointclouds() -> None:
     p = run_dir("fps4") / "geometry" / "3dgs" / "gaussians.ply"
     if p.exists():
         xyz, rgb = parse_binary_vertex_ply(p)
-        xyz, rgb = downsample(xyz, rgb, 100000)
+        xyz, rgb = downsample(xyz, rgb, 50000)
         write_pointcloud_json(xyz, rgb, pcdir / "3dgs_fps4.json", "3DGS gaussians (fps4, 100k subsample)")
     # NeuS mesh fps4 -> vertices
     p = run_dir("fps4") / "geometry" / "neus" / "sdf_mesh.ply"
     if p.exists():
         xyz, rgb = parse_binary_vertex_ply(p)
         rgb[:] = 180  # uniform grey: mesh has no vertex color
-        xyz, rgb = downsample(xyz, rgb, 100000)
+        xyz, rgb = downsample(xyz, rgb, 50000)
         write_pointcloud_json(xyz, rgb, pcdir / "neus_fps4.json", "NeuS SDF mesh vertices (fps4)")
     # SfM dense fps5
     p = run_dir("fps5") / "geometry" / "sfm" / "dense.ply"
     if p.exists():
         xyz, rgb = parse_binary_vertex_ply(p)
-        xyz, rgb = downsample(xyz, rgb, 100000)
+        xyz, rgb = downsample(xyz, rgb, 50000)
         write_pointcloud_json(xyz, rgb, pcdir / "sfm_dense_fps5.json", "COLMAP dense cloud (fps5, 100k subsample)")
     # NeRF sparse fps4 (ascii)
     p = run_dir("fps4") / "geometry" / "nerf" / "sparse_pc.ply"
     if p.exists():
         xyz, rgb = parse_ascii_ply(p)
-        xyz, rgb = downsample(xyz, rgb, 80000)
+        xyz, rgb = downsample(xyz, rgb, 50000)
         write_pointcloud_json(xyz, rgb, pcdir / "nerf_sparse_fps4.json", "Nerfacto sparse point cloud (fps4)")
     # 3DGS fps8 for cross-fps geometry artifact comparison
     p = run_dir("fps8") / "geometry" / "3dgs" / "gaussians.ply"
     if p.exists():
         xyz, rgb = parse_binary_vertex_ply(p)
-        xyz, rgb = downsample(xyz, rgb, 80000)
+        xyz, rgb = downsample(xyz, rgb, 50000)
         write_pointcloud_json(xyz, rgb, pcdir / "3dgs_fps8.json", "3DGS gaussians (fps8, 80k subsample)")
 
 
@@ -369,6 +425,8 @@ def main() -> None:
     views = ["vid_001_dormitory_000010.jpg", "vid_001_dormitory_000020.jpg", "vid_001_dormitory_000030.jpg"]
     for tag in ("fps4", "fps8"):
         build_qualitative(tag, views)
+    build_3dgs_only_qualitative("boya_close", ["img_000010.jpg"])
+    build_3dgs_only_qualitative("boya_far", ["img_000020.jpg"])
     build_pointclouds()
     build_metrics_json()
 
