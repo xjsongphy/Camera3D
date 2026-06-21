@@ -196,7 +196,7 @@ class NeRFReconstructor(Reconstructor):
         train_root = run_dir / "results" / self.name / "train"
         configs = sorted(train_root.rglob("config.yml")) if train_root.exists() else []
         return [
-            ViewerTarget(self.name, "external", path, ("--load-config", str(path)))
+            ViewerTarget(self.name, "nerfstudio", path, ("--load-config", str(path)))
             for path in configs[-1:]
         ]
 

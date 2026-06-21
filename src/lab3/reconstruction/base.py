@@ -52,7 +52,7 @@ class ViewerTarget:
     """A viewable artifact exposed by a reconstructor."""
 
     method: str
-    kind: Literal["geometry", "external"]
+    kind: Literal["geometry", "nerfstudio", "sibr"]
     path: Path
     launcher_args: tuple[str, ...] = ()
 

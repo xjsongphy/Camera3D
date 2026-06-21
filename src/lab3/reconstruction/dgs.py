@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import os
 import re
 import runpy
@@ -273,7 +274,18 @@ class DGSReconstructor(Reconstructor):
         candidates += sorted(
             (run_dir / "results" / self.name / "point_cloud").glob("iteration_*/point_cloud.ply")
         )
-        return [ViewerTarget(self.name, "geometry", path) for path in candidates if path.exists()]
+        targets = [ViewerTarget(self.name, "geometry", path) for path in candidates if path.exists()]
+        model_dir = run_dir / "results" / self.name
+        if model_dir.exists():
+            targets.append(
+                ViewerTarget(
+                    self.name,
+                    "sibr",
+                    model_dir,
+                    (str(_viewer_repo_dir(run_dir)),),
+                )
+            )
+        return targets
 
     def with_shared_poses(self, shared_dir: Path) -> Reconstructor:
         return replace(self, config=replace(self.config, colmap_source=shared_dir))
@@ -315,6 +327,20 @@ def _find_point_cloud(model_dir: Path) -> Path | None:
         if model_dir.is_dir() else []
     )
     return matches[-1] if matches else None
+
+
+def _viewer_repo_dir(run_dir: Path) -> Path:
+    config_path = run_dir / "configs" / "run_config.json"
+    if not config_path.is_file():
+        return Path("gaussian-splatting")
+    try:
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return Path("gaussian-splatting")
+    reconstruction = data.get("reconstruction", {})
+    dgs = reconstruction.get("3dgs", {}) if isinstance(reconstruction, dict) else {}
+    configured = dgs.get("repo_dir") if isinstance(dgs, dict) else None
+    return Path("gaussian-splatting") if configured in (None, "") else Path(str(configured))
 
 
 def _graphdeco_command(

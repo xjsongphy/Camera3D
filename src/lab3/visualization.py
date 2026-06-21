@@ -17,6 +17,8 @@ operations the user runs locally, so they are guarded and never executed under
 
 from __future__ import annotations
 
+import os
+import platform
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -104,15 +106,94 @@ def view_run_dir(
     elif not target_records:
         print("[lab3.visualization] no staged geometry found; run `lab3` with geometry stage on first.")
 
-    external_target = next((target for target in target_records if target.kind == "external"), None)
-    if nerfstudio_viewer and external_target is not None:
-        cmd = external_target.command(nerf_viewer_bin)
-        print("$", " ".join(cmd))
-        if not dry_run:
+    if nerfstudio_viewer:
+        for target in target_records:
+            if target.kind != "nerfstudio":
+                continue
+            cmd = target.command(nerf_viewer_bin)
+            print("$", " ".join(cmd))
+            if dry_run:
+                continue
             if shutil.which(nerf_viewer_bin) is None:
                 print(
                     f"[lab3.visualization] {nerf_viewer_bin} not found in PATH; "
                     "install nerfstudio to use the web viewer."
                 )
-            else:
-                run_cmd(cmd)  # opens web viewer; blocks until the user closes it
+                continue
+            run_cmd(cmd)
+
+    for target in target_records:
+        if target.kind != "sibr":
+            continue
+        _launch_sibr_viewer(target, dry_run=dry_run)
+
+
+def _launch_sibr_viewer(target: ViewerTarget, *, dry_run: bool) -> None:
+    repo_dir = _resolve_repo_dir(target)
+    viewer_bin = _find_sibr_binary(repo_dir)
+    if viewer_bin is None:
+        build_cmd = _sibr_build_command(repo_dir)
+        print(
+            "[lab3.visualization] SIBR viewer binary SIBR_gaussianViewer_app not found; "
+            f"build it first via: {' '.join(build_cmd)}"
+        )
+        if dry_run:
+            return
+        run_cmd(build_cmd)
+        viewer_bin = _find_sibr_binary(repo_dir)
+        if viewer_bin is None:
+            print(
+                "[lab3.visualization] SIBR build completed but the viewer binary is still missing "
+                f"under {repo_dir / 'SIBR_viewers' / 'install' / 'bin'}"
+            )
+            return
+    cmd = [str(viewer_bin), "-m", str(target.path)]
+    print("$", " ".join(cmd))
+    if not dry_run:
+        run_cmd(cmd)
+
+
+def _resolve_repo_dir(target: ViewerTarget) -> Path:
+    configured = Path(target.launcher_args[0]) if target.launcher_args else Path("gaussian-splatting")
+    if configured.is_absolute():
+        return configured
+    return (Path.cwd() / configured).resolve()
+
+
+def _find_sibr_binary(repo_dir: Path) -> Path | None:
+    bin_dir = repo_dir / "SIBR_viewers" / "install" / "bin"
+    candidates = (
+        "SIBR_gaussianViewer_app.exe",
+        "SIBR_gaussianViewer_app",
+        "SIBR_gaussianViewer_app_rwdi.exe",
+        "SIBR_gaussianViewer_app_config.exe",
+        "SIBR_gaussianViewer_app_config",
+    )
+    for name in candidates:
+        path = bin_dir / name
+        if path.exists():
+            return path
+    return None
+
+
+def _sibr_build_command(repo_dir: Path) -> list[str]:
+    repo_root = Path(__file__).resolve().parents[2]
+    sibr_source = _relative_to_workspace(repo_dir / "SIBR_viewers", repo_root)
+    system = platform.system()
+    if system == "Windows":
+        script = repo_root / "scripts" / "lab3" / "build_sibr_viewer.ps1"
+        return [
+            "powershell",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(script),
+            "--sibr-source",
+            sibr_source,
+        ]
+    script = repo_root / "scripts" / "lab3" / "build_sibr_viewer.sh"
+    return ["bash", str(script), "--sibr-source", sibr_source]
+
+
+def _relative_to_workspace(path: Path, workspace_root: Path) -> str:
+    return os.path.relpath(path.resolve(), workspace_root.resolve())

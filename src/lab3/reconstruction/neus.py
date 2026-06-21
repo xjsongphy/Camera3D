@@ -247,6 +247,9 @@ class NeuSReconstructor(Reconstructor):
                 context.run_dir / "results" / self.name / "processed" / "test",
                 evaluation_config,
             )
+            # Work around the appearance-embedding size mismatch that otherwise
+            # turns every NeuS held-out render into a checkpoint load failure.
+            patch_checkpoint_for_eval(context.run_dir / "results" / self.name)
 
         try:
             return evaluate_nerfstudio(
@@ -290,7 +293,7 @@ class NeuSReconstructor(Reconstructor):
         train_root = run_dir / "results" / self.name / "train"
         configs = sorted(train_root.rglob("config.yml")) if train_root.exists() else []
         targets = [
-            ViewerTarget(self.name, "external", path, ("--load-config", str(path)))
+            ViewerTarget(self.name, "nerfstudio", path, ("--load-config", str(path)))
             for path in configs[-1:]
         ]
         mesh = run_dir / "geometry" / self.name / "sdf_mesh.ply"
@@ -380,6 +383,61 @@ def build_sdfstudio_dataset(
     path = output_dir / "meta_data.json"
     path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
     return path
+
+
+def patch_checkpoint_for_eval(neus_result_dir: Path) -> tuple[Path, Path] | None:
+    """Sanitize the latest NeuS checkpoint so held-out rendering can load it.
+
+    nerfstudio's NeuS-facto field materializes an ``embedding_appearance`` table
+    whose row count equals the number of images the data parser exposes. The
+    training checkpoint was built over the train split (N_train rows), while the
+    held-out eval config repoints the parser at the test split (N_test rows).
+    The resulting shape mismatch aborts ``load_state_dict`` even with
+    ``strict=False`` (PyTorch rejects size mismatches regardless of strictness),
+    which is why every NeuS run reported "render skipped".
+
+    The serialized ``use_appearance_embedding: false`` in ``config.yml`` does not
+    prevent this: the runtime field still allocates the embedding, so the flag is
+    misleading. The robust, framework-agnostic fix is to drop every
+    ``*embedding_appearance*`` tensor from a copy of the checkpoint; the eval
+    model then loads cleanly (the stripped keys become missing/ignored) and the
+    minor view-dependent appearance aid is simply not restored.
+
+    The original checkpoint is left untouched; a patched copy is written next to
+    it and the eval config is repointed at the patched directory. Returns the
+    (patched_checkpoint, eval_config) pair, or ``None`` if no checkpoint exists.
+    """
+    import torch  # local import: torch is a heavy training-only dependency
+
+    model_dir = next((neus_result_dir / "train").rglob("nerfstudio_models"), None)
+    ckpts = sorted(model_dir.glob("*.ckpt")) if model_dir and model_dir.is_dir() else []
+    if not ckpts:
+        return None
+    ckpt = ckpts[-1]
+    patched_dir = neus_result_dir / "patched_models"
+    patched_dir.mkdir(parents=True, exist_ok=True)
+    patched = patched_dir / ckpt.name
+    # Copy first so the strip never mutates the original checkpoint on disk.
+    if not patched.exists():
+        import shutil
+        shutil.copy2(ckpt, patched)
+    state = torch.load(patched, map_location="cpu", weights_only=False)
+    pipeline_state = state.get("pipeline", state)
+    model_state = (
+        pipeline_state.get("model", pipeline_state)
+        if isinstance(pipeline_state, dict) else pipeline_state
+    )
+    for key in [k for k in list(model_state.keys()) if "embedding_appearance" in k]:
+        model_state.pop(key)
+    torch.save(state, patched)
+
+    eval_config = neus_result_dir / "eval_config.yml"
+    if eval_config.is_file():
+        config = yaml.load(eval_config.read_text(encoding="utf-8"), Loader=yaml.Loader)
+        config.load_dir = str(patched_dir)
+        config.load_step = None
+        eval_config.write_text(yaml.dump(config), encoding="utf-8")
+    return patched, eval_config
 
 
 def write_neus_eval_config(training_config: Path, test_data_dir: Path, output_path: Path) -> Path:
