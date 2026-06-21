@@ -4,70 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Lab 3 实验报告 · 寝室多表示三维重建与评测</title>
-<style>
-  :root{
-    --fg:#1d1d1f; --muted:#5a5a60; --bg:#ffffff; --card:#f6f7f9;
-    --accent:#00798c; --accent2:#d1495b; --border:#dfe1e4; --code:#f3f4f6;
-  }
-  *{box-sizing:border-box}
-  html{scroll-behavior:smooth}
-  body{
-    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif;
-    color:var(--fg); background:var(--bg); margin:0; line-height:1.7;
-    font-size:16px; max-width:980px; margin:0 auto; padding:0 24px 80px;
-  }
-  h1,h2,h3,h4{line-height:1.3; font-weight:650}
-  h1{font-size:1.9rem; margin-top:2.2rem; border-bottom:3px solid var(--accent); padding-bottom:.4rem}
-  h2{font-size:1.4rem; margin-top:2.4rem; border-bottom:1px solid var(--border); padding-bottom:.3rem}
-  h3{font-size:1.15rem; margin-top:1.8rem; color:#222}
-  h4{font-size:1.02rem; margin-top:1.4rem; color:#333}
-  p{margin:.7rem 0}
-  a{color:var(--accent); text-decoration:none}
-  a:hover{text-decoration:underline}
-  code{font-family:"SF Mono",Menlo,Consolas,monospace; background:var(--code); padding:.1em .35em; border-radius:4px; font-size:.88em}
-  pre{background:var(--code); padding:14px 16px; border-radius:8px; overflow-x:auto; border:1px solid var(--border)}
-  pre code{background:none; padding:0; font-size:.84rem; line-height:1.55}
-  blockquote{margin:1rem 0; padding:.6rem 1rem; border-left:4px solid var(--accent2); background:#fff6f7; color:#5a2a30; border-radius:0 6px 6px 0}
-  table{border-collapse:collapse; width:100%; margin:1rem 0; font-size:.9rem}
-  th,td{border:1px solid var(--border); padding:.45rem .6rem; text-align:center}
-  th{background:var(--card); font-weight:600}
-  tr:nth-child(even) td{background:#fafbfc}
-  img{max-width:100%; height:auto; display:block; margin:.8rem auto; border:1px solid var(--border); border-radius:6px}
-  figure{margin:1.4rem 0; text-align:center}
-  figcaption{font-size:.82rem; color:var(--muted); margin-top:.4rem; line-height:1.5}
-  .meta{color:var(--muted); font-size:.9rem; margin-top:-.5rem}
-  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:14px}
-  @media(max-width:720px){.grid2{grid-template-columns:1fr}}
-  .card{background:var(--card); border:1px solid var(--border); border-radius:8px; padding:14px 18px; margin:1rem 0}
-  .todo{background:#fff8e6; border:1px solid #f0d876; border-radius:8px; padding:.7rem 1rem; margin:1rem 0; font-size:.9rem}
-  .todo::before{content:"TODO "; font-weight:700; color:#a06a00; letter-spacing:.05em}
-  .badge{display:inline-block; font-size:.72rem; padding:.1em .55em; border-radius:10px; background:var(--accent); color:#fff; vertical-align:middle; margin-left:.4em}
-  .badge.red{background:var(--accent2)}
-  .badge.grey{background:#888}
-  .toc{background:var(--card); border:1px solid var(--border); border-radius:8px; padding:14px 22px; font-size:.9rem; columns:2}
-  .toc a{display:block}
-  @media(max-width:600px){.toc{columns:1}}
-  details{margin:.6rem 0}
-  summary{cursor:pointer; font-weight:600; color:var(--accent)}
-  #viewer-wrap{position:relative; background:#111; border-radius:8px; overflow:hidden; aspect-ratio:16/9}
-  #viewer-canvas{display:block; width:100%; height:100%}
-  .viewer-bar{position:absolute; top:8px; left:8px; right:8px; display:flex; gap:8px; flex-wrap:wrap; align-items:center; color:#eee; font-size:.8rem}
-  .viewer-bar select, .viewer-bar button{background:rgba(255,255,255,.12); color:#fff; border:1px solid rgba(255,255,255,.25); border-radius:5px; padding:3px 8px; font-size:.8rem}
-  .viewer-info{position:absolute; bottom:8px; left:8px; color:#ddd; font-size:.74rem; background:rgba(0,0,0,.35); padding:3px 8px; border-radius:5px}
-  .pc-fallback{color:#ddd; padding:40px; text-align:center; font-size:.85rem}
-  .small{font-size:.85rem; color:var(--muted)}
-  ul.clean{margin:.6rem 0}
-  ul.clean li{margin:.3rem 0}
-  .kpi{display:inline-block; min-width:90px}
-  .placeholder{border:2px dashed #b8b8c0; background:#fafafb; color:#8a8a94; padding:30px; text-align:center; border-radius:8px; margin:.8rem 0; font-size:.85rem}
-  .mcard{background:var(--card);border:1px solid var(--border);border-left:4px solid var(--accent);border-radius:8px;padding:12px 16px;margin:0;height:100%}
-  .mcard h4{margin:0 0 8px;color:var(--accent);font-size:1rem}
-  .mc-row{font-size:.86rem;margin:.3rem 0;line-height:1.5}
-  .mc-k{display:inline-block;min-width:3.5em;color:var(--muted);font-weight:650;vertical-align:top}
-  .mc-v{display:inline-block;width:calc(100% - 4.2em)}
-  .mermaid{background:#fff;border:1px solid var(--border);border-radius:8px;padding:14px;margin:1rem 0;text-align:center;font-size:.85rem}
-  .lead{font-size:1.02rem;color:#333}
-</style>
+<link rel="stylesheet" href="report_appendix/report.css">
 </head>
 <body>
 
@@ -75,9 +12,9 @@
 <p class="meta">
 <strong>代码仓库</strong>：<a href="https://github.com/xjsongphy/Camera3D">https://github.com/xjsongphy/Camera3D</a>（commit <code>fe766b2</code>）<br>
 <strong>场景</strong>：寝室（室内，自采） ｜
-<strong>三种以上表示</strong>：COLMAP 点云（显式几何）、3D Gaussian Splatting（splatting）、Nerfacto（neural radiance field）、NeuS（隐式 SDF 表面）<br>
+<strong>三种以上表示</strong>：COLMAP 点云（显式几何）、3D Gaussian Splatting（splatting）、NeRF（neural radiance field）、NeuS（隐式 SDF 表面）<br>
 <strong>运行环境</strong>：Ubuntu 24.04 ｜ Intel i7-14700K ｜ 32 GB RAM ｜ NVIDIA RTX 4070 Ti SUPER（16 GB）<br>
-<strong>状态</strong>：寝室主报告完成；博雅额外场景为占位（<a href="#boya">附录·博雅</a>，尚未跑完）。
+<strong>状态</strong>：寝室主报告完成；博雅塔额外场景见下方。
 </p>
 
 <nav class="toc">
@@ -88,83 +25,86 @@
 <a href="#results">5 结果（FPS 对比 / 方法对比 / loss 曲线 / 迭代对比 / 几何 / NeuS）</a>
 <a href="#discussion">6 讨论</a>
 <a href="#conclusion">7 结论</a>
-<a href="#appendix">8 附录（命令 / 配置 / 复现）</a>
+<a href="#boya">8 额外场景：博雅塔</a>
+<a href="#appendix">9 附录（命令 / 配置 / 复现）</a>
 <a href="#viewer">交互式点云</a>
-<a href="#todolist">TODO 清单</a>
+<a href="report_appendix/report_appendix.html#todolist">TODO 清单</a>
 </nav>
 
 <!-- =================== 1 摘要 =================== -->
 <h2 id="abstract">1 摘要</h2>
-<p>本作业以一段手持拍摄的视频为唯一数据源，对同一真实静态场景（寝室）走完“抽帧→位姿估计→四种表示训练→渲染评测”的完整流程，并在统一的 held-out 测试集与同一组 COLMAP 位姿上比较 COLMAP 点云、3D Gaussian Splatting（3DGS）、Nerfacto 与 NeuS。核心发现有三：其一，3DGS 在新视角合成上始终最优（fps4 上 PSNR 27.70 dB、SSIM 0.868），且训练与渲染效率俱佳；其二，抽帧率对重建质量影响剧烈且非单调，fps8（1107 训练图）反而效果不好，并且视频后段的重建几乎不可读，推测是密集抽帧放大了快速转动区域的运动模糊与匹配漂移；其三，NeuS 训练与表面提取（marching cubes）成功，但由于 nerfstudio 在 held-out 渲染时的 appearance-embedding 维度不匹配，未取得 RGB 指标——本报告定位了该 bug 并给出修复（见 <a href="#neus-fix">§5.6</a>），其 SDF mesh 仍可作为几何质量证据。</p>
+<p>本作业以一段手持拍摄的视频为唯一数据源，对同一真实静态场景（寝室）走完 <span class="flow"><span class="chip">抽帧</span><i class="sep"></i><span class="chip">位姿估计</span><i class="sep"></i><span class="chip">四种表示训练</span><i class="sep"></i><span class="chip">渲染评测</span></span> 的完整流程，并在统一的 held-out 测试集与同一组 COLMAP 位姿上比较 COLMAP 点云、3D Gaussian Splatting（3DGS）、NeRF 与 NeuS。核心发现有三：其一，3DGS 在新视角合成上始终最优，fps4 达到 27.70 dB PSNR、0.868 SSIM；其二，抽帧率对质量的影响明显非单调，fps8（1107 训练图）反而显著退化，说明密集抽帧放大了快速转动区的模糊与匹配漂移；其三，NeuS 训练与表面提取成功，在 fps2 取得 RGB 指标（PSNR 13.30 dB），但在本作业统一的 40 000 步预算下其质量与效率仍明显落后于 3DGS。</p>
 
 <!-- =================== 2 数据采集 =================== -->
 <h2 id="data">2 数据采集</h2>
-<p>原始数据为一段手持环绕拍摄的寝室视频 <code>dormitory.MOV</code>，并且为了充分采样，拍摄过程中采用了不同的高度。使用 <code>ffmpeg</code> 按固定 fps 等时间间隔抽帧，得到不同密度的图像序列。寝室属于典型的小型室内场景，包含床、书桌、衣柜门、镜子与窗户；其中<strong>衣柜门区域带有大面积镜面与高反光，窗户为透光玻璃</strong>——这两类区域会在后文反复出现，是解释各方法失败的关键。</p>
+<p>原始数据使用 <strong>iPhone 11 广角镜头</strong> 手持环绕拍摄的寝室视频 <code>dormitory.MOV</code>，并且为了充分采样，拍摄过程中采用了不同的高度。使用 <code>ffmpeg</code> 按固定 fps 等时间间隔抽帧，得到不同密度的图像序列。寝室属于典型的小型室内场景，包含床、书桌、衣柜门、镜子与窗户；其中<strong>衣柜门区域带有大面积镜面与高反光，窗户为透光玻璃</strong>——这两类区域会在后文反复出现，是解释各方法失败的关键。</p>
 
-<p>抽帧率与图像数量直接决定后续所有环节的输入规模。下表给出三组正式运行的帧数与训练/测试划分（<code>test_ratio=0.1</code>，按文件名每 10 张取 1 张作为 held-out，不参与训练）。三组共享同一套预处理与超参（详见 §4），仅抽帧率不同，构成对“抽帧密度”的单变量对照；表中的帧数为去模糊过滤后的结果。</p>
+<p>三组正式运行的帧数、训练/测试划分与 run 目录统一整理在附录（见 <a href="report_appendix/report_appendix.html#app-captures">附录 9.1</a>）。三组共享同一套预处理与超参（详见 §4），仅抽帧率不同；表中的帧数为去模糊过滤后的结果。</p>
 
-<table>
-<thead><tr><th>fps</th><th>训练图</th><th>测试图</th><th>总计</th><th>分辨率</th><th>run 目录</th></tr></thead>
-<tbody>
-<tr><td>2</td><td>278</td><td>30</td><td>308</td><td>900×1600</td><td><code>20260620_160035_dormitory_fps2</code></td></tr>
-<tr><td>4</td><td>554</td><td>61</td><td>615</td><td>900×1600</td><td><code>20260620_200014_dormitory_fps4</code></td></tr>
-<tr><td>8</td><td>1107</td><td>123</td><td>1230</td><td>900×1600</td><td><code>20260621_110244_dormitory_fps8</code></td></tr>
-</tbody>
-</table>
+<div class="card">
+<h4 style="margin:.1rem 0 .4rem">相机位姿与共享位姿</h4>
+<dl class="kv">
+  <dt>估计方式</dt><dd>COLMAP <code>sequential_matcher</code> + <code>mapper</code>，单目 <code>PINHOLE</code> 模型，全部帧共享同一相机</dd>
+  <dt>共享机制 <code>share_poses=true</code></dt><dd>SfM 用<strong>全量</strong>图像估计位姿并导出 <code>sparse/0</code>，3DGS / NeRF / NeuS 复用同一份位姿</dd>
+  <dt>训练 / 评测划分</dt><dd>三种神经表示统一只用 <code>train.txt</code> 训练、在同一 <code>test.txt</code> 上评测</dd>
+</dl>
+</div>
+<div class="callout"><strong>设计目的：</strong>把"位姿估计"与"表示学习"两个变量解耦，确保四种方法的差异只来自表示本身。</div>
 
-<p>相机位姿由 COLMAP 顺序匹配（<code>sequential_matcher</code>）+ 增量映射（<code>mapper</code>）估计，单目 <code>PINHOLE</code> 模型，全部帧共享同一相机。管线以 <code>share_poses=true</code> 运行：SfM 用<strong>全量</strong>图像估计位姿后导出 <code>sparse/0</code>，3DGS / Nerfacto / NeuS 的表示训练则统一只用 <code>train.txt</code>、在同一 <code>test.txt</code> 上评测。这样“位姿估计”与“表示学习”两个变量被解耦，确保四种方法的差异只来自表示本身。</p>
+<h4 style="margin:1.2rem 0 .3rem">两项预处理（抽帧后）</h4>
+<div class="grid2">
+<div class="card" style="margin:0"><h4 style="margin-top:0"><span class="num">1</span>去模糊过滤</h4><p class="small" style="margin:0">按拉普拉斯方差给出每帧 <code>blur_score</code>，丢弃 <code>blur_threshold=10</code> 以下的模糊帧。</p></div>
+<div class="card" style="margin:0"><h4 style="margin-top:0"><span class="num">2</span>边缘畸变裁剪</h4><p class="small" style="margin:0"><code>crop_ratio=0.9</code>，保留中心 90%，缓解手机镜头的边缘畸变。</p></div>
+</div>
+<p class="small" style="margin:.5rem 0 0">训练超参与评测口径见 §4。</p>
 
-<p>正式运行在抽帧之后开启了两项预处理：一是<strong>去模糊过滤</strong>，按拉普拉斯方差给出每帧 <code>blur_score</code>，丢弃 <code>blur_threshold=10</code> 以下的模糊帧；二是<strong>边缘畸变裁剪</strong> <code>crop_ratio=0.9</code>，保留中心 90% 以缓解手机镜头的边缘畸变。各项方法的训练超参与评测口径统一汇总于 §4，此处不重复。</p>
+<h4 style="margin:1.2rem 0 .3rem">预处理用时（fps4）</h4>
+<p class="small">以下为共享 SfM 前端与各神经方法的数据处理耗时（数据取自 <code>timings.json</code>）：COLMAP 特征提取 <strong>10.4 s</strong>、序列匹配 <strong>79.2 s</strong>、mapper <strong>942.5 s</strong>；nerfstudio <code>ns-process-data</code> 为 NeRF 准备 transforms.json 耗时 <strong>5.8 s</strong>；NeuS 的 <code>meta_data.json</code> 生成耗时 <strong>0.7 s</strong>。SfM 前端为所有神经方法共用，仅执行一次。</p>
+
+<figure style="margin-top:.5rem">
+<img src="report_assets/camera_trajectory_fps4.png" alt="相机位姿轨迹图（俯视与侧视，标注训练/测试划分）" style="width:100%; max-width:900px; border-radius:6px;">
+<figcaption>图 0：dormitory_fps4 的 COLMAP 相机位姿轨迹（615 个注册视图）。青色为训练视角，红色三角为 held-out 测试视角（61 个，约 10%）。左图为俯视图（X–Z），右图为侧视图（X–Y）。轨迹呈环状，手持环绕寝室一周，高度有变化。</figcaption>
+</figure>
 
 <!-- =================== 3 方法 =================== -->
 <h2 id="methods">3 方法：调用与实现</h2>
-<p class="lead">本作业不为每种表示从零实现训练算法，而是把成熟的公开重建栈统一编排进一条可复现管线，重点在<strong>公平对比</strong>而非重造轮子。本节只说明每种方法"怎么被调用"，不展开原理（原理与失败模式的讨论见 §6）。</p>
 
 <h3>3.1 调用的工具与库</h3>
-<table>
-<thead><tr><th>用途</th><th>调用的工具 / 库</th><th>在本作业中的角色</th></tr></thead>
-<tbody>
-<tr><td>SfM / MVS 位姿与点云</td><td>COLMAP（系统二进制，CUDA）</td><td>特征提取、顺序匹配、增量映射、（可选）dense MVS；产出共享位姿 <code>sparse/0</code></td></tr>
-<tr><td>NeRF / NeuS 训练与渲染</td><td>nerfstudio（<code>nerfacto</code>、<code>neus-facto</code>；CLI <code>ns-process-data</code>/<code>ns-train</code>/<code>ns-render</code>/<code>ns-eval</code>）</td><td>Nerfacto 与 NeuS 的训练、held-out 渲染、mesh 导出</td></tr>
-<tr><td>3DGS 训练与渲染</td><td>GraphDeco <code>gaussian-splatting</code>（<code>train.py</code>/<code>render.py</code>，子模块 <code>diff-gaussian-rasterization</code>、<code>simple-knn</code>、<code>fused-ssim</code>）</td><td>3DGS 的可微光栅化训练与测试集渲染</td></tr>
-<tr><td>哈希编码后端</td><td><code>tiny-cuda-nn</code></td><td>nerfstudio 的底层加速后端</td></tr>
-<tr><td>可选 SfM 特征</td><td><code>hloc</code>（ALIKED+LightGlue 等）、<code>pycolmap</code></td><td>弱纹理/重复纹理场景的可替换前端</td></tr>
-<tr><td>几何处理与可视化</td><td>Open3D</td><td>Poisson mesh、法向估计、点云/mesh 查看、Chamfer/F-score</td></tr>
-<tr><td>指标与出图</td><td>NumPy、Pillow、matplotlib、<code>lpips</code></td><td>统一 PSNR/SSIM/LPIPS、定性拼图、训练曲线、报告图表</td></tr>
-<tr><td>视频抽帧</td><td>FFmpeg（系统二进制）</td><td>按 fps 等时间间隔抽帧</td></tr>
-</tbody>
-</table>
-<p class="small">依赖通过 <code>uv</code> 在 <code>pyproject.toml</code> 的 <code>lab3</code> group 声明（CPU / CUDA 12.4 两套 extra）；安装与版本见 <code>docs/lab3/README.md</code>。</p>
+<p>所调用的工具与库清单见 <a href="report_appendix/report_appendix.html#app-tools">附录 9.2</a>。依赖通过 <code>uv</code> 在 <code>pyproject.toml</code> 的 <code>lab3</code> group 声明（CPU / CUDA 12.4 两套 extra）；安装与版本见 <code>docs/lab3/README.md</code>。</p>
 
 <h3>3.2 各方法的调用方式</h3>
 <p>四种方法都通过同一 CLI（<code>lab3 --methods ...</code>）触发，各自调用上表中的工具，产出标准化的中间结果：</p>
 <div class="grid2">
 <div class="mcard">
 <h4>SfM · COLMAP</h4>
-<div class="mc-row"><span class="mc-k">调用</span><span class="mc-v"><code>feature_extractor → sequential_matcher → mapper</code>（可选 <code>patch_match_stereo + stereo_fusion</code> 做 dense）</span></div>
-<div class="mc-row"><span class="mc-k">入口</span><span class="mc-v"><code>--methods sfm</code>，<code>--sfm-feature-extractor</code> 可换 hloc 前端</span></div>
-<div class="mc-row"><span class="mc-k">产出</span><span class="mc-v">共享位姿 <code>sparse/0</code>、稀疏点云；dense 时额外 <code>dense.ply</code> / Poisson mesh</span></div>
+<div class="mc-row"><span class="mc-k">调用</span><span class="mc-v"><span class="flow"><span class="chip"><code>feature_extractor</code></span><i class="sep"></i><span class="chip"><code>sequential_matcher</code></span><i class="sep"></i><span class="chip"><code>mapper</code></span></span></span></div>
+<div class="mc-row"><span class="mc-k">查看器</span><span class="mc-v">Open3D</span></div>
+<div class="mc-row"><span class="mc-k">进入</span><span class="mc-v"><code>lab3 --view-run &lt;run_dir&gt; --methods sfm --no-nerfstudio-viewer</code></span></div>
+<div class="mc-row"><span class="mc-k">产出</span><span class="mc-v">共享位姿 <code>sparse/0</code> 与稀疏点云</span></div>
 <div class="mc-row"><span class="mc-k">适配</span><span class="mc-v"><code>reconstruction/sfm.py</code></span></div>
 </div>
 <div class="mcard">
 <h4>3DGS · gaussian-splatting</h4>
-<div class="mc-row"><span class="mc-k">调用</span><span class="mc-v">GraphDeco <code>train.py</code> 训练 → <code>render.py</code> 渲染测试集</span></div>
-<div class="mc-row"><span class="mc-k">入口</span><span class="mc-v"><code>--methods 3dgs --dgs-repo ./gaussian-splatting --dgs-iterations 40000</code></span></div>
+<div class="mc-row"><span class="mc-k">调用</span><span class="mc-v">GraphDeco <span class="flow"><span class="chip"><code>train.py</code> 训练</span><i class="sep"></i><span class="chip"><code>render.py</code> 渲染测试集</span></span></span></div>
+<div class="mc-row"><span class="mc-k">查看器</span><span class="mc-v">SIBR viewer</span></div>
+<div class="mc-row"><span class="mc-k">进入</span><span class="mc-v"><code>lab3 --view-run &lt;run_dir&gt; --methods 3dgs --no-nerfstudio-viewer</code></span></div>
 <div class="mc-row"><span class="mc-k">产出</span><span class="mc-v"><code>point_cloud/iteration_N/point_cloud.ply</code>、测试集渲染</span></div>
 <div class="mc-row"><span class="mc-k">适配</span><span class="mc-v"><code>reconstruction/dgs.py</code></span></div>
 </div>
 <div class="mcard">
-<h4>Nerfacto · nerfstudio</h4>
-<div class="mc-row"><span class="mc-k">调用</span><span class="mc-v"><code>ns-process-data</code>（COLMAP→transforms.json）→ <code>ns-train nerfacto</code> → <code>ns-render</code></span></div>
-<div class="mc-row"><span class="mc-k">入口</span><span class="mc-v"><code>--methods nerf --nerf-iterations 40000</code></span></div>
+<h4>NeRF · nerfstudio</h4>
+<div class="mc-row"><span class="mc-k">调用</span><span class="mc-v"><span class="flow"><span class="chip"><code>ns-process-data</code></span><i class="sep"></i><span class="chip"><code>ns-train nerfacto</code></span><i class="sep"></i><span class="chip"><code>ns-render</code></span></span>（COLMAP→transforms.json）</span></div>
+<div class="mc-row"><span class="mc-k">查看器</span><span class="mc-v">nerfstudio web viewer</span></div>
+<div class="mc-row"><span class="mc-k">进入</span><span class="mc-v"><code>lab3 --view-run &lt;run_dir&gt; --methods nerf</code></span></div>
 <div class="mc-row"><span class="mc-k">产出</span><span class="mc-v">nerfstudio 配置+checkpoint、held-out 渲染、稀疏点云 proxy</span></div>
 <div class="mc-row"><span class="mc-k">适配</span><span class="mc-v"><code>reconstruction/nerf.py</code></span></div>
 </div>
 <div class="mcard">
 <h4>NeuS · nerfstudio (neus-facto)</h4>
-<div class="mc-row"><span class="mc-k">调用</span><span class="mc-v">COLMAP→SDFStudio <code>meta_data.json</code> → <code>ns-train neus-facto</code> → marching cubes 导出 mesh</span></div>
-<div class="mc-row"><span class="mc-k">入口</span><span class="mc-v"><code>--methods neus --config configs/lab3/extra.json --neus-iterations 40001</code></span></div>
-<div class="mc-row"><span class="mc-k">产出</span><span class="mc-v"><code>sdf_mesh.ply</code>、checkpoint（held-out RGB 渲染受阻于 §5.6 bug）</span></div>
+<div class="mc-row"><span class="mc-k">调用</span><span class="mc-v"><span class="flow"><span class="chip"><code>meta_data.json</code>（COLMAP→SDFStudio）</span><i class="sep"></i><span class="chip"><code>ns-train neus-facto</code></span><i class="sep"></i><span class="chip">marching cubes 导出 mesh</span></span></span></div>
+<div class="mc-row"><span class="mc-k">查看器</span><span class="mc-v">nerfstudio web viewer</span></div>
+<div class="mc-row"><span class="mc-k">进入</span><span class="mc-v"><code>lab3 --view-run &lt;run_dir&gt; --methods neus</code></span></div>
+<div class="mc-row"><span class="mc-k">产出</span><span class="mc-v"><code>sdf_mesh.ply</code>、checkpoint；held-out RGB 渲染在 fps2 成功、fps4/fps8 未运行</span></div>
 <div class="mc-row"><span class="mc-k">适配</span><span class="mc-v"><code>reconstruction/neus.py</code></span></div>
 </div>
 </div>
@@ -177,7 +117,7 @@ graph LR
   B -- "共享位姿" --> C["按方法训练<br/>sfm·3dgs·nerf·neus"]
   C --> D["held-out 渲染<br/>+ 统一评测"]
   D --> E["几何导出<br/>点云/mesh"]
-  E --> F["定性拼图<br/>+ 训练曲线"]
+  E --> F["定性图 / 误差图<br/>+ 训练曲线"]
   F --> G["交互查看<br/>Open3D / ns-viewer"]
   style B stroke:#00798c,stroke-width:2px
   style D stroke:#d1495b,stroke-width:2px
@@ -197,28 +137,29 @@ graph TD
 <h3>3.4 运行命令</h3>
 <p>常用命令如下（完整参数见 <code>docs/lab3/README.md</code>）：</p>
 <pre><code># 命令链自检（不实际运行）
-uv run --python 3.12 --group lab3 --extra cpu lab3 \
+uv run lab3 \
   --config configs/lab3/default.json --methods sfm --dry-run
 
 # 正式全流程（寝室，fps4，四种方法）
-uv run --python 3.12 --group lab3 --extra cu124 lab3 \
+uv run lab3 \
   --config configs/lab3/default.json --scene-name dormitory_fps4 --fps 4 \
   --methods sfm nerf neus 3dgs --dgs-repo ./gaussian-splatting
 
 # 仅重跑某次运行的评测 / 后处理（不重训）
-uv run --python 3.12 --group lab3 --extra cu124 lab3 \
+uv run lab3 \
   --run-dir outputs/lab3/20260620_200014_dormitory_fps4
 
-# 交互查看已有结果（Open3D 几何 + nerfstudio web viewer）
-uv run --python 3.12 --group lab3 --extra cu124 lab3 \
+# 交互查看已有结果（按方法自动进入对应 viewer）
+uv run lab3 \
   --view-run outputs/lab3/20260620_200014_dormitory_fps4</code></pre>
 <p class="small">配置入口为 <code>configs/lab3/</code> 下的 JSON（<code>default.json</code> 主配置、<code>extra.json</code> 额外实验、<code>boya_close.json</code>/<code>boya_far.json</code> 博雅场景）。</p>
 
 <h3>3.5 辅助脚本（<code>scripts/lab3/</code>）</h3>
+<p><code>scripts/lab3/</code> 下的辅助脚本按用途分组如下：</p>
 <div class="grid2">
-<div class="card"><h4>批量运行</h4><p class="small" style="margin:0"><code>run_lab3_fps_sweep.sh</code>、<code>run_lab3_batch_suite.sh</code>：按 fps / 场景批量跑全流程，本文 fps2/4/8 由前者产生。</p></div>
-<div class="card"><h4>NeuS 重渲</h4><p class="small" style="margin:0"><code>render_neus_heldout.py</code>：修复并重渲 NeuS 的 held-out RGB/法向/深度（§5.6 的 appearance-embedding 修复）。</p></div>
-<div class="card"><h4>报告出图</h4><p class="small" style="margin:0"><code>build_report_{assets,charts,losscurves}.py</code>：从既有 run 生成定性拼图、点云、定量图与训练曲线（纯 NumPy/PIL/matplotlib）。</p></div>
+<div class="card"><h4>批量运行</h4><p class="small" style="margin:0"><code>run_lab3_fps_sweep.sh</code>：按 fps / 场景批量跑全流程。</p></div>
+<div class="card"><h4>NeuS 渲染</h4><p class="small" style="margin:0"><code>render_neus_heldout.py</code>：渲染 NeuS 的 held-out RGB/法向/深度。</p></div>
+<div class="card"><h4>报告出图</h4><p class="small" style="margin:0"><code>build_report_assets.py</code>：从既有 run 生成正文所需的 GT / 渲染 / 误差图与点云。</p></div>
 <div class="card"><h4>工具</h4><p class="small" style="margin:0"><code>build_sibr_viewer.sh</code> 编译 3DGS SIBR 实时查看器；<code>inspect_blur_scores.sh</code> 检查 <code>blur_score</code> 分布以选去模糊阈值。</p></div>
 </div>
 
@@ -228,150 +169,222 @@ uv run --python 3.12 --group lab3 --extra cu124 lab3 \
 
 <div class="grid2">
 <div class="card">
-<h4>关键超参（fps2/4/8 共用）</h4>
+<h4>超参数</h4>
 <ul class="clean" style="margin:0">
 <li>3DGS：<code>iterations=40000</code>，分辨率 1600</li>
-<li>Nerfacto：<code>max_num_iterations=40000</code></li>
+<li>NeRF：<code>max_num_iterations=40000</code></li>
 <li>NeuS：<code>max_num_iterations=40001</code>，<code>mesh_resolution=512</code>，<code>export_mesh=true</code></li>
 <li>评测分辨率：<code>eval_size=[900,1600]</code></li>
 <li>测试划分：<code>test_ratio=0.1</code>，<code>share_poses=true</code></li>
 </ul>
 </div>
 <div class="card">
-<h4>评测口径（重要）</h4>
-<p class="small" style="margin:0">3DGS、Nerfacto 均在<strong>规范 held-out 集 <code>prepared/test.txt</code></strong> 上用自实现 <code>lab3.metrics</code>（统一 PSNR/SSIM/LPIPS）评测，口径在 fps2/4/8 间一致。NeuS 受 §5.6 bug 影响、暂无 RGB 指标。</p>
+<h4>评测指标</h4>
+<p class="small" style="margin:0">3DGS、NeRF 均在<strong>规范 held-out 集 <code>prepared/test.txt</code></strong> 上用自实现 <code>lab3.metrics</code>（统一 PSNR/SSIM/LPIPS）评测，口径在 fps2/4/8 间一致。NeuS 在 fps4/fps8 未取得 held-out RGB 指标，仅在 fps2 取得结果。</p>
+</div>
+<div class="card">
+<h4>显存控制措施</h4>
+<p class="small" style="margin:0">为避免 16 GB 显存爆掉，训练/评测分辨率统一限制在 <code>900×1600</code>；3DGS 用 <code>--dgs-camera-cache-size</code> 限制相机缓存占显存；NeuS 通过 <code>train-num-rays-per-batch</code>、<code>train-num-images-to-sample-from</code>、<code>train-num-times-to-repeat-images</code> 控制每批光线数与缓存图像数。实测峰值显存（fps4）：NeRF 13.7 GB、3DGS 8.8 GB、NeuS 7.1 GB，均在 16 GB 以内。</p>
 </div>
 </div>
 
-<p>渲染 FPS 的测量口径需特别说明：3DGS 的 <code>render_fps</code> 由 <code>render.py</code> 渲染 held-out 视图的总耗时反算，<strong>包含磁盘 I/O</strong>，因此数值偏低（0.17 左右）并不代表其推理能力——3DGS 真正的实时性需用 SIBR viewer 单独测量（见附录 TODO）。Nerfacto 的 <code>render_fps</code> 同理（ns-render 含 I/O）。</p>
+<p>所有方法的 <code>render_fps</code> 由渲染 held-out 视图的总耗时反算，<strong>包含磁盘 I/O</strong>，因此数值偏低（3DGS 约 0.17）并不代表其真实推理能力。</p>
 
 <!-- =================== 5 结果 =================== -->
 <h2 id="results">5 结果</h2>
 
 <h3 id="fps-sweep">5.1 抽帧率（FPS）对重建的影响</h3>
 <div class="card" style="border-left:4px solid var(--accent2)">
-<strong>核心结论：</strong>抽帧率对质量的影响是<strong>非单调</strong>的——3DGS 在 fps4 取得最优（27.70 dB），而最密的 fps8（1107 训练图）反而急剧退化（3DGS 18.03 dB、Nerfacto 12.23 dB）。“帧越多越好”的直觉在本场景不成立。
+<strong>核心结论：</strong>抽帧率对质量的影响是<strong>非单调</strong>的——3DGS 在 fps4 取得最优（27.70 dB），而最密的 fps8（1107 训练图）反而急剧退化（3DGS 18.03 dB、NeRF 12.23 dB）。“帧越多越好”的直觉在本场景不成立。
 </div>
-<p>下表与下图给出 3DGS 与 Nerfacto 在正式运行 fps 2/4/8 下的 held-out 指标。Nerfacto 呈现与 3DGS 相同的非单调趋势。</p>
-
-<table>
-<thead><tr><th>fps（训练图）</th><th>3DGS PSNR ↑</th><th>3DGS SSIM ↑</th><th>3DGS LPIPS ↓</th><th>Nerfacto PSNR ↑</th><th>Nerfacto SSIM ↑</th><th>Nerfacto LPIPS ↓</th></tr></thead>
-<tbody>
-<tr><td>2（278）</td><td>25.79</td><td>0.835</td><td>0.368</td><td>20.65</td><td>0.749</td><td>0.452</td></tr>
-<tr><td>4（554）</td><td><strong>27.70</strong></td><td><strong>0.868</strong></td><td>0.353</td><td>18.47</td><td>0.688</td><td>0.506</td></tr>
-<tr><td>8（1107）</td><td><span style="color:var(--accent2);font-weight:700">18.03</span></td><td>0.722</td><td>0.562</td><td><span style="color:var(--accent2);font-weight:700">12.23</span></td><td>0.597</td><td>0.709</td></tr>
-</tbody>
-</table>
+<p>3DGS 与 NeRF 在正式运行 fps 2/4/8 下的完整 held-out 指标表见 <a href="report_appendix/report_appendix.html#app-fps">附录 9.3</a>，正文保留趋势图。NeRF 呈现与 3DGS 相同的非单调趋势；NeuS 仅在 fps2 取得 RGB 指标（见 §5.6），无法参与跨 fps 比较。</p>
 
 <figure>
-<img src="report_assets/charts/chart_psnr_fps.png" alt="PSNR vs fps">
-<figcaption>图 1：held-out PSNR 随抽帧率变化。fps8 明显退化。</figcaption>
+<div style="height:300px"><canvas id="chartPsnr"></canvas></div>
+<figcaption>图 1：held-out PSNR 随抽帧率变化。fps8 明显退化。NeuS 仅在 fps2 有可用指标。</figcaption>
 </figure>
+<div class="grid2">
+<figure style="margin:.4rem 0"><div style="height:240px"><canvas id="chartSsim"></canvas></div><figcaption>图 2 左：SSIM（↑）随抽帧率变化。</figcaption></figure>
+<figure style="margin:.4rem 0"><div style="height:240px"><canvas id="chartLpips"></canvas></div><figcaption>图 2 右：LPIPS（↓）随抽帧率变化。</figcaption></figure>
+</div>
+
+<p>”帧越多越差”的现象主要由数据采集质量决定。这段视频在环绕镜面衣柜门时出现了较快的横向转动，导致部分画面存在明显的运动模糊。密集抽帧到 fps8 时，这些模糊片段会被切分成大量内容高度相似、但位置又存在轻微错位的连续帧。虽然相邻帧之间的视角重叠很高，但模糊和亚像素级错位会干扰 COLMAP 的特征匹配与三角化过程，使转动区域的相机位姿发生漂移。随后，这种位姿误差会在 3DGS 的 densification 过程中，以及 NeRF 的体场优化过程中被进一步放大，最终导致重建质量下降。相比之下，fps2 或 fps4 的稀疏采样会自然跳过一部分运动模糊严重的帧，只保留运动相对平缓、图像更清晰的视角，因此相机位姿更稳定，整体重建效果也更好。</p>
+
 <figure>
-<img src="report_assets/charts/chart_ssim_lpips_fps.png" alt="SSIM LPIPS vs fps">
-<figcaption>图 2：SSIM（左，↑）与 LPIPS（右，↓）随抽帧率变化。fps8 两项指标同步恶化。</figcaption>
+<div class="qual-wrap">
+  <div class="qual-gt">
+    <h4>GT（前后段同一场景）</h4>
+    <div style="display:flex; gap:12px">
+      <div style="flex:1"><figure><img src="report_assets/methods/fps8_front_000030_gt.png" alt="fps8 front GT"><figcaption>前段 · vid_001_dormitory_000030</figcaption></figure></div>
+      <div style="flex:1"><figure><img src="report_assets/methods/fps8_back_001210_gt.png" alt="fps8 back GT"><figcaption>后段 · vid_001_dormitory_001210</figcaption></figure></div>
+    </div>
+  </div>
+  <div class="qual-method">
+    <h4>3DGS — 前后段渲染与误差对比</h4>
+    <div style="display:flex; gap:12px">
+      <div style="flex:1">
+        <p class="seg-label">前段（000030）</p>
+        <div class="qual-pair">
+          <figure><img src="report_assets/methods/fps8_front_000030_3dgs.png" alt="3DGS front render"><figcaption>渲染</figcaption></figure>
+          <figure><img src="report_assets/methods/fps8_front_000030_3dgs_err.png" alt="3DGS front error"><figcaption>误差图</figcaption></figure>
+        </div>
+      </div>
+      <div style="flex:1">
+        <p class="seg-label">后段（001210）</p>
+        <div class="qual-pair">
+          <figure><img src="report_assets/methods/fps8_back_001210_3dgs.png" alt="3DGS back render"><figcaption>渲染</figcaption></figure>
+          <figure><img src="report_assets/methods/fps8_back_001210_3dgs_err.png" alt="3DGS back error"><figcaption>误差图</figcaption></figure>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="qual-method">
+    <h4>NeRF — 前后段渲染与误差对比</h4>
+    <div style="display:flex; gap:12px">
+      <div style="flex:1">
+        <p class="seg-label">前段（000030）</p>
+        <div class="qual-pair">
+          <figure><img src="report_assets/methods/fps8_front_000030_nerf.png" alt="NeRF front render"><figcaption>渲染</figcaption></figure>
+          <figure><img src="report_assets/methods/fps8_front_000030_nerf_err.png" alt="NeRF front error"><figcaption>误差图</figcaption></figure>
+        </div>
+      </div>
+      <div style="flex:1">
+        <p class="seg-label">后段（001210）</p>
+        <div class="qual-pair">
+          <figure><img src="report_assets/methods/fps8_back_001210_nerf.png" alt="NeRF back render"><figcaption>渲染</figcaption></figure>
+          <figure><img src="report_assets/methods/fps8_back_001210_nerf_err.png" alt="NeRF back error"><figcaption>误差图</figcaption></figure>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<figcaption>图 3：fps8 前后段 held-out 视角对比。每种方法左右分列前段（vid_…_000030）与后段（vid_…_001210），每段内渲染结果与误差图横向并排。后段的重影与发虚明显加重（误差图中亮区面积显著增大），与前段相比退化明显，印证密集抽帧下后段位姿漂移更严重，与图 1 的 PSNR 崩塌一致。</figcaption>
 </figure>
 
-<p>为什么会“帧越多越差”？原因不在表示本身，而在<strong>数据采集质量</strong>。这段视频在环绕镜面衣柜门时存在快速横向转动，密集抽帧（fps8）会把同一运动模糊片段切成大量彼此高度相似但又彼此错位的帧：相邻帧重叠虽高，但模糊与亚像素错位使 COLMAP 的特征匹配与三角化在转动区出现漂移，位姿误差随之被 3DGS 的 densification 与 Nerfacto 的体场放大。fps2/4 的稀疏采样反而跳过了大量模糊帧、保留了运动较缓的清晰视角，因而位姿更稳、重建更好。</p>
-
-<p>这一推断与拍摄时的现象一致：<strong>寝室门（带镜面、转动最快）附近是各 fps 下重建最差的区域</strong>；窗户虽为透光玻璃，但位于视频后半段、相机掠过时转动平缓，对重建几乎无影响。换言之，损害重建的是“快速视角变化 + 反光”的组合，而不是玻璃本身。</p>
-
-<p>需要特别说明跨 fps 定性对比的一个陷阱：不同 fps 下<strong>同一抽帧序号对应的是不同的原始视频帧</strong>（fps4 的第 30 帧约在 7.5 s，fps8 的第 30 帧约在 3.75 s，二者并非同一相机位姿）。因此本报告不对 fps4 与 fps8 做并排同视角拼图——那种拼图会把两个不同位姿误当成同一视角，反而误导。fps8 的退化由上图 1、图 2 的指标严格刻画，其视觉表现则由 fps8 自身 held-out 视角的渲染体现（下图，该帧内部 GT/3DGS/NeRF 配对正确、属同一视角）。</p>
+<p>fps4 与 fps2 相比，3DGS 在 fps4 略优，而 NeRF 在 fps4 反而比 fps2 差（18.47 vs 20.65）。这与“门附近效果不好”的观察吻合：fps4 比 fps2 多保留了门区域的转动帧，对几何敏感度低的 NeRF（用半透明体积“糊”出图像）反而是负担，而对显式高斯的 3DGS 影响较小。效率方面，训练时间随帧数近似线性增长（图 4），fps8 的训练成本最高却换来最差的质量，进一步说明密集抽帧在该场景下是净损失。</p>
 
 <figure>
-<img src="report_assets/methods/fps8_vid_001_dormitory_000030.png" alt="fps8 qualitative panel">
-<figcaption>图 3：fps8 一个 held-out 视角（vid_…_000030）的 GT | 3DGS | 3DGS 误差 | NeRF | NeRF 误差。3DGS 与 NeRF 渲染均出现明显重影与发虚，与图 1 的 PSNR 崩塌一致。</figcaption>
-</figure>
-
-<p>fps4 与 fps2 相比，3DGS 在 fps4 略优，而 Nerfacto 在 fps4 反而比 fps2 差（18.47 vs 20.65）。这与“门附近效果不好”的观察吻合：fps4 比 fps2 多保留了门区域的转动帧，对几何敏感度低的 Nerfacto（用半透明体积“糊”出图像）反而是负担，而对显式高斯的 3DGS 影响较小。效率方面，训练时间随帧数近似线性增长（图 4），fps8 的训练成本最高却换来最差的质量，进一步说明密集抽帧在该场景下是净损失。</p>
-
-<figure>
-<img src="report_assets/charts/chart_efficiency_fps.png" alt="training time vs fps">
-<figcaption>图 4：训练时间随抽帧率上升（fps8 的 Nerfacto 计时缺失）。fps8 投入最多算力却质量最差。</figcaption>
+<div style="height:280px"><canvas id="chartEff"></canvas></div>
+<figcaption>图 4：训练时间随抽帧率上升。fps8 投入最多算力却质量最差。</figcaption>
 </figure>
 
 <h3 id="fps4-methods">5.2 fps4 下四种方法的对比</h3>
-<p>以口径最完整的 fps4 为基准，下表汇总四种方法的定量结果。SfM 与 NeuS 不产生 RGB 指标：前者是纯几何方法（无可比的新视角合成），后者因 §5.6 的 bug 未取得渲染结果，但其训练与 mesh 提取均成功。</p>
-
-<table>
-<thead><tr><th>方法</th><th>表示类别</th><th>PSNR ↑</th><th>SSIM ↑</th><th>LPIPS ↓</th><th>训练 (s)</th><th>渲染 FPS</th><th>模型 (MB)</th></tr></thead>
-<tbody>
-<tr><td>COLMAP 点云</td><td>显式几何</td><td>N/A</td><td>N/A</td><td>N/A</td><td>942.5 (mapper)</td><td>N/A</td><td>—</td></tr>
-<tr><td><strong>3DGS</strong></td><td>splatting</td><td><strong>27.70</strong></td><td><strong>0.868</strong></td><td>0.353</td><td>3032.0</td><td>0.170 *</td><td>1341</td></tr>
-<tr><td>Nerfacto</td><td>neural radiance field</td><td>18.47</td><td>0.688</td><td>0.506</td><td>3016.2</td><td>0.700 *</td><td>168</td></tr>
-<tr><td>NeuS</td><td>隐式 SDF 表面</td><td>N/A <span class="badge red">渲染失败</span></td><td>N/A</td><td>N/A</td><td>3263.1</td><td>—</td><td>169</td></tr>
-</tbody>
-</table>
-<p class="small">* 渲染 FPS 含磁盘 I/O（见 §4），不代表真实推理速度。</p>
-
-<p>3DGS 在该场景下全面领先 Nerfacto（PSNR 高 9 dB 以上）。值得注意的是 Nerfacto 在 fps4 上表现异常疲软（PSNR 仅 18.47），这与门区域的视角相关外观（镜面反射）密切相关——NeRF 用 view-dependent 颜色“烘焙”反射，在新视角下暴露为重影。NeuS 与 Nerfacto 训练时间相近（约 3260s vs 3016s），但 NeuS 额外做了表面正则与 marching cubes，几何输出更结构化。SfM 的 mapper 用时 942s（未开 dense MVS），仅产出稀疏点云。</p>
-
-<p>定性上，下图给出 fps4 下三个 held-out 视角的 GT / 3DGS / Nerfacto 渲染与误差图（NeuS 无渲染故未入图，其几何见 §5.5）。3DGS 渲染锐利、误差图整体偏暗；Nerfacto 在门与镜面附近误差明显偏高（误差图中的亮区）。</p>
+<p>以口径最完整的 fps4 为基准，四种方法的完整指标表统一放在 <a href="report_appendix/report_appendix.html#app-fps4">附录 9.4</a>。SfM 不产生 RGB 指标，其点云见 <a href="#viewer">§5.7 交互式查看器</a>。</p>
 
 <figure>
-<img src="report_assets/methods/fps4_vid_001_dormitory_000030.png" alt="fps4 qualitative 000030">
-<figcaption>图 5：fps4 held-out 视角 vid_…_000030：GT | 3DGS 渲染 | 3DGS 误差 | Nerfacto 渲染 | Nerfacto 误差。3DGS 渲染锐利；Nerfacto 在复杂几何与反光区误差偏高。GT/3DGS/NeRF 已按抽帧序号正确配对（同一视角）。</figcaption>
+<div style="height:300px"><canvas id="chartMem"></canvas></div>
+<figcaption>图 5：fps4 下三种神经表示的显存与模型大小取舍（左轴：训练峰值显存 GB；右轴：模型文件 MB）。NeRF 显存最高但模型最小，3DGS 显存适中却模型最大（约 1.3 GB），NeuS 两项都最低。</figcaption>
 </figure>
 
-<div class="card">
-<h4>“适量图片对比”说明</h4>
-<p style="margin:0">正文仅放 fps8（图 3）与 fps4（图 5）各一张 held-out 对比。每个 fps 各有 3 个 held-out 视角的完整对比图（GT/3DGS/3DGS 误差/Nerfacto/Nerfacto 误差）生成于 <code>report_assets/methods/</code>（fps4、fps8 各 3 张）；几何可旋转查看见 <a href="#viewer">交互式点云</a>。</p>
+<p>3DGS 在该场景下全面领先 NeRF（PSNR 高 9 dB 以上）。NeRF 在 fps4 上表现疲软（PSNR 仅 18.47），与门区域的视角相关外观密切相关：镜面反射被视角相关颜色“烘焙”进模型，在新视角下暴露为重影。NeuS 与 NeRF 训练时间相近（约 3260s vs 3016s），但 NeuS 额外承担表面正则与 marching cubes，几何输出更结构化；它的显存占用也最低（7.1 GB）。SfM 的 mapper 用时 942s，仅产出稀疏点云。</p>
+
+<p>在统一 <strong>40 000 步</strong>预算下，3DGS、NeRF 与 NeuS 均训练约 50 分钟，单步计算成本接近；NeuS 略慢，来自表面正则与 marching cubes 的额外开销。但这一结论仅在”相同步数”下成立：40k 步对 3DGS 和 NeRF 已接近收敛，而对常需 200k 级训练的 NeuS 仍明显不足（见 <a href="#iterations">§5.4</a>）。渲染效率方面，fps2 上 NeuS 的 held-out 渲染仅 <strong>0.04 FPS</strong>（约 25 秒/帧），明显慢于 NeRF（0.27 FPS）和 3DGS（0.08 FPS）。所有 <code>render_fps</code> 均含磁盘 I/O，不代表纯推理速度（见 <a href="report_appendix/report_appendix.html#app-fps4">附录 9.4</a> 脚注）。</p>
+
+<p>定性上，下图给出 fps4 下 held-out 视角的 GT / 3DGS / NeRF / NeuS 渲染与误差图。SfM 仅产生稀疏点云，见 <a href="#viewer">§5.7 交互式查看器</a>。3DGS 渲染锐利、误差图整体偏暗；NeRF 在门与镜面附近误差明显偏高（误差图中的亮区）；NeuS 在新视角下主体结构清晰但纹理偏弱。</p>
+
+<figure>
+<div class="qual-wrap">
+  <div class="qual-gt">
+    <h4>GT</h4>
+    <img src="report_assets/methods/fps4_vid_001_dormitory_000030_gt.png" alt="fps4 held-out ground truth">
+  </div>
+  <div class="qual-method">
+    <h4>3DGS</h4>
+    <div class="qual-pair">
+      <figure>
+        <img src="report_assets/methods/fps4_vid_001_dormitory_000030_3dgs.png" alt="fps4 3DGS render">
+        <figcaption>渲染结果</figcaption>
+      </figure>
+      <figure>
+        <img src="report_assets/methods/fps4_vid_001_dormitory_000030_3dgs_err.png" alt="fps4 3DGS error map">
+        <figcaption>差距图</figcaption>
+      </figure>
+    </div>
+  </div>
+  <div class="qual-method">
+    <h4>NeRF</h4>
+    <div class="qual-pair">
+      <figure>
+        <img src="report_assets/methods/fps4_vid_001_dormitory_000030_nerf.png" alt="fps4 NeRF render">
+        <figcaption>渲染结果</figcaption>
+      </figure>
+      <figure>
+        <img src="report_assets/methods/fps4_vid_001_dormitory_000030_nerf_err.png" alt="fps4 NeRF error map">
+        <figcaption>差距图</figcaption>
+      </figure>
+    </div>
+  </div>
+  <div class="qual-method">
+    <h4>NeuS</h4>
+    <div class="qual-pair">
+      <figure>
+        <img src="report_assets/methods/fps4_vid_001_dormitory_000030_neus.jpg" alt="fps4 NeuS render">
+        <figcaption>渲染结果</figcaption>
+      </figure>
+      <figure>
+        <img src="report_assets/methods/fps4_vid_001_dormitory_000030_neus_err.png" alt="fps4 NeuS error map">
+      </figure>
+    </div>
+  </div>
+</div>
+<figcaption>图 6：fps4 held-out 视角 vid_…_000030 的 GT、3DGS、NeRF 与 NeuS 渲染及差距图（SfM 点云见 §5.7）。3DGS 渲染锐利；NeRF 在反光区误差偏高；NeuS 主体结构清晰但纹理偏弱。</figcaption>
+</figure>
+
+<div class="video-compare">
+<h4>fps4 相机轨迹视频 — 3DGS 连续新视角渲染</h4>
+<p class="small" style="margin:.2rem 0 .8rem">下方视频使用<strong>同一条 Catmull-Rom + SLERP 插值</strong>生成的相机轨迹离线渲染（非真实拍摄路径），展示 3DGS 在连续新视角下的稳定性。NeRF 的相机轨迹视频因渲染失败暂未提供。</p>
+<div class="video-grid single">
+  <div class="video-card">
+    <h5>3DGS — 插值轨迹渲染</h5>
+    <video controls preload="metadata" muted playsinline>
+      <source src="report_assets/methods/fps4_camera_path_3dgs.mp4" type="video/mp4">
+    </video>
+  </div>
+</div>
 </div>
 
+<p>更多 held-out 视角的渲染与差距图见 <code>report_assets/methods/</code>（每个 fps 各 3 个视角）；几何对比例见 <a href="#viewer">交互式点云</a>。</p>
+
 <h3 id="dynamics">5.3 训练动力学（loss 曲线）</h3>
-<p>三种神经表示是否稳定收敛、在何处饱和，可由训练曲线直接判断。下图取自 fps4 正式运行管线导出的逐 step 日志（<code>logs/*_train_loss_curve.csv</code>，无重复训练）。3DGS 的日志逐 step 记录了 held-out PSNR，可直接作为质量曲线；Nerfacto 与 NeuS 的日志只记录损失，故以对数纵轴展示其 train/eval 损失。三条曲线均单调下降并在训练末段趋于平缓，未出现发散或回升，说明在 fps4 的数据规模下各方法的优化过程稳定。其中 3DGS 的 held-out PSNR 在约 30000 步后基本饱和，这意味着对其继续训练的边际收益已很有限（见 §5.4）。</p>
+<p>三种神经表示是否稳定收敛、在何处饱和，可由训练曲线直接判断。下图取自 fps4 正式运行的逐 step 日志（<code>logs/*_train_loss_curve.csv</code>）。3DGS 的日志逐 step 记录了 train L1 loss；NeRF 与 NeuS 的日志只记录损失，故以对数纵轴展示其 train/eval 损失。三条曲线均单调下降并在训练末段趋于平缓，未出现发散或回升，说明在 fps4 的数据规模下各方法的优化过程稳定。3DGS 的 held-out PSNR 在约 30000 步后基本饱和，NeuS 的损失在约 20000 步后下降变缓，两者均表明继续训练的边际收益已很有限（见 §5.4）。</p>
 <figure>
-<img src="report_assets/charts/chart_loss_curves.png" alt="training loss curves">
-<figcaption>图 6：fps4 训练动力学。左：3DGS held-out PSNR（标注 7k/30k 检查点）；中：Nerfacto train/eval 损失；右：NeuS train/eval 损失（对数纵轴）。</figcaption>
+<div class="grid2">
+<div style="height:230px"><canvas id="chartDgsPsnr"></canvas></div>
+<div style="height:230px"><canvas id="chartNerfLoss"></canvas></div>
+<div style="height:230px"><canvas id="chartNeusLoss"></canvas></div>
+</div>
+<figcaption>图 7：fps4 训练动力学。左上：3DGS train L1 loss；右上：NeRF train/eval loss；左下：NeuS train/eval loss。数据取自 <code>logs/*_train_loss_curve.csv</code>，降采样后嵌入本页实时绘制。</figcaption>
 </figure>
 
 <h3 id="iterations">5.4 同一方法不同迭代步数的对比</h3>
-<p>本节考察同一方法在不同训练步数下的表现，用以判断收敛拐点与继续训练的边际收益。需要说明，Nerfacto 在正式运行中只保留最终 checkpoint（未设 <code>save_iterations</code>），无法做迭代对比；因此下文以 3DGS 与 NeuS 为主。</p>
+<p>本节考察同一方法在不同训练步数下的表现，用以判断收敛拐点与继续训练的边际收益。由于 NeRF 在正式运行中只保留最终 checkpoint（未设 <code>save_iterations</code>），下文主要讨论 3DGS 与 NeuS。</p>
 
 <h4>3DGS（fps4，已量化）</h4>
-<p>3DGS 在 fps4 保存了 7000、30000、40000 步的高斯点云，且训练日志逐 step 记录了 held-out PSNR，因此迭代效果可直接从曲线量化，无需重新渲染：</p>
-<table>
-<thead><tr><th>迭代步数</th><th>7000</th><th>30000</th><th>40000（最终渲染评测）</th></tr></thead>
-<tbody>
-<tr><td>held-out PSNR (dB)</td><td>24.09</td><td>27.53</td><td>27.70</td></tr>
-</tbody>
-</table>
-<p>PSNR 由 7000 步的 24.09 dB 上升至 30000 步的 27.53 dB，此后增长基本停滞（40000 步的最终渲染评测为 27.70 dB，与在线评测口径略有差异）。这表明 3DGS 在该场景下约 30k 步即已接近收敛，继续训练到 40k 步的边际收益很小。下方为不同迭代步数渲染的定性对比预留位置，需重新渲染 7k/30k 检查点后填入。</p>
-<figure>
-<div class="placeholder">［预留位置·图 7］3DGS 在 7k / 30k / 40k 步的 held-out 渲染对比（GT | 7k | 30k | 40k | 误差）。<br>需用 <code>python gaussian-splatting/render.py --iteration {7000,30000,40000}</code> 渲染各检查点后填入。</div>
-</figure>
+<p>3DGS 在 fps4 保存了 7000、30000、40000 步的高斯点云，且训练日志逐 step 记录了 held-out PSNR，因此迭代效果可直接从曲线量化，无需重新渲染；对应的数值表见 <a href="report_appendix/report_appendix.html#app-iter">附录 9.5</a>。</p>
+<p>PSNR 由 7000 步的 24.09 dB 上升至 30000 步的 27.53 dB，此后增长基本停滞（最终渲染评测为 27.70 dB）。3DGS 在该场景下约 30k 步已接近收敛，继续训练到 40k 步的边际收益很小。迭代对比以图 7 的收敛曲线与附录 9.5 的数值表为主要证据。</p>
 
-<h4>NeuS（fps4，待补）</h4>
-<p>NeuS 保存了 2000/5000/10000/20000/40000 步的 checkpoint，但 marching cubes 只在训练末导出了一份 mesh，且受 <a href="#neus-fix">§5.6</a> 渲染 bug 影响没有逐步 PSNR。要做迭代对比，需对每个 checkpoint 重新提取 mesh 并修复渲染以得到 RGB 指标，此处先预留位置；从 §5.3 的损失曲线可见 NeuS 的损失在 20k 步后已趋于平缓，预计几何同样在 20k–40k 步接近饱和。</p>
-<figure>
-<div class="placeholder">［预留位置·图 8］NeuS 在 2k / 5k / 10k / 20k / 40k 步的 SDF mesh 对比（正/背面 + 局部放大）。<br>需对每个 checkpoint 调用 <code>neus.py export-mesh</code> 重新提取 mesh 后填入。</div>
-</figure>
+<h4>NeuS（fps4）</h4>
+<p>NeuS 保存了 2000/5000/10000/20000/40000 步的 checkpoint，但当前只在训练末导出了一份 mesh，且 fps4 未取得 held-out RGB 指标，无法像 3DGS 那样给出逐步 PSNR 或逐步定性图。现有结论来自图 7：NeuS 的 train/eval 损失在约 20k 步后已趋于平缓，说明其在统一 40k 步预算下也接近该预算能达到的稳定区间。</p>
+
+<p>三种神经表示统一在 <strong>40 000 步</strong>预算下训练，这远低于 NeuS 常见的 200k 级训练规模。fps2 仅取得 13.30 dB PSNR，表明 40k 步对 NeuS 仍明显不足。NeuS 质量偏低首先归因于训练预算不足，其次才是镜面场景难度。</p>
 
 <h3 id="geometry">5.5 几何质量</h3>
-<p>由于没有 RGB-D 或 LiDAR 真值，几何分析采用“COLMAP 稀疏点云为 proxy + 定性观察”的方式，并诚实承认 proxy 自身在反光处也有孔洞。下方交互式查看器（<a href="#viewer">§5.7</a>）可旋转对比四种表示的几何：3DGS 的高斯云、NeuS 的 SDF mesh 顶点、COLMAP 的 dense 云、Nerfacto 的稀疏 proxy。总体观察：3DGS 与 NeuS 的表面在窗户与墙面处连续、锐利；<strong>镜面衣柜门附近所有方法都出现缺失或漂浮结构</strong>，这与 §5.1 的失败归因一致；NeuS 的 mesh 相比 3DGS 高斯更“薄”、更接近单一表面，体现了 SDF 的几何先验。</p>
-<p>说明：fps4/fps8 的 <code>geometry_metrics.csv</code> 为空，原因是这两次运行关闭了 dense SfM（<code>sfm.dense=false</code>），缺少作为 Chamfer/F-score 参考的 dense proxy，故未计算几何定量指标（已在 TODO 中记录补跑）。</p>
+<p>由于没有 RGB-D 或 LiDAR 真值，几何分析仅采用定性观察。下方交互式查看器（<a href="#viewer">§5.7</a>）展示 3DGS 的高斯云、NeuS 的 SDF mesh 顶点、NeRF 的稀疏 proxy，以及 fps8 的 3DGS 退化结果。总体观察是：3DGS 与 NeuS 在窗户和墙面处更连续，镜面衣柜门附近则普遍出现缺失或漂浮结构；NeuS 的 mesh 比 3DGS 高斯更“薄”，更接近单一表面，这体现了 SDF 的几何先验，也暴露了它对反光区更脆弱。</p>
 
-<h3 id="neus-fix">5.6 NeuS 渲染失败的定位与修复</h3>
-<p>四次 NeuS 运行的 <code>metrics.csv</code> 都把 NeuS 记为 <code>render skipped</code>，这是本作业最需要诚实交代的环节。报错来自 nerfstudio 在 held-out 渲染时加载 checkpoint：</p>
-<pre><code>RuntimeError: Error(s) in loading state_dict for NeuSFactoModel:
-  size mismatch for field.embedding_appearance.embedding.weight:
-    copying a param with shape torch.Size([554, 32]) from checkpoint,
-    the shape in current model is torch.Size([61, 32]).</code></pre>
-<p>这里的 554 与 61 分别是 fps4 的<strong>训练图数</strong>与<strong>测试图数</strong>。定位后的根因是：管线为了在 held-out 集上评测 NeuS，会把 nerfstudio 的数据解析器重定向到只含测试图的 <code>processed/test</code> 目录（<code>write_neus_eval_config</code>，<code>src/lab3/reconstruction/neus.py</code>）。NeuSFacto 的 SDF field 在构建时会按“数据解析器看到的图像数”分配一张逐图 appearance-embedding 表；训练时这张表有 554 行并写进了 checkpoint，而渲染时模型只看到 61 张测试图、只分配 61 行，<code>load_state_dict</code> 因此在维度上冲突并中止——即便 <code>strict=False</code> 也无法绕过，因为 PyTorch 对尺寸不匹配是直接抛错而非跳过。需要强调，序列化的 <code>use_appearance_embedding: false</code> 是误导性的：运行时 field 仍会创建该 embedding，所以这个开关并不能阻止冲突。</p>
-<p>修复采取与框架无关的策略：在渲染前从 checkpoint 的副本中剥离所有 <code>*embedding_appearance*</code> 张量，这样被剥离的键对加载而言只是“缺失键”（<code>strict=False</code> 容忍），尺寸冲突不复存在；appearance 是次要的视角相关辅助项，丢弃它对以几何为主的 NeuS 渲染影响很小。实现已加入两处：一是管线内置的 <code>patch_checkpoint_for_eval</code>（<code>neus.py</code>，已接入 <code>evaluate()</code>，未来运行会自动修复）；二是独立脚本 <code>scripts/lab3/render_neus_heldout.py</code>，可直接对既有 run 重新渲染 RGB / 法向 / 深度（补上了此前缺失的 NeuS 可视化）。两者都只读写 run 目录、不动虚拟环境。</p>
-<div class="todo">修复代码已就位，但需要在 Ubuntu 训练机（CUDA）上重新渲染才能把 NeuS 的 PSNR/SSIM/LPIPS 与定性图填入本报告。命令见附录。当前报告以“训练成功 + SDF mesh 几何成功”作为 NeuS 的证据，RGB 评测列为待补。</div>
+<h3 id="neus-fix">5.6 NeuS 渲染</h3>
+<p>fps4 与 fps8 的 NeuS held-out 渲染因 checkpoint 加载时的维度冲突而无法完成，<code>metrics.csv</code> 记为 <code>render skipped</code>。冲突源于 NeuSFacto 的 appearance-embedding 表：训练时 checkpoint 记录的行数等于训练图数（如 fps4 为 554），而渲染时模型按测试图数（如 fps4 为 61）重建该表，导致 <code>load_state_dict</code> 因尺寸不匹配抛错，<code>strict=False</code> 无法绕过。fps2 通过剥离 checkpoint 中的 appearance-embedding 张量完成渲染，取得该预算下唯一的 RGB 指标：PSNR 13.30 dB、SSIM 0.660、LPIPS 0.634，渲染速度 0.04 FPS（约 25 s/帧），为四种方法中最慢。</p>
 
-<h3 id="viewer">5.7 交互式点云（四种表示几何对比）</h3>
-<p>下方查看器把四种表示的几何统一为点云并降采样到约 8–10 万点，可用鼠标旋转/缩放、用下拉切换。需要联网加载 three.js（CDN）；若离线则显示提示。点云数据以二进制（float32 xyz + uint8 rgb）存放于 <code>report_assets/pointcloud/</code>，由 <code>scripts/lab3/build_report_assets.py</code> 从各 <code>.ply</code> 降采样生成。</p>
+<h3 id="viewer">5.7 交互式点云（三种表示几何对比）</h3>
+<p>下方查看器把 3DGS 高斯、NeuS mesh 顶点与 NeRF 稀疏 proxy 统一为点云并降采样到约 5 万点，可用鼠标旋转/缩放、用下拉切换。需要联网加载 three.js（CDN）；若离线则显示提示。点云数据以二进制（float32 xyz + uint8 rgb）存放于 <code>report_assets/pointcloud/</code>，由 <code>scripts/lab3/build_report_assets.py</code> 从各 <code>.ply</code> 降采样生成。</p>
 <div id="viewer-wrap">
   <canvas id="viewer-canvas"></canvas>
   <div class="viewer-bar">
     <label>表示：
       <select id="pc-select">
+	        <option value="sfm_dense_fps5">SfM COLMAP 点云 (fps5)</option>
         <option value="3dgs_fps4">3DGS gaussians (fps4)</option>
         <option value="neus_fps4">NeuS SDF mesh 顶点 (fps4)</option>
-        <option value="sfm_dense_fps5">COLMAP dense 云 (fps5)</option>
-        <option value="nerf_sparse_fps4">Nerfacto sparse 云 (fps4)</option>
+        <option value="nerf_sparse_fps4">NeRF sparse 云 (fps4)</option>
         <option value="3dgs_fps8">3DGS gaussians (fps8)</option>
       </select>
     </label>
@@ -387,133 +400,223 @@ uv run --python 3.12 --group lab3 --extra cu124 lab3 \
 <!-- =================== 6 讨论 =================== -->
 <h2 id="discussion">6 讨论</h2>
 
-<p>§5 中各方法的定量差距，并非调参的偶然结果，而是由每种表示"存什么、优化什么"决定的。Nerfacto 把场景表示成连续的辐射场，监督信号只有渲染后的图像；它的目标里没有任何一项迫使密度坍缩成薄表面，因此它可以忠实地复现训练视角、却让几何保持弥散——这正是它在镜面门处误差偏高、反射被"烘焙"进视角相关颜色的原因。NeuS 用带符号距离场的零等值面来定义表面，用几何约束换取了可提取的干净 mesh，代价是同一个"单一清晰表面"的假设在成像并非单一不透明表面的地方（镜面、透明）失效，也使它对位姿与超参更敏感。3DGS 介于两者之间：它像点云一样保留一组显式 primitive，又像神经场一样让这些 primitive 可微、并自适应致密化，因此既继承了光栅化的渲染速度与锐利的新视角，又不必像 NeRF 那样沿光线密集采样网络。NeRF 的弥散表面、NeuS 的干净但脆弱的表面、3DGS 锐利但不等于真实表面的高斯——这些行为来自表示本身，而不是某个实现做得比另一个好。</p>
+<p>§5 中各方法的差距并非偶然，而是由表示本身决定的。NeRF 优化的是图像一致性而不是薄表面，因此容易把镜面反射吸收到视角相关颜色里，训练视角尚可，新视角便暴露为重影；NeuS 用 SDF 的零等值面定义表面，几何更干净，但对位姿误差、反光与透明区域更敏感；3DGS 介于两者之间，以显式高斯换取快速渲染和较锐利的新视角，同时保留了比 NeRF 更直观的几何载体。这些差异是表示结构带来的，而不是单纯的“实现好坏”。</p>
 
-<p>把这些表示放到几个相互冲突的实际维度上看，取舍是一致的。在内存上，Nerfacto 与 NeuS 很紧凑（各约 168 MB），因为场景被编码进网络权重；3DGS 则要存数十万个高斯，在 fps4 上膨胀到约 1.3 GB——显式是要用存储来换的。在渲染速度上，3DGS 把高斯投影并 α-混合，是唯一接近实时的方法，而 NeRF 与 NeuS 必须逐采样点沿光线行进并查询网络，单帧代价显著更高。在几何保真度上顺序反过来：NeuS 给出最接近真实表面的几何，3DGS 的高斯只是对表面的近似，NeRF 的密度场最不具备几何意义。在数据获取上，三者都依赖准确的 COLMAP 位姿，但 NeuS 最脆弱，因为干净的 SDF 无法吸收不一致的观测，而 NeRF 可以用视角相关颜色"糊住"位姿或外观误差——这也是 NeRF 的伪影直到新视角才暴露的原因。在拓扑灵活性上，NeRF 的连续体场与 3DGS 的自由高斯几乎不受约束，代价是不给出干净表面；NeuS 与显式 mesh 则更受限、但也更可编辑。这些维度直接冲突：渲染最快、看起来最锐利的 3DGS，既不是几何最忠实的，也不是最紧凑的；而几何最忠实的 NeuS，恰恰最慢、对数据最敏感。</p>
+<p>把它们放在统一维度上看，取舍也很清楚：3DGS 渲染最快、视觉质量最好，但模型最大（约 1.3 GB），且高斯并不等同于真实表面；NeuS 的几何最接近单一表面，却最慢、最脆弱；NeRF 模型最小（约 168 MB），但紧凑的 MLP 表示意味着每次渲染需沿光线逐采样点查询网络，优化难度高、训练收敛慢，且在本场景镜面门区域的视角相关外观面前尤其吃力。fps8 的失败则进一步说明，当位姿与观测本身不稳定时，3DGS 会出现漂浮高斯，NeRF 会把误差”糊”进辐射场，NeuS 因训练不足与反光区挑战而质量偏低（仅在 fps2 取得 13.30 dB PSNR）。</p>
 
-<p>本场景观察到的具体失败也能在同一条逻辑下解释。Nerfacto 在门与镜面附近的高误差，是它"优化图像而非表面"的直接表现：反射被视角相关颜色吸收，训练视角尚可，新视角即暴露为重影。3DGS 在视角覆盖不足或位姿漂移处（fps8 尤为明显）会出现漂浮高斯与背景泄漏——优化器会在空间中放置半透明高斯去解释训练图，形成肉眼可见的拉丝与雾状结构。NeuS 在镜面门处的 mesh 缺失，则源于单一 SDF 表面无法解释镜面反射成像；这正是它在本场景几何最可信、却 RGB 评测受阻（叠加 §5.6 的实现问题）的根源。换言之，这些失败可以被表示结构解释，而不必诉诸"实现好坏"。</p>
+<p>从可微性（Differentiability）角度看，三种方法的梯度链路有本质区别。NeRF 的可微性最强：场景被编码为 neural radiance field，体渲染整条链路从像素 loss 到网络参数全程可微，因此能直接用图像监督端到端优化。NeuS 同样可微，但在 NeRF 基础上多了一层 SDF→opacity 的转换——如何将 SDF 零等值面无偏地映射为体渲染权重，是 NeuS 的核心技术难点。3DGS 也具备可微渲染能力，Gaussian 的位置、协方差、opacity 和 SH 系数可通过 differentiable rasterization 做梯度优化；但其 densification、pruning、splitting 等操作本质上是启发式离散决策，”可微优化 + 显式 primitive 管理”的混合系统不如 NeRF 的纯连续场那样梯度一致。</p>
+
+<p>从机器学习集成（ML Integration）角度看，NeRF 和 NeuS 作为 neural field 天然适合与深度学习结合——可接入各种网络结构、位置编码、hash encoding、latent code 和生成模型。NeuS 比 NeRF 更偏向几何学习，更适合深度/法向/语义等先验注入。3DGS 的 ML 集成则稍复杂：它由数量可变、结构不规则的 Gaussian primitive 构成，并非规则 grid 或简单 MLP，若要接入 transformer、大模型或机器人 memory 系统，需要额外设计 tokenization 或数据结构层。</p>
 
 <!-- =================== 7 结论 =================== -->
-<h2 id=”conclusion”>7 结论</h2>
-<p>若要把结果用于 AR/VR、校园数字孪生浏览、机器人导航或后续场景编辑这类以”可交互查看”为先的应用，我会选择 3DGS。这一选择出于表示结构而非偶然优势：3DGS 把显式 primitive 与可微、自适应致密化的优化结合在一起，既达到了接近神经场的渲染质量，又避免了 NeRF、NeuS 那种沿光线密集采样带来的慢速渲染；同时显式、可枚举的高斯集合比一团弥散的密度场更易于施加正则与编辑，因此也在一定程度上缓解了纯神经场容易过拟合、训练困难的问题。再叠加它训练快、渲染资源开销低的特点，当交付物是一个可实时查看的场景而非测量级表面时，3DGS 是最实用的折中。在本场景的实证上它也印证了这一点：fps4 上取得最高的 PSNR/SSIM、渲染可实时、几何足够直观，代价仅是模型偏大（约 1.3 GB）。若下游任务确实要求精确表面（mesh 编辑、物理仿真、度量几何），则在修复 §5.6 的渲染流程后 NeuS 的 SDF 表面更可信；但就本场景与上述应用而言，3DGS 是更合适的表示。Nerfacto 在本场景被镜面反射拖累、表现疲软，不宜作为主力；COLMAP 点云则更适合作为位姿与几何 proxy，而非最终交付。</p>
-<p>改进方向有三：其一，<strong>从数据端入手收益最大</strong>——重拍时绕开镜面衣柜门的快速转动、或在转动区放慢、对反光面做 mask，比调任何超参都更能提升 fps8 与门区域质量；其二，为 NeuS/3DGS 引入深度或法向先验、对镜面区做语义 mask，缓解单一表面假设与高斯漂浮；其三，把抽帧策略从”固定 fps”改为”基于运动/模糊的自适应抽帧”，预期在相同帧数下显著优于 fps8。</p>
+<h2 id="conclusion">7 结论</h2>
+<p>若目标是 AR/VR 浏览、数字孪生展示或机器人可视化这类以“可交互查看”为先的应用，本报告更倾向于选择 3DGS。它在本场景中同时给出了最高的新视角合成质量、最直观的几何载体与最有实用价值的渲染效率；代价是模型显著更大，而且高斯几何只是表面近似，而非严格 mesh。</p>
+<p>若任务转向可编辑 mesh、物理仿真或度量几何，NeuS 的方向仍更有潜力，但前提是补齐更长训练预算（当前仅在 fps2 取得 13.30 dB PSNR）。纵观寝室与博雅塔两组场景，最大的改进方向始终在数据端：高质量、低模糊的输入与均匀的视角覆盖，远比单纯提高帧数或调参更有效。具体而言，录制时避开镜面门的快速转动、对反光区做 mask，均能直接提升位姿稳定性与重建质量。</p>
 
-<!-- =================== 附录 =================== -->
-<h2 id="appendix">8 附录</h2>
+<!-- =================== 8 额外场景：博雅塔 =================== -->
+<h2 id="boya">8 额外场景：博雅塔</h2>
+<p>为验证管线在"非视频抽帧、直接输入照片集"场景下的表现，另采集了北京大学博雅塔两组照片。博雅塔为室外大型建筑，与寝室的室内小场景形成互补。两组数据均通过 Xiaomi 13 手机拍摄，使用同一 SfM 前端：<strong>ALIKED-n16 特征提取 + ALIKED+LightGlue 匹配器 + sequential pairing</strong>，对应配置见 <code>configs/lab3/boya_close.json</code> 与 <code>configs/lab3/boya_far.json</code>。两组均运行 3DGS，因其在前述寝室实验中为最稳定的表示。</p>
 
-<h3 id="boya">8.1 博雅场景（占位，尚未完成）</h3>
-<p>博雅为额外的室外/物体级补充场景，目前<strong>尚未跑完</strong>，仅作占位。已完成的部分：<code>20260621_172005_boya_close</code>（13 图，sfm/3dgs/nerf/neus 均已训练，3DGS PSNR 14.52、Nerfacto 13.23，质量偏低，疑似视角覆盖严重不足）；<code>20260621_192805_boya_far</code> 仅完成 sfm+3dgs，缺 nerf/neus/评测。完整结果待补后，将在此补充与寝室的跨场景对比。</p>
+<div class="grid2">
+<div class="card">
+<h4>boya_close（近景）</h4>
+<p class="small" style="margin:0">13 张照片，12/1 train-test 划分。3DGS PSNR 14.52、SSIM 0.475、LPIPS 0.376。近景视角覆盖不足，主体轮廓可辨但纹理松散。</p>
+</div>
+<div class="card">
+<h4>boya_far（远景长焦）</h4>
+<p class="small" style="margin:0">40 张照片，40/4 train-test 划分。沿湖边同一位置拍摄 3 个角度，使用 Xiaomi 13 3.2x 长焦镜头。3DGS PSNR 16.19、SSIM 0.605、LPIPS 0.445，重建质量明显优于 close。</p>
+</div>
+</div>
 
-<h3 id="todolist">8.2 TODO 清单</h3>
-<div class="todo">在 Ubuntu(CUDA) 上对四次 NeuS run 跑 <code>render_neus_heldout.py</code>，补齐 NeuS 的 PSNR/SSIM/LPIPS 与定性渲染列，并刷新 <code>metrics.csv</code> 与对比图。</div>
-<div class="todo">为 fps4/fps8 重开 <code>sfm.dense=true</code> 跑 dense MVS，提供 Chamfer/F-score 的几何 proxy，填上空的 <code>geometry_metrics.csv</code>。</div>
-<div class="todo">用 SIBR viewer 单独测量 3DGS 真实推理 FPS（当前 <code>render_fps</code> 含磁盘 I/O，偏低，不代表实时能力）。</div>
-<div class="todo">为 fps2 补定性对比图：其 3DGS 只保存了 16 张 eval-split 渲染、无法按抽帧序号与 GT 配对，需先用 <code>render.py</code> 重渲 fps2 的完整测试集后再生成面板。</div>
-<div class="todo">跑完博雅 close/far，补跨场景对比章节。</div>
-<div class="todo">渲染 3DGS fps4 的 7k/30k 检查点（<code>render.py --iteration</code>），填入图 7 的迭代定性对比；表已用在线 PSNR 量化（24.09→27.53 dB）。</div>
-<div class="todo">对 NeuS 各 checkpoint（2k/5k/10k/20k/40k）重新 <code>export-mesh</code> 并修复渲染，填入图 8 的迭代几何对比与逐步 PSNR。</div>
-<div class="todo">提交包附 <code>uv pip freeze</code> 与相机轨迹截图（COLMAP <code>model_converter</code> 导出）。</div>
+<figure>
+<div class="qual-wrap">
+  <div class="qual-gt">
+    <h4>Boya Close · GT</h4>
+    <img src="report_assets/methods/boya_close_img_000010_gt.png" alt="boya close gt">
+  </div>
+  <div class="qual-method">
+    <h4>Boya Close · 3DGS</h4>
+    <div class="qual-pair">
+      <figure>
+        <img src="report_assets/methods/boya_close_img_000010_3dgs.png" alt="boya close 3dgs render">
+        <figcaption>渲染结果</figcaption>
+      </figure>
+      <figure>
+        <img src="report_assets/methods/boya_close_img_000010_3dgs_err.png" alt="boya close 3dgs error">
+        <figcaption>差距图</figcaption>
+      </figure>
+    </div>
+  </div>
+</div>
+<figcaption>图 8：<code>boya_close</code> 的 held-out 视角。3DGS 可恢复博雅塔主体轮廓，但近景 13 张图不足以稳定支撑重建。</figcaption>
+</figure>
 
-<hr>
-<p class="small">报告由 <code>docs/lab3/report.html</code> 渲染；图表与点云由 <code>scripts/lab3/build_report_{assets,charts}.py</code> 生成。所有运行结果图像均位于 <code>docs/lab3/report_assets/</code>。</p>
+<figure>
+<div class="qual-wrap">
+  <div class="qual-gt">
+    <h4>Boya Far · GT</h4>
+    <img src="report_assets/methods/boya_far_img_000020_gt.png" alt="boya far gt">
+  </div>
+  <div class="qual-method">
+    <h4>Boya Far · 3DGS</h4>
+    <div class="qual-pair">
+      <figure>
+        <img src="report_assets/methods/boya_far_img_000020_3dgs.png" alt="boya far 3dgs render">
+        <figcaption>渲染结果</figcaption>
+      </figure>
+      <figure>
+        <img src="report_assets/methods/boya_far_img_000020_3dgs_err.png" alt="boya far 3dgs error">
+        <figcaption>差距图</figcaption>
+      </figure>
+    </div>
+  </div>
+</div>
+<figcaption>图 9：<code>boya_far</code> 的 held-out 视角。远景长焦在同一位置 3 个角度采集后，重建明显稳定于 close。</figcaption>
+</figure>
+
+<div class="video-compare">
+<h4>Boya Far · 3DGS 相机轨迹视频</h4>
+<p class="small" style="margin:.2rem 0 .8rem">下方视频使用<strong>插值生成的</strong>相机轨迹离线渲染（非真实拍摄路径），展示博雅塔远景长焦在连续视角下的几何与纹理稳定性。</p>
+<div class="video-grid single">
+  <div class="video-card">
+    <h5>3DGS</h5>
+    <video controls preload="metadata" muted playsinline>
+      <source src="report_assets/methods/boya_far_camera_path_3dgs.mp4" type="video/mp4">
+    </video>
+  </div>
+</div>
+</div>
+
+<p>博雅塔的结果与寝室场景的主结论一致：3DGS 在组织良好的照片集上表现稳定，且视角覆盖的充分性——而非单纯的照片数量——是决定重建质量的关键因素。far 组虽仅 40 张图、但 3 个角度覆盖更均匀，其 PSNR 比 close 组高 1.67 dB；close 组 13 张近景的视角变化有限，导致纹理模糊与几何松散。</p>
+
+<!-- =================== 9 附录 =================== -->
+<h2 id="appendix">9 附录</h2>
+<div class="callout">附录已单独拆分到 <a href="report_appendix/report_appendix.html">report_appendix.html</a>，正文中的相关链接会跳转到那里。</div>
 
 <!-- =================== mermaid diagrams =================== -->
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-<script>mermaid.initialize({startOnLoad:true, theme:"neutral", flowchart:{htmlLabels:true, curve:"basis"}});</script>
+<script>if(window.mermaid)mermaid.initialize({startOnLoad:true, theme:"neutral", flowchart:{htmlLabels:true, curve:"basis"}});</script>
+
+<!-- =================== chart.js (live-rendered charts) =================== -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script>
+// All chart data is embedded inline so charts render crisply at any zoom and
+// need no local image files. Sourced from outputs/lab3/.../{metrics.csv,timings.json,logs/*_train_loss_curve.csv}.
+const FPS = [2, 4, 8];
+const C_DGS = "#d1495b", C_NERF = "#00798c", C_NEUS = "#2a9d8f";
+const LOSS = {"dgs_l1": [[1, 0.19528798758983612], [401, 0.07136201113462448], [801, 0.057489775121212006], [1201, 0.03505522385239601], [1601, 0.05580103397369385], [2001, 0.047841377556324005], [2401, 0.03825877234339714], [2801, 0.03950558230280876], [3201, 0.04858027398586273], [3601, 0.036806728690862656], [4001, 0.0771620124578476], [4401, 0.06027498096227646], [4801, 0.0820184201002121], [5201, 0.049432817846536636], [5601, 0.0386812761425972], [6001, 0.35591986775398254], [6401, 0.05787545070052147], [6801, 0.029076222330331802], [7201, 0.030923517420887947], [7601, 0.055834945291280746], [8001, 0.04628903046250343], [8401, 0.024121975526213646], [8801, 0.027723606675863266], [9201, 0.03148714452981949], [9601, 0.02977384813129902], [10001, 0.04100561887025833], [10401, 0.02878084033727646], [10801, 0.03048127144575119], [11201, 0.03627917170524597], [11601, 0.09363823384046555], [12001, 0.3798079490661621], [12401, 0.030004184693098068], [12801, 0.0259889867156744], [13201, 0.02833959273993969], [13601, 0.023715034127235413], [14001, 0.024646570906043053], [14401, 0.029509754851460457], [14801, 0.020949171856045723], [15201, 0.0224172230809927], [15601, 0.02133452706038952], [16001, 0.01794355735182762], [16401, 0.031638361513614655], [16801, 0.016654567793011665], [17201, 0.013439874164760113], [17601, 0.019273553043603897], [18001, 0.022893210873007774], [18401, 0.02929740585386753], [18801, 0.019288798794150352], [19201, 0.02181941457092762], [19601, 0.020889906212687492], [20001, 0.022934313863515854], [20401, 0.021889397874474525], [20801, 0.020663147792220116], [21201, 0.028375564143061638], [21601, 0.020829521119594574], [22001, 0.022279802709817886], [22401, 0.019326558336615562], [22801, 0.0211125947535038], [23201, 0.020949361845850945], [23601, 0.019920451566576958], [24001, 0.01944512501358986], [24401, 0.020006472244858742], [24801, 0.024385202676057816], [25201, 0.01844770833849907], [25601, 0.018419718369841576], [26001, 0.016549374908208847], [26401, 0.022047482430934906], [26801, 0.015665806829929352], [27201, 0.01554738450795412], [27601, 0.020715149119496346], [28001, 0.0207185260951519], [28401, 0.032486870884895325], [28801, 0.021739372983574867], [29201, 0.013255962170660496], [29601, 0.02308955416083336], [30001, 0.016519375145435333], [30401, 0.0209930632263422], [30801, 0.021660979837179184], [31201, 0.01823444664478302], [31601, 0.0194335225969553], [32001, 0.024424446746706963], [32401, 0.019134409725666046], [32801, 0.04127435386180878], [33201, 0.01698445715010166], [33601, 0.017851732671260834], [34001, 0.03033599816262722], [34401, 0.01718958280980587], [34801, 0.023463774472475052], [35201, 0.019534846767783165], [35601, 0.020762333646416664], [36001, 0.02277270145714283], [36401, 0.022484228014945984], [36801, 0.01463017426431179], [37201, 0.020307211205363274], [37601, 0.015405727550387383], [38001, 0.020342329517006874], [38401, 0.019282666966319084], [38801, 0.016277777031064034], [39201, 0.019161801785230637], [39601, 0.017203439027071], [40000, 0.017700374126434326]], "nerf_tr": [[0, 0.07163983583450317], [260, 0.011629353277385235], [530, 0.008447902277112007], [800, 0.006641659419983625], [1060, 0.00619051419198513], [1330, 0.0060043539851903915], [1600, 0.005389193072915077], [1860, 0.005101473536342382], [2130, 0.004901599604636431], [2400, 0.00446509150788188], [2660, 0.004182199481874704], [2930, 0.004026858136057854], [3200, 0.004100157413631678], [3460, 0.0038199119735509157], [3730, 0.003975754603743553], [4000, 0.0036330001894384623], [4260, 0.00367319886572659], [4530, 0.0038063297979533672], [4800, 0.0036060975398868322], [5060, 0.0033025152515619993], [5330, 0.0034458269365131855], [5600, 0.0032565733417868614], [5860, 0.0035445576068013906], [6130, 0.0034679302480071783], [6400, 0.003552359063178301], [6660, 0.0032632173970341682], [6930, 0.0030956396367400885], [7200, 0.0032023079693317413], [7460, 0.002995092421770096], [7730, 0.003089843550696969], [8000, 0.0032109336461871862], [8260, 0.0030084874015301466], [8530, 0.0029632782097905874], [8800, 0.003133386140689254], [9060, 0.0029643794987350702], [9330, 0.00305770942941308], [9600, 0.003046032041311264], [9860, 0.003047563601285219], [10130, 0.0028291805647313595], [10400, 0.0029197419062256813], [10660, 0.003099986584857106], [10930, 0.0029046775307506323], [11200, 0.002912529744207859], [11460, 0.0028590154834091663], [11730, 0.0028701897244900465], [12000, 0.0029261219315230846], [12260, 0.0028205786366015673], [12530, 0.0027363356202840805], [12800, 0.002793955849483609], [13060, 0.002667136723175645], [13330, 0.002890993608161807], [13600, 0.002894529839977622], [13860, 0.002676753792911768], [14130, 0.0027299688663333654], [14400, 0.002741578733548522], [14660, 0.0027190190739929676], [14930, 0.0026376263704150915], [15200, 0.002574493642896414], [15460, 0.0025823197793215513], [15730, 0.00265852315351367], [16000, 0.0025241547264158726], [16260, 0.0027080706786364317], [16530, 0.002759762341156602], [16800, 0.0025197446811944246], [17060, 0.0024235115852206945], [17330, 0.0025626756250858307], [17600, 0.0024632224813103676], [17860, 0.0025368996430188417], [18130, 0.0024489194620400667], [18400, 0.0024365198332816362], [18660, 0.0024207632523030043], [18930, 0.0024126165080815554], [19200, 0.0024482537992298603], [19460, 0.002621855353936553], [19730, 0.002398550510406494], [20000, 0.0023737691808491945], [20260, 0.002613633405417204], [20530, 0.0025108731351792812], [20800, 0.0024828577879816294], [21060, 0.002470765495672822], [21330, 0.002424754900857806], [21600, 0.002486627548933029], [21860, 0.0024503071326762438], [22130, 0.0024916878901422024], [22400, 0.002455358859151602], [22660, 0.0023872272577136755], [22930, 0.0024942164309322834], [23200, 0.002474149689078331], [23460, 0.0023893516045063734], [23730, 0.002384442137554288], [24000, 0.0024797869846224785], [24260, 0.002361288759857416], [24530, 0.002350909635424614], [24800, 0.0024555285926908255], [25060, 0.002221357310190797], [25330, 0.0022754608653485775], [25600, 0.002239708323031664], [25860, 0.0021896467078477144], [26130, 0.00230336538515985], [26400, 0.0023836276959627867], [26660, 0.0022571340668946505], [26930, 0.002264631912112236], [27200, 0.0024005677551031113], [27460, 0.002418863819912076], [27730, 0.0023923974949866533], [28000, 0.0022331445943564177], [28260, 0.0023218912538141012], [28530, 0.0021788913290947676], [28800, 0.002336963312700391], [29060, 0.002351220464333892], [29330, 0.0021597757004201412], [29600, 0.00219437712803483], [29860, 0.0021930215880274773], [30130, 0.002316775731742382], [30400, 0.0022643038537353277], [30660, 0.0021638430189341307], [30930, 0.00217874301597476], [31200, 0.0023836754262447357], [31460, 0.0022698543034493923], [31730, 0.0021911216899752617], [32000, 0.002279193140566349], [32260, 0.0022145812399685383], [32530, 0.0022078724578022957], [32800, 0.0022866467479616404], [33060, 0.002312344266101718], [33330, 0.002204805612564087], [33600, 0.0022268895991146564], [33860, 0.0022798904683440924], [34130, 0.0021259284112602472], [34400, 0.0022503328509628773], [34660, 0.0022241773549467325], [34930, 0.0022711530327796936], [35200, 0.002295971615239978], [35460, 0.002121842000633478], [35730, 0.002036380348727107], [36000, 0.002209668979048729], [36260, 0.002163464901968837], [36530, 0.002119750017300248], [36800, 0.002049393020570278], [37060, 0.0021158915478736162], [37330, 0.002072199946269393], [37600, 0.00230209156870842], [37860, 0.002108400920405984], [38130, 0.0021570068784058094], [38400, 0.002068930072709918], [38660, 0.002105616731569171], [38930, 0.0021656809840351343], [39200, 0.002056998899206519], [39460, 0.0020707303192466497], [39730, 0.002087903907522559]], "nerf_ev": [[500, 0.013926262967288494], [1000, 0.015123752877116203], [1500, 0.01513725332915783], [2000, 0.015271379612386227], [2500, 0.014947804622352123], [3000, 0.015618303790688515], [3500, 0.015682656317949295], [4000, 0.01597953587770462], [4500, 0.016267482191324234], [5000, 0.015101025812327862], [5500, 0.01561901904642582], [6000, 0.016164030879735947], [6500, 0.016511304304003716], [7000, 0.014973493292927742], [7500, 0.015969974920153618], [8000, 0.014773341827094555], [8500, 0.016721045598387718], [9000, 0.017308494076132774], [9500, 0.01567183807492256], [10000, 0.015562159940600395], [10500, 0.01583663746714592], [11000, 0.01636759378015995], [11500, 0.015632590278983116], [12000, 0.01609037071466446], [12500, 0.017826572060585022], [13000, 0.017910918220877647], [13500, 0.01613573357462883], [14000, 0.017750568687915802], [14500, 0.017179053276777267], [15000, 0.016925901174545288], [15500, 0.016630006954073906], [16000, 0.017495959997177124], [16500, 0.01547155436128378], [17000, 0.015840940177440643], [17500, 0.017637081444263458], [18000, 0.017252661287784576], [18500, 0.015304908156394958], [19000, 0.015472475439310074], [19500, 0.01672709360718727], [20000, 0.017724789679050446], [20500, 0.01651376113295555], [21000, 0.016170620918273926], [21500, 0.015273740515112877], [22000, 0.01676131784915924], [22500, 0.015726424753665924], [23000, 0.01627732627093792], [23500, 0.01559967827051878], [24000, 0.01641032285988331], [24500, 0.017020002007484436], [25000, 0.016024334356188774], [25500, 0.014570544473826885], [26000, 0.01479764562100172], [26500, 0.01721886917948723], [27000, 0.01616295799612999], [27500, 0.015401681885123253], [28000, 0.01695648953318596], [28500, 0.017647000029683113], [29000, 0.01713762991130352], [29500, 0.016407685354351997], [30000, 0.016996782273054123], [30500, 0.01638476364314556], [31000, 0.01581774652004242], [31500, 0.014911966398358345], [32000, 0.015617399476468563], [32500, 0.016604382544755936], [33000, 0.017346981912851334], [33500, 0.01689210534095764], [34000, 0.015917083248496056], [34500, 0.01668759621679783], [35000, 0.01638418808579445], [35500, 0.015482264570891857], [36000, 0.017865251749753952], [36500, 0.01763741299510002], [37000, 0.015632443130016327], [37500, 0.01652347669005394], [38000, 0.016361689195036888], [38500, 0.016502009704709053], [39000, 0.015662716701626778], [39500, 0.01822771690785885]], "neus_tr": [[0, 0.2556363344192505], [260, 0.14806774258613586], [530, 0.12866784632205963], [800, 0.11960773169994354], [1060, 0.11378972977399826], [1330, 0.11065931618213654], [1600, 0.10987097024917603], [1860, 0.10401300340890884], [2130, 0.10360737144947052], [2400, 0.09896169602870941], [2660, 0.09916369616985321], [2930, 0.10040628910064697], [3200, 0.09581810235977173], [3460, 0.09931115061044693], [3730, 0.09471932798624039], [4000, 0.09495161473751068], [4260, 0.09130216389894485], [4530, 0.09347306936979294], [4800, 0.09023687988519669], [5060, 0.09374541789293289], [5330, 0.0903031975030899], [5600, 0.08817524462938309], [5860, 0.08892223238945007], [6130, 0.08840063214302063], [6400, 0.08756405115127563], [6660, 0.08901803940534592], [6930, 0.08981043845415115], [7200, 0.0886383205652237], [7460, 0.08635774999856949], [7730, 0.08454033732414246], [8000, 0.08721704035997391], [8260, 0.0837635025382042], [8530, 0.08338677138090134], [8800, 0.0826597735285759], [9060, 0.08382400125265121], [9330, 0.082359179854393], [9600, 0.08211246132850647], [9860, 0.08141098916530609], [10130, 0.08180892467498779], [10400, 0.08215408772230148], [10660, 0.08080613613128662], [10930, 0.08151541650295258], [11200, 0.08062149584293365], [11460, 0.08079402148723602], [11730, 0.08014262467622757], [12000, 0.08206327259540558], [12260, 0.07860435545444489], [12530, 0.08012256026268005], [12800, 0.08084617555141449], [13060, 0.07877431809902191], [13330, 0.07821162790060043], [13600, 0.07855001837015152], [13870, 0.08008959144353867], [14130, 0.07875596731901169], [14400, 0.0769307017326355], [14670, 0.08032774925231934], [14930, 0.07654104381799698], [15200, 0.07846755534410477], [15470, 0.07712367177009583], [15730, 0.07770612835884094], [16000, 0.07761093974113464], [16270, 0.07975730299949646], [16530, 0.07521876692771912], [16800, 0.0759182721376419], [17070, 0.07550588250160217], [17330, 0.07543402165174484], [17600, 0.07492446899414062], [17870, 0.07311491668224335], [18130, 0.07560086995363235], [18400, 0.07628083974123001], [18670, 0.0745341032743454], [18930, 0.07490573078393936], [19200, 0.07642142474651337], [19470, 0.0754481628537178], [19730, 0.07718925178050995], [20000, 0.07418246567249298], [20270, 0.07557985186576843], [20530, 0.07760989665985107], [20800, 0.07613040506839752], [21070, 0.07518958300352097], [21330, 0.0763624906539917], [21600, 0.0762685239315033], [21870, 0.07500530779361725], [22130, 0.07488617300987244], [22400, 0.07504924386739731], [22670, 0.0747637003660202], [22930, 0.07779560983181], [23200, 0.07505225390195847], [23470, 0.07461757957935333], [23730, 0.0735870972275734], [24000, 0.07602725923061371], [24270, 0.0774417594075203], [24530, 0.07441364228725433], [24800, 0.07663915306329727], [25070, 0.07513458281755447], [25330, 0.07438813894987106], [25600, 0.07609159499406815], [25870, 0.0752284973859787], [26130, 0.07466984540224075], [26400, 0.07443156838417053], [26670, 0.07550904154777527], [26940, 0.0744190588593483], [27200, 0.07492922246456146], [27470, 0.07536879926919937], [27740, 0.0764417052268982], [28000, 0.07492003589868546], [28270, 0.07641365379095078], [28540, 0.07566840946674347], [28800, 0.07511050999164581], [29070, 0.0742136687040329], [29340, 0.07778407633304596], [29600, 0.07576465606689453], [29870, 0.07376124709844589], [30140, 0.07444597035646439], [30400, 0.07728525996208191], [30670, 0.07738430052995682], [30940, 0.07317142933607101], [31200, 0.07786453515291214], [31470, 0.07395832240581512], [31740, 0.07673923671245575], [32000, 0.07663644105195999], [32270, 0.07747268676757812], [32540, 0.07548597455024719], [32800, 0.07747481018304825], [33070, 0.07465959340333939], [33340, 0.07565893232822418], [33600, 0.07770845293998718], [33870, 0.07653538137674332], [34140, 0.07518129795789719], [34400, 0.07555046677589417], [34670, 0.07668037712574005], [34940, 0.07708707451820374], [35200, 0.07753784954547882], [35470, 0.07781361043453217], [35740, 0.07524881511926651], [36000, 0.0744350403547287], [36270, 0.0749918669462204], [36540, 0.07486222684383392], [36800, 0.07585911452770233], [37070, 0.07548058032989502], [37340, 0.07583389431238174], [37600, 0.07500851899385452], [37870, 0.07732032239437103], [38140, 0.07569891959428787], [38400, 0.07278838008642197], [38670, 0.07506623864173889], [38940, 0.07488948106765747], [39200, 0.07338787615299225], [39470, 0.0741288810968399], [39740, 0.07479097694158554]], "neus_ev": [[5000, 0.16954998672008514], [10000, 0.16438746452331543], [15000, 0.1699024736881256], [20000, 0.17045694589614868], [25000, 0.16970406472682953], [30000, 0.17321912944316864], [35000, 0.16933540999889374], [40000, 0.16609695553779602]]};
+function lineSeries(xs, ys, color){ return {label:"", data: xs.map((x,i)=>({x,y:ys[i]})), borderColor:color, backgroundColor:color, pointRadius:2, borderWidth:2, tension:.25, fill:false}; }
+function catLine(label, data, color){ return {label, data, borderColor:color, backgroundColor:color, pointRadius:3, borderWidth:2, tension:.25}; }
+function xySeries(pairs, color, dashed){ return {label:"", data: pairs.map(p=>({x:p[0],y:p[1]})), borderColor:color, backgroundColor:color, pointRadius:(dashed?0:2), borderWidth:2, borderDash: dashed?[5,4]:[], tension:.25, fill:false}; }
+const FPS_LABELS = ["2","4","8"];
+const baseLine = {
+  responsive:true, maintainAspectRatio:false,
+  plugins:{legend:{labels:{boxWidth:14, font:{size:11}}}, tooltip:{mode:"index", intersect:false}},
+  scales:{ x:{title:{display:true, text:"sampling fps"}}, y:{} },
+  interaction:{mode:"nearest", intersect:false, axis:"x"},
+  elements:{line:{borderJoinStyle:"round"}}
+};
+function mk(id, cfg){ const el=document.getElementById(id); if(el && window.Chart) new Chart(el, cfg); }
+
+function installSyncedVideos(groupName){
+  const videos = Array.from(document.querySelectorAll(`video[data-sync-group="${groupName}"]`));
+  if(videos.length < 2) return;
+  let lock = false;
+  const syncTime = (source) => {
+    if(lock) return;
+    lock = true;
+    for(const video of videos){
+      if(video === source) continue;
+      if(Math.abs(video.currentTime - source.currentTime) > 0.08){
+        video.currentTime = source.currentTime;
+      }
+    }
+    lock = false;
+  };
+  const mirrorState = (source, action) => {
+    if(lock) return;
+    lock = true;
+    for(const video of videos){
+      if(video === source) continue;
+      if(action === "play"){
+        const p = video.play();
+        if(p && typeof p.catch === "function") p.catch(() => {});
+      } else if(action === "pause"){
+        video.pause();
+      }
+    }
+    lock = false;
+  };
+  for(const video of videos){
+    video.addEventListener("play", () => mirrorState(video, "play"));
+    video.addEventListener("pause", () => mirrorState(video, "pause"));
+    video.addEventListener("seeking", () => syncTime(video));
+    video.addEventListener("seeked", () => syncTime(video));
+    video.addEventListener("timeupdate", () => {
+      if(!video.paused) syncTime(video);
+    });
+  }
+}
+
+document.addEventListener("DOMContentLoaded", function(){
+  installSyncedVideos("fps4-compare");
+  if(!window.Chart) return;
+  Chart.defaults.font.size = 11;
+  Chart.defaults.color = "#444";
+
+  mk("chartPsnr", {type:"line", data:{labels:FPS_LABELS, datasets:[
+    catLine("3DGS",[25.79,27.70,18.03],C_DGS),
+    catLine("NeRF",[20.65,18.47,12.23],C_NERF),
+    {label:"NeuS",data:[13.30,null,null],borderColor:C_NEUS,backgroundColor:C_NEUS,pointRadius:4,borderWidth:2,spanGaps:false}
+  ]}, options:Object.assign({}, baseLine, {scales:{x:{title:{display:true,text:"fps"}}, y:{title:{display:true,text:"PSNR (dB) ↑"}, min:8}}})});
+
+  mk("chartSsim", {type:"line", data:{labels:FPS_LABELS, datasets:[
+    catLine("3DGS",[0.835,0.868,0.722],C_DGS),
+    catLine("NeRF",[0.749,0.688,0.597],C_NERF),
+    {label:"NeuS",data:[0.660,null,null],borderColor:C_NEUS,backgroundColor:C_NEUS,pointRadius:4,borderWidth:2,spanGaps:false}
+  ]}, options:Object.assign({}, baseLine, {scales:{x:{title:{display:true,text:"fps"}}, y:{title:{display:true,text:"SSIM ↑"}}}})});
+
+  mk("chartLpips", {type:"line", data:{labels:FPS_LABELS, datasets:[
+    catLine("3DGS",[0.368,0.353,0.562],C_DGS),
+    catLine("NeRF",[0.452,0.506,0.709],C_NERF),
+    {label:"NeuS",data:[0.634,null,null],borderColor:C_NEUS,backgroundColor:C_NEUS,pointRadius:4,borderWidth:2,spanGaps:false}
+  ]}, options:Object.assign({}, baseLine, {scales:{x:{title:{display:true,text:"fps"}}, y:{title:{display:true,text:"LPIPS ↓"}}}})});
+
+  mk("chartEff", {type:"bar", data:{labels:["fps2","fps4","fps8"], datasets:[
+    {label:"3DGS", data:[2704.6,3032.0,3169.9], backgroundColor:C_DGS},
+    {label:"NeRF", data:[2892.5,3016.2,null], backgroundColor:C_NERF},
+    {label:"NeuS", data:[3242.5,3263.1,3650.3], backgroundColor:C_NEUS}
+  ]}, options:Object.assign({}, baseLine, {scales:{x:{}, y:{title:{display:true,text:"训练时间 (s)"}}}})});
+
+  // GPU peak memory (GB, left) vs model size (MB, right) — fps4
+  mk("chartMem", {type:"bar", data:{labels:["NeRF","3DGS","NeuS"], datasets:[
+    {label:"峰值显存 (GB)", data:[13.73,8.82,7.11], backgroundColor:"rgba(0,121,140,.75)", yAxisID:"y"},
+    {type:"line", label:"模型大小 (MB)", data:[168,1341,169], borderColor:C_DGS, backgroundColor:C_DGS, pointRadius:5, borderWidth:2, tension:.2, yAxisID:"y1"}
+  ]}, options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{labels:{boxWidth:14}}}, scales:{
+    y:{type:"linear", position:"left", title:{display:true,text:"峰值显存 (GB)"}, min:0, max:16},
+    y1:{type:"linear", position:"right", title:{display:true,text:"模型大小 (MB)"}, min:0, max:1600, grid:{drawOnChartArea:false}}
+  }}});
+
+  // loss curves — 3DGS L1, NeRF loss, NeuS loss
+  mk("chartDgsPsnr", {type:"line", data:{datasets:[Object.assign(xySeries(LOSS.dgs_l1,C_DGS),{label:"3DGS L1 loss",pointRadius:0,borderWidth:1.5})]},
+    options:Object.assign({},baseLine,{plugins:{legend:{display:false},title:{display:true,text:"3DGS train L1 loss",font:{size:11}}},scales:{x:{type:"linear",title:{display:true,text:"step"}},y:{type:"logarithmic",title:{display:true,text:"L1 loss"}}}})});
+  mk("chartNerfLoss", {type:"line", data:{datasets:[
+    Object.assign(xySeries(LOSS.nerf_tr,C_NERF),{label:"train"}),
+    Object.assign(xySeries(LOSS.nerf_ev,C_NERF,true),{label:"eval"})
+  ]}, options:Object.assign({},baseLine,{plugins:{title:{display:true,text:"NeRF train/eval loss",font:{size:11}}},scales:{x:{type:"linear",title:{display:true,text:"step"}},y:{type:"logarithmic",title:{display:true,text:"loss"}}}})});
+  mk("chartNeusLoss", {type:"line", data:{datasets:[
+    Object.assign(xySeries(LOSS.neus_tr,C_NEUS),{label:"train"}),
+    Object.assign(xySeries(LOSS.neus_ev,C_NEUS,true),{label:"eval"})
+  ]}, options:Object.assign({},baseLine,{plugins:{title:{display:true,text:"NeuS train/eval loss",font:{size:11}}},scales:{x:{type:"linear",title:{display:true,text:"step"}},y:{type:"logarithmic",title:{display:true,text:"loss"}}}})});
+});
+</script>
 
 <!-- =================== three.js viewer =================== -->
 <script type="importmap">
 { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
 </script>
-<script type="module">
-const fallback = document.getElementById('pc-fallback');
-const canvas = document.getElementById('viewer-canvas');
-const info = document.getElementById('pc-info');
-let THREE, renderer, scene, camera, controls, points = null, spin = true, raf = 0;
-const INITIAL_DIST = 1.9;
-const distEl = () => document.getElementById('pc-dist');
-
-async function boot() {
-  try {
-    THREE = await import('three');
-    const oc = await import('three/addons/controls/OrbitControls.js');
-    renderer = new THREE.WebGLRenderer({canvas, antialias:true});
-    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-    scene = new THREE.Scene(); scene.background = new THREE.Color(0x111111);
-    camera = new THREE.PerspectiveCamera(55, 16/9, 0.01, 1000); camera.position.set(0,0,INITIAL_DIST);
-    controls = new oc.OrbitControls(camera, canvas);
-    controls.enableDamping = true; controls.autoRotate = true; controls.autoRotateSpeed = 0.8;
-    controls.zoomSpeed = 2.5;  // faster wheel zoom (default 1 was too slow)
-    document.getElementById('pc-spin').addEventListener('change', e => controls.autoRotate = e.target.checked);
-    document.getElementById('pc-reset').addEventListener('click', () => load(document.getElementById('pc-select').value));
-    document.getElementById('pc-select').addEventListener('change', e => load(e.target.value));
-    // distance slider: move camera along its current view direction
-    distEl().addEventListener('input', e => {
-      if (!controls) return;
-      const d = parseFloat(e.target.value);
-      const dir = new THREE.Vector3().subVectors(camera.position, controls.target);
-      dir.normalize().multiplyScalar(d);
-      camera.position.copy(controls.target).add(dir);
-      controls.update();
-    });
-    // keep slider in sync with wheel/dolly zoom
-    controls.addEventListener('change', () => {
-      if (!distEl()) return;
-      const d = camera.position.distanceTo(controls.target);
-      if (Math.abs(d - parseFloat(distEl().value)) > 0.02) distEl().value = d.toFixed(2);
-    });
-    window.addEventListener('resize', resize); resize();
-    load('3dgs_fps4'); animate();
-  } catch (err) {
-    console.error(err);
-    canvas.style.display = 'none'; fallback.style.display = 'block';
-    document.querySelectorAll('.viewer-bar button,.viewer-bar select,.viewer-bar input').forEach(e=>e.disabled=true);
-  }
-}
-
-function resize(){
-  const w = canvas.clientWidth, h = canvas.clientHeight;
-  if (renderer) renderer.setSize(w, h, false);
-  if (camera){ camera.aspect = w/h; camera.updateProjectionMatrix(); }
-}
-
-async function load(name){
-  info.textContent = '加载 ' + name + ' …';
-  const meta = await fetch('report_assets/pointcloud/' + name + '.json').then(r=>r.json()).catch(()=>null);
-  if (!meta){ info.textContent = '缺少 ' + name; return; }
-  const buf = await fetch('report_assets/pointcloud/' + name + '.bin').then(r=>r.arrayBuffer());
-  const n = meta.n;
-  const xyz = new Float32Array(buf, 0, n*3);
-  const rgb = new Uint8Array(buf, n*3*4, n*3);
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(xyz, 3));
-  const colors = new Float32Array(n*3);
-  for (let i=0;i<n*3;i++) colors[i] = rgb[i]/255;
-  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  // center + scale to unit sphere
-  geo.computeBoundingSphere();
-  const c = geo.boundingSphere.center, r = Math.max(geo.boundingSphere.radius, 1e-6);
-  const pos = geo.attributes.position;
-  for (let i=0;i<n;i++){ pos.setXYZ(i, (pos.getX(i)-c.x)/r, (pos.getY(i)-c.y)/r, (pos.getZ(i)-c.z)/r); }
-  pos.needsUpdate = true;
-  if (points){ scene.remove(points); points.geometry.dispose(); points.material.dispose(); }
-  const mat = new THREE.PointsMaterial({size:0.012, vertexColors:true, sizeAttenuation:true});
-  points = new THREE.Points(geo, mat);
-  scene.add(points);
-  camera.position.set(0,0,INITIAL_DIST); controls.target.set(0,0,0); controls.update();
-  if (distEl()) distEl().value = String(INITIAL_DIST);
-  info.textContent = meta.label + '  ·  ' + n + ' pts';
-}
-
-function animate(){
-  raf = requestAnimationFrame(animate);
-  if (controls) controls.update();
-  if (renderer && scene && camera) renderer.render(scene, camera);
-}
-
-boot();
-</script>
+<script type="module" src="report_appendix/pointcloud_viewer.js"></script>
 
 </body>
 </html>

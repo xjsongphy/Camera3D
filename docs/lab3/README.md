@@ -39,12 +39,14 @@ uv sync --python 3.12 --group lab3 --extra cu124
 - `colmap`
 - `ffmpeg`
 
+完成一次 `uv sync` 后，下面的命令默认都直接使用 `uv run lab3 ...`。
+
 ## 常用命令
 
 ### 1. 命令链自检
 
 ```bash
-uv run --python 3.12 --group lab3 --extra cpu lab3 \
+uv run lab3 \
   --config configs/lab3/default.json \
   --methods sfm \
   --dry-run
@@ -53,7 +55,7 @@ uv run --python 3.12 --group lab3 --extra cpu lab3 \
 ### 2. 完整运行
 
 ```bash
-uv run --python 3.12 --group lab3 --extra cu124 lab3 \
+uv run lab3 \
   --input-dir path/to/captured_scene \
   --scene-name my_scene \
   --methods sfm 3dgs nerf neus \
@@ -66,7 +68,7 @@ uv run --python 3.12 --group lab3 --extra cu124 lab3 \
 ### 3. 只跑部分方法
 
 ```bash
-uv run --python 3.12 --group lab3 --extra cu124 lab3 \
+uv run lab3 \
   --config configs/lab3/default.json \
   --methods sfm nerf
 ```
@@ -74,14 +76,14 @@ uv run --python 3.12 --group lab3 --extra cu124 lab3 \
 ### 4. 仅重跑评测 / 后处理
 
 ```bash
-uv run --python 3.12 --group lab3 --extra cu124 lab3 \
+uv run lab3 \
   --run-dir outputs/lab3/<timestamp>_<scene>
 ```
 
 也可以按需关闭后处理阶段：
 
 ```bash
-uv run --python 3.12 --group lab3 --extra cu124 lab3 \
+uv run lab3 \
   --config configs/lab3/default.json \
   --no-evaluate \
   --no-geometry \
@@ -90,18 +92,45 @@ uv run --python 3.12 --group lab3 --extra cu124 lab3 \
 
 ### 5. 交互查看已有结果
 
+统一入口：
+
 ```bash
-uv run --python 3.12 --group lab3 --extra cu124 lab3 \
+uv run lab3 \
   --view-run outputs/lab3/<timestamp>_<scene>
 ```
 
-只开 Open3D 几何查看，不启动 nerfstudio viewer：
+`SfM`：查看器是 Open3D。进入方式：
 
 ```bash
-uv run --python 3.12 --group lab3 --extra cu124 lab3 \
+uv run lab3 \
   --view-run outputs/lab3/<timestamp>_<scene> \
-  --methods sfm 3dgs neus \
+  --methods sfm \
   --no-nerfstudio-viewer
+```
+
+`3DGS`：查看器是 GraphDeco SIBR viewer；`lab3 --view-run` 会自动尝试进入，若未编译会先提示并构建。进入方式：
+
+```bash
+uv run lab3 \
+  --view-run outputs/lab3/<timestamp>_<scene> \
+  --methods 3dgs \
+  --no-nerfstudio-viewer
+```
+
+`NeRF`：查看器是 nerfstudio web viewer。进入方式：
+
+```bash
+uv run lab3 \
+  --view-run outputs/lab3/<timestamp>_<scene> \
+  --methods nerf
+```
+
+`NeuS`：查看器是 nerfstudio web viewer。进入方式：
+
+```bash
+uv run lab3 \
+  --view-run outputs/lab3/<timestamp>_<scene> \
+  --methods neus
 ```
 
 ### 6. 常见参数覆盖
@@ -109,7 +138,7 @@ uv run --python 3.12 --group lab3 --extra cu124 lab3 \
 SfM / HLOC：
 
 ```bash
-uv run --python 3.12 --group lab3 --extra cu124 lab3 \
+uv run lab3 \
   --config configs/lab3/boya_close.json \
   --methods sfm \
   --sfm-feature-extractor aliked-n16 \
@@ -119,7 +148,7 @@ uv run --python 3.12 --group lab3 --extra cu124 lab3 \
 3DGS：
 
 ```bash
-uv run --python 3.12 --group lab3 --extra cu124 lab3 \
+uv run lab3 \
   --config configs/lab3/default.json \
   --methods 3dgs \
   --dgs-repo ./gaussian-splatting \
@@ -131,7 +160,7 @@ uv run --python 3.12 --group lab3 --extra cu124 lab3 \
 NeRF：
 
 ```bash
-uv run --python 3.12 --group lab3 --extra cu124 lab3 \
+uv run lab3 \
   --config configs/lab3/default.json \
   --methods nerf \
   --nerf-iterations 30000 \
@@ -142,7 +171,7 @@ uv run --python 3.12 --group lab3 --extra cu124 lab3 \
 NeuS：
 
 ```bash
-uv run --python 3.12 --group lab3 --extra cu124 lab3 \
+uv run lab3 \
   --config configs/lab3/extra.json \
   --methods neus \
   --neus-iterations 20001 \
