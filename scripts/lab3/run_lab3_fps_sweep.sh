@@ -11,7 +11,7 @@ cd "${ROOT_DIR}"
 CONFIG_PATH="${CONFIG_PATH:-configs/lab3/extra.json}"
 INPUT_DIR="${INPUT_DIR:-input/lab3_dormitory_input}"
 SCENE_NAME="${SCENE_NAME:-dormitory}"
-read -r -a FPS_LIST <<< "${FPS_VALUES:-4 8}"
+read -r -a FPS_LIST <<< "${FPS_VALUES:-8}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-}"
 METHODS=()
 DEFAULT_METHODS=(sfm nerf neus 3dgs)

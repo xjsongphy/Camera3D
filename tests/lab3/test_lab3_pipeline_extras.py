@@ -36,6 +36,8 @@ def test_config_from_dict_parses_new_fields() -> None:
                 },
                 "neus": {
                     "train_num_rays_per_batch": 3072,
+                    "train_num_images_to_sample_from": 256,
+                    "train_num_times_to_repeat_images": 100,
                     "export_mesh": False,
                 },
             },
@@ -52,6 +54,8 @@ def test_config_from_dict_parses_new_fields() -> None:
     assert cfg.nerf.save_iterations == (5000, 10000)
     assert cfg.nerf.train_num_rays_per_batch == 6144
     assert cfg.neus.train_num_rays_per_batch == 3072
+    assert cfg.neus.train_num_images_to_sample_from == 256
+    assert cfg.neus.train_num_times_to_repeat_images == 100
     assert cfg.neus.export_mesh is False
 
 

@@ -34,6 +34,8 @@ class NeuSConfig:
     max_num_iterations: int | None = 20001
     save_iterations: tuple[int, ...] = (2000, 5000, 10000, 20000)
     train_num_rays_per_batch: int | None = None
+    train_num_images_to_sample_from: int = -1
+    train_num_times_to_repeat_images: int = -1
     colmap_model: Path | None = None
     scene_scale: float = 2.0
     export_mesh: bool = True
@@ -47,6 +49,12 @@ def config_from_dict(values: dict) -> NeuSConfig:
         max_num_iterations=_optional_int(values.get("max_num_iterations", 20001)),
         save_iterations=tuple(int(step) for step in values.get("save_iterations", (2000, 5000, 10000, 20000))),
         train_num_rays_per_batch=_optional_int(values.get("train_num_rays_per_batch")),
+        train_num_images_to_sample_from=int(
+            values.get("train_num_images_to_sample_from", -1)
+        ),
+        train_num_times_to_repeat_images=int(
+            values.get("train_num_times_to_repeat_images", -1)
+        ),
         colmap_model=(
             None if values.get("colmap_model") in (None, "")
             else Path(str(values["colmap_model"]))
@@ -66,6 +74,16 @@ def add_cli_arguments(parser) -> None:
         help="override NeuS train_num_rays_per_batch",
     )
     parser.add_argument(
+        "--neus-train-num-images",
+        type=int,
+        help="number of NeuS training images kept in the nerfstudio cache (-1: all)",
+    )
+    parser.add_argument(
+        "--neus-train-repeat-images",
+        type=int,
+        help="steps before NeuS resamples its cached training images (-1: never)",
+    )
+    parser.add_argument(
         "--neus-export-mesh",
         action=argparse.BooleanOptionalAction,
         default=None,
@@ -79,6 +97,8 @@ def cli_overrides(arguments) -> dict:
             "max_num_iterations": arguments.neus_iterations,
             "save_iterations": arguments.neus_save_iterations,
             "train_num_rays_per_batch": arguments.neus_train_rays_per_batch,
+            "train_num_images_to_sample_from": arguments.neus_train_num_images,
+            "train_num_times_to_repeat_images": arguments.neus_train_repeat_images,
             "export_mesh": arguments.neus_export_mesh,
         }.items() if value is not None
     }
@@ -156,6 +176,22 @@ class NeuSReconstructor(Reconstructor):
                     str(self.config.train_num_rays_per_batch),
                 ]
             )
+        _validate_cache_setting(
+            "train_num_images_to_sample_from",
+            self.config.train_num_images_to_sample_from,
+        )
+        _validate_cache_setting(
+            "train_num_times_to_repeat_images",
+            self.config.train_num_times_to_repeat_images,
+        )
+        train_cmd.extend(
+            [
+                "--pipeline.datamanager.train-num-images-to-sample-from",
+                str(self.config.train_num_images_to_sample_from),
+                "--pipeline.datamanager.train-num-times-to-repeat-images",
+                str(self.config.train_num_times_to_repeat_images),
+            ]
+        )
         save_iterations = validate_save_iterations(
             self.config.max_num_iterations, self.config.save_iterations
         )
@@ -388,6 +424,11 @@ def _read_cameras(path: Path) -> dict[int, tuple[np.ndarray, int, int]]:
 
 def _optional_int(value: object) -> int | None:
     return None if value in (None, "") else int(value)
+
+
+def _validate_cache_setting(name: str, value: int) -> None:
+    if value != -1 and value <= 0:
+        raise Lab3Error(f"NeuS {name} must be -1 or a positive integer")
 
 
 def _read_images(path: Path) -> list[tuple[str, np.ndarray, int]]:

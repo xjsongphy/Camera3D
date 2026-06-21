@@ -17,6 +17,8 @@ def test_neus_defaults_to_neus_facto_and_mesh_export() -> None:
     assert cfg.export_mesh is True
     assert cfg.mesh_resolution == 512
     assert cfg.train_num_rays_per_batch is None
+    assert cfg.train_num_images_to_sample_from == -1
+    assert cfg.train_num_times_to_repeat_images == -1
 
 
 def test_build_sdfstudio_dataset_converts_colmap_text_model(tmp_path: Path) -> None:
