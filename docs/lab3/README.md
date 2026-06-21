@@ -12,25 +12,19 @@ uv sync --group lab3 --extra cpu
 uv sync --group lab3 --extra cu124
 ```
 
-`lab3` 组：Matplotlib、Pillow、NumPy、lpips、nerfstudio、tiny-cuda-nn，以及 3DGS 依赖的本地扩展 `diff-gaussian-rasterization` / `simple-knn` / `fused-ssim`（torch 经 `--extra cpu/cu124` 提供）。Windows + Python 3.12 下通过 `tool.uv.override-dependencies` 覆盖到 `pymeshlab==2023.12.post1`，并在 `tool.uv.prerelease = "allow"` 下接受 `nerfstudio 1.1.5` 传递依赖的 `newrawpy>=1.0.0b0` 预发布版本。`tiny-cuda-nn` 通过 Git 源码编译安装，要求本机 CUDA/MSVC 工具链可用；3DGS 三个扩展通过仓库内 `gaussian-splatting/submodules/` 本地路径构建安装，因此同步前需保证该目录存在。lpips 缺失时评测自动降级为只算 PSNR/SSIM。
+`lab3` 组：Matplotlib、Pillow、NumPy、lpips、nerfstudio、pycolmap、HLOC、tiny-cuda-nn，以及 3DGS 依赖的本地扩展 `diff-gaussian-rasterization` / `simple-knn` / `fused-ssim`（torch 经 `--extra cpu/cu124` 提供）。Windows + Python 3.12 下通过 `tool.uv.override-dependencies` 覆盖到 `pymeshlab==2023.12.post1`，并在 `tool.uv.prerelease = "allow"` 下接受 `nerfstudio 1.1.5` 传递依赖的 `newrawpy>=1.0.0b0` 预发布版本。`tiny-cuda-nn` 通过 Git 源码编译安装，要求本机 CUDA/MSVC 工具链可用；3DGS 三个扩展通过仓库内 `gaussian-splatting/submodules/` 本地路径构建安装，因此同步前需保证该目录存在。lpips 缺失时评测自动降级为只算 PSNR/SSIM。
 
 系统工具（需在 PATH 中可用）：
 
 - `colmap`（SfM、共享位姿、dense；CUDA 版用于 MVS）
 - `ffmpeg`（视频抽帧）
 
-可选学习式 SfM 依赖（仅当 `reconstruction.sfm.feature_extractor` / `feature_matcher` 显式切到 HLOC 预设时需要）：
-
-- `hloc`
-- `pycolmap`
-- `torch`
+基于机器学习的 SfM（HLOC / pycolmap）依赖已经并入 `lab3` 组；只要执行上面的 `uv sync --group lab3 --extra cpu|cu124`，就会和其他 lab3 依赖一起安装。
 
 外部代码库（完整训练/评测需要）：
 
 - `nerfstudio`：已随 `uv sync --group lab3 --extra cpu|cu124` 安装（提供 `ns-process-data`/`ns-train`/`ns-eval`/`ns-render`）
 - GraphDeco `gaussian-splatting`：默认读取当前工作目录下的相对路径 `./gaussian-splatting`；若 clone 到别处，用 `--dgs-repo` 显式指向（提供 `convert.py`/`train.py`/`render.py`/`metrics.py`）
-
-> 不装这些工具也能用 `--dry-run` 验证整条命令链（见下）。
 
 ## 常用命令
 
